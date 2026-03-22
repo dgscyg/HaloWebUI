@@ -1,4 +1,4 @@
-# Open WebUI 👋
+# HaloWebUI
 
 ![GitHub stars](https://img.shields.io/github/stars/ztx888/HaloWebUI?style=social)
 ![GitHub forks](https://img.shields.io/github/forks/ztx888/HaloWebUI?style=social)
@@ -7,209 +7,123 @@
 ![GitHub language count](https://img.shields.io/github/languages/count/ztx888/HaloWebUI)
 ![GitHub top language](https://img.shields.io/github/languages/top/ztx888/HaloWebUI)
 ![GitHub last commit](https://img.shields.io/github/last-commit/ztx888/HaloWebUI?color=red)
-![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2Follama-webui%2Follama-wbui&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false)
-[![Discord](https://img.shields.io/badge/Discord-Open_WebUI-blue?logo=discord&logoColor=white)](https://discord.gg/5rJgQTnV4s)
-[![](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/tjbck)
 
-**Open WebUI is an [extensible](https://docs.openwebui.com/features/plugin/), feature-rich, and user-friendly self-hosted AI platform designed to operate entirely offline.** It supports various LLM runners like **Ollama** and **OpenAI-compatible APIs**, with **built-in inference engine** for RAG, making it a **powerful AI deployment solution**.
+**HaloWebUI 是一个功能丰富、可扩展、用户友好的自托管 AI 平台，支持完全离线运行。** 兼容 **Ollama** 和 **OpenAI 兼容 API** 等多种 LLM 运行时，内置 RAG 推理引擎，是强大的 AI 部署方案。
 
-> [!TIP]  
-> **Looking for an [Enterprise Plan](https://docs.openwebui.com/enterprise)?** – **[Speak with Our Sales Team Today!](mailto:sales@openwebui.com)**
->
-> Get **enhanced capabilities**, including **custom theming and branding**, **Service Level Agreement (SLA) support**, **Long-Term Support (LTS) versions**, and **more!**
+## 核心特性
 
-For more information, be sure to check out our [Open WebUI Documentation](https://docs.openwebui.com/).
+- **极简部署**：通过 Docker 一键安装，支持 `:ollama` 和 `:cuda` 标签镜像。
 
-## Key Features of Open WebUI ⭐
+- **多 API 集成**：无缝对接 OpenAI 兼容 API，可连接 LMStudio、GroqCloud、Mistral、OpenRouter 等服务。
 
-- 🚀 **Effortless Setup**: Install seamlessly using Docker or Kubernetes (kubectl, kustomize or helm) for a hassle-free experience with support for both `:ollama` and `:cuda` tagged images.
+- **精细权限管理**：支持管理员创建详细的用户角色和权限分组，确保安全的多用户环境。
 
-- 🤝 **Ollama/OpenAI API Integration**: Effortlessly integrate OpenAI-compatible APIs for versatile conversations alongside Ollama models. Customize the OpenAI API URL to link with **LMStudio, GroqCloud, Mistral, OpenRouter, and more**.
+- **响应式设计**：在桌面、笔记本和移动设备上均有流畅体验，支持 PWA 离线访问。
 
-- 🛡️ **Granular Permissions and User Groups**: By allowing administrators to create detailed user roles and permissions, we ensure a secure user environment. This granularity not only enhances security but also allows for customized user experiences, fostering a sense of ownership and responsibility amongst users.
+- **Markdown 和 LaTeX**：完整支持 Markdown 和 LaTeX 渲染，丰富对话内容展示。
 
-- 📱 **Responsive Design**: Enjoy a seamless experience across Desktop PC, Laptop, and Mobile devices.
+- **语音/视频通话**：集成免提语音和视频通话功能，打造动态交互的对话体验。
 
-- 📱 **Progressive Web App (PWA) for Mobile**: Enjoy a native app-like experience on your mobile device with our PWA, providing offline access on localhost and a seamless user interface.
+- **模型构建器**：通过 Web 界面轻松创建 Ollama 模型，支持自定义角色/Agent 和聊天元素。
 
-- ✒️🔢 **Full Markdown and LaTeX Support**: Elevate your LLM experience with comprehensive Markdown and LaTeX capabilities for enriched interaction.
+- **Python 函数调用**：内置代码编辑器，支持自带纯 Python 函数（BYOF），无缝集成 LLM 工具调用。
 
-- 🎤📹 **Hands-Free Voice/Video Call**: Experience seamless communication with integrated hands-free voice and video call features, allowing for a more dynamic and interactive chat environment.
+- **本地 RAG**：支持检索增强生成，将文档直接加载到对话中，或通过 `#` 命令引用文档库。
 
-- 🛠️ **Model Builder**: Easily create Ollama models via the Web UI. Create and add custom characters/agents, customize chat elements, and import models effortlessly through [Open WebUI Community](https://openwebui.com/) integration.
+- **联网搜索**：支持 SearXNG、Google PSE、Brave Search、DuckDuckGo、Tavily 等搜索引擎，将搜索结果注入对话。
 
-- 🐍 **Native Python Function Calling Tool**: Enhance your LLMs with built-in code editor support in the tools workspace. Bring Your Own Function (BYOF) by simply adding your pure Python functions, enabling seamless integration with LLMs.
+- **网页浏览**：使用 `#` 加 URL 将网页内容整合到对话中。
 
-- 📚 **Local RAG Integration**: Dive into the future of chat interactions with groundbreaking Retrieval Augmented Generation (RAG) support. This feature seamlessly integrates document interactions into your chat experience. You can load documents directly into the chat or add files to your document library, effortlessly accessing them using the `#` command before a query.
+- **图像生成**：集成 AUTOMATIC1111 API、ComfyUI（本地）和 OpenAI DALL-E（外部）。
 
-- 🔍 **Web Search for RAG**: Perform web searches using providers like `SearXNG`, `Google PSE`, `Brave Search`, `serpstack`, `serper`, `Serply`, `DuckDuckGo`, `TavilySearch`, `SearchApi` and `Bing` and inject the results directly into your chat experience.
+- **多模型并行对话**：同时与多个模型交互，充分利用不同模型的优势。
 
-- 🌐 **Web Browsing Capability**: Seamlessly integrate websites into your chat experience using the `#` command followed by a URL. This feature allows you to incorporate web content directly into your conversations, enhancing the richness and depth of your interactions.
+- **多语言支持**：支持国际化（i18n），可使用多种语言界面。
 
-- 🎨 **Image Generation Integration**: Seamlessly incorporate image generation capabilities using options such as AUTOMATIC1111 API or ComfyUI (local), and OpenAI's DALL-E (external), enriching your chat experience with dynamic visual content.
+- **Pipeline 插件系统**：通过 Pipeline 框架集成自定义逻辑和 Python 库，支持函数调用、速率限制、用量监控、实时翻译等。
 
-- ⚙️ **Many Models Conversations**: Effortlessly engage with various models simultaneously, harnessing their unique strengths for optimal responses. Enhance your experience by leveraging a diverse set of models in parallel.
+## 安装方式
 
-- 🔐 **Role-Based Access Control (RBAC)**: Ensure secure access with restricted permissions; only authorized individuals can access your Ollama, and exclusive model creation/pulling rights are reserved for administrators.
+### Docker 安装（推荐）
 
-- 🌐🌍 **Multilingual Support**: Experience Open WebUI in your preferred language with our internationalization (i18n) support. Join us in expanding our supported languages! We're actively seeking contributors!
+> [!NOTE]
+> 请确保 Docker 命令中包含 `-v open-webui:/app/backend/data` 以正确挂载数据库，防止数据丢失。
 
-- 🧩 **Pipelines, Open WebUI Plugin Support**: Seamlessly integrate custom logic and Python libraries into Open WebUI using [Pipelines Plugin Framework](https://github.com/open-webui/pipelines). Launch your Pipelines instance, set the OpenAI URL to the Pipelines URL, and explore endless possibilities. [Examples](https://github.com/open-webui/pipelines/tree/main/examples) include **Function Calling**, User **Rate Limiting** to control access, **Usage Monitoring** with tools like Langfuse, **Live Translation with LibreTranslate** for multilingual support, **Toxic Message Filtering** and much more.
+> [!TIP]
+> 如需 CUDA 加速，请先安装 [Nvidia CUDA container toolkit](https://docs.nvidia.com/dgx/nvidia-container-runtime-upgrade/)。
 
-- 🌟 **Continuous Updates**: We are committed to improving Open WebUI with regular updates, fixes, and new features.
+**Ollama 在本机：**
 
-Want to learn more about Open WebUI's features? Check out our [Open WebUI documentation](https://docs.openwebui.com/features) for a comprehensive overview!
+```bash
+docker run -d -p 3000:8080 --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:main
+```
 
-## 🔗 Also Check Out Open WebUI Community!
+**Ollama 在其他服务器：**
 
-Don't forget to explore our sibling project, [Open WebUI Community](https://openwebui.com/), where you can discover, download, and explore customized Modelfiles. Open WebUI Community offers a wide range of exciting possibilities for enhancing your chat interactions with Open WebUI! 🚀
+```bash
+docker run -d -p 3000:8080 -e OLLAMA_BASE_URL=https://example.com -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:main
+```
 
-## How to Install 🚀
+**GPU 加速：**
 
-### Installation via Python pip 🐍
+```bash
+docker run -d -p 3000:8080 --gpus all --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:cuda
+```
 
-Open WebUI can be installed using pip, the Python package installer. Before proceeding, ensure you're using **Python 3.11** to avoid compatibility issues.
+**仅使用 OpenAI API：**
 
-1. **Install Open WebUI**:
-   Open your terminal and run the following command to install Open WebUI:
+```bash
+docker run -d -p 3000:8080 -e OPENAI_API_KEY=your_secret_key -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:main
+```
 
-   ```bash
-   pip install open-webui
-   ```
+**内置 Ollama（GPU）：**
 
-2. **Running Open WebUI**:
-   After installation, you can start Open WebUI by executing:
+```bash
+docker run -d -p 3000:8080 --gpus=all -v ollama:/root/.ollama -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:ollama
+```
 
-   ```bash
-   open-webui serve
-   ```
+**内置 Ollama（仅 CPU）：**
 
-This will start the Open WebUI server, which you can access at [http://localhost:8080](http://localhost:8080)
+```bash
+docker run -d -p 3000:8080 -v ollama:/root/.ollama -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:ollama
+```
 
-### Quick Start with Docker 🐳
+安装完成后访问 [http://localhost:3000](http://localhost:3000) 即可使用。
 
-> [!NOTE]  
-> Please note that for certain Docker environments, additional configurations might be needed. If you encounter any connection issues, our detailed guide on [Open WebUI Documentation](https://docs.openwebui.com/) is ready to assist you.
+### Python pip 安装
 
-> [!WARNING]
-> When using Docker to install Open WebUI, make sure to include the `-v open-webui:/app/backend/data` in your Docker command. This step is crucial as it ensures your database is properly mounted and prevents any loss of data.
+需要 **Python 3.11**：
 
-> [!TIP]  
-> If you wish to utilize Open WebUI with Ollama included or CUDA acceleration, we recommend utilizing our official images tagged with either `:cuda` or `:ollama`. To enable CUDA, you must install the [Nvidia CUDA container toolkit](https://docs.nvidia.com/dgx/nvidia-container-runtime-upgrade/) on your Linux/WSL system.
+```bash
+pip install open-webui
+open-webui serve
+```
 
-### Installation with Default Configuration
+访问 [http://localhost:8080](http://localhost:8080)。
 
-- **If Ollama is on your computer**, use this command:
+### 常见问题
 
-  ```bash
-  docker run -d -p 3000:8080 --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:main
-  ```
-
-- **If Ollama is on a Different Server**, use this command:
-
-  To connect to Ollama on another server, change the `OLLAMA_BASE_URL` to the server's URL:
-
-  ```bash
-  docker run -d -p 3000:8080 -e OLLAMA_BASE_URL=https://example.com -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:main
-  ```
-
-- **To run Open WebUI with Nvidia GPU support**, use this command:
-
-  ```bash
-  docker run -d -p 3000:8080 --gpus all --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:cuda
-  ```
-
-### Installation for OpenAI API Usage Only
-
-- **If you're only using OpenAI API**, use this command:
-
-  ```bash
-  docker run -d -p 3000:8080 -e OPENAI_API_KEY=your_secret_key -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:main
-  ```
-
-### Installing Open WebUI with Bundled Ollama Support
-
-This installation method uses a single container image that bundles Open WebUI with Ollama, allowing for a streamlined setup via a single command. Choose the appropriate command based on your hardware setup:
-
-- **With GPU Support**:
-  Utilize GPU resources by running the following command:
-
-  ```bash
-  docker run -d -p 3000:8080 --gpus=all -v ollama:/root/.ollama -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:ollama
-  ```
-
-- **For CPU Only**:
-  If you're not using a GPU, use this command instead:
-
-  ```bash
-  docker run -d -p 3000:8080 -v ollama:/root/.ollama -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/ztx888/halowebui:ollama
-  ```
-
-Both commands facilitate a built-in, hassle-free installation of both Open WebUI and Ollama, ensuring that you can get everything up and running swiftly.
-
-After installation, you can access Open WebUI at [http://localhost:3000](http://localhost:3000). Enjoy! 😄
-
-### Other Installation Methods
-
-We offer various installation alternatives, including non-Docker native installation methods, Docker Compose, Kustomize, and Helm. Visit our [Open WebUI Documentation](https://docs.openwebui.com/getting-started/) or join our [Discord community](https://discord.gg/5rJgQTnV4s) for comprehensive guidance.
-
-### Troubleshooting
-
-Encountering connection issues? Our [Open WebUI Documentation](https://docs.openwebui.com/troubleshooting/) has got you covered. For further assistance and to join our vibrant community, visit the [Open WebUI Discord](https://discord.gg/5rJgQTnV4s).
-
-#### Open WebUI: Server Connection Error
-
-If you're experiencing connection issues, it’s often due to the WebUI docker container not being able to reach the Ollama server at 127.0.0.1:11434 (host.docker.internal:11434) inside the container . Use the `--network=host` flag in your docker command to resolve this. Note that the port changes from 3000 to 8080, resulting in the link: `http://localhost:8080`.
-
-**Example Docker Command**:
+如果遇到连接问题（容器无法访问 Ollama 服务器），可使用 `--network=host`：
 
 ```bash
 docker run -d --network=host -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://127.0.0.1:11434 --name open-webui --restart always ghcr.io/ztx888/halowebui:main
 ```
 
-### Keeping Your Docker Installation Up-to-Date
-
-In case you want to update your local Docker installation to the latest version, you can do it with [Watchtower](https://containrrr.dev/watchtower/):
+### 更新 Docker 版本
 
 ```bash
 docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower --run-once open-webui
 ```
 
-In the last part of the command, replace `open-webui` with your container name if it is different.
-
-Check our Updating Guide available in our [Open WebUI Documentation](https://docs.openwebui.com/getting-started/updating).
-
-### Using the Dev Branch 🌙
-
-> [!WARNING]
-> The `:dev` branch contains the latest unstable features and changes. Use it at your own risk as it may have bugs or incomplete features.
-
-If you want to try out the latest bleeding-edge features and are okay with occasional instability, you can use the `:dev` tag like this:
-
-```bash
-docker run -d -p 3000:8080 -v open-webui:/app/backend/data --name open-webui --add-host=host.docker.internal:host-gateway --restart always ghcr.io/ztx888/halowebui:main
-```
-
-### Offline Mode
-
-If you are running Open WebUI in an offline environment, you can set the `HF_HUB_OFFLINE` environment variable to `1` to prevent attempts to download models from the internet.
+### 离线模式
 
 ```bash
 export HF_HUB_OFFLINE=1
 ```
 
-## What's Next? 🌟
+## 许可证
 
-Discover upcoming features on our roadmap in the [Open WebUI Documentation](https://docs.openwebui.com/roadmap/).
-
-## License 📜
-
-This project is licensed under the [BSD-3-Clause License](LICENSE) - see the [LICENSE](LICENSE) file for details. 📄
-
-## Support 💬
-
-If you have any questions, suggestions, or need assistance, please open an issue or join our
-[Open WebUI Discord community](https://discord.gg/5rJgQTnV4s) to connect with us! 🤝
+本项目基于 [BSD-3-Clause License](LICENSE) 许可协议。
 
 ## Star History
 
@@ -220,7 +134,3 @@ If you have any questions, suggestions, or need assistance, please open an issue
     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ztx888/HaloWebUI&type=Date" />
   </picture>
 </a>
-
----
-
-Created by [Timothy Jaeryang Baek](https://github.com/tjbck) - Let's make Open WebUI even more amazing together! 💪
