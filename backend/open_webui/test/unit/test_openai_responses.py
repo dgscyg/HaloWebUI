@@ -2,6 +2,8 @@ import asyncio
 import json
 import pathlib
 import sys
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 # Ensure `open_webui` is importable when running tests from repo root.
@@ -15,6 +17,7 @@ from open_webui.utils.openai_responses import (
     iter_responses_events,
     responses_events_to_chat_completions_sse,
 )
+from open_webui.routers import openai as openai_router
 
 
 async def _aiter(chunks):
@@ -155,6 +158,114 @@ def test_convert_responses_to_chat_completions_preserves_function_call_outputs_f
         "content": "{\"app_id\": \"resource-1\", \"render_url\": \"https://apps.example/render/1\", \"metadata\": {\"tool_call_id\": \"call_1\"}}",
         "files": [{"type": "image", "url": "data:image/png;base64,abc"}],
     }
+
+
+def test_generate_chat_completion_one_shot_sse_preserves_tool_output_lineage():
+    class FakeResponse:
+        def __init__(self, payload):
+            self.status = 200
+            self.headers = {"Content-Type": "application/json"}
+            self._payload = payload
+            self.content = None
+
+        async def json(self):
+            return self._payload
+
+        async def text(self):
+            return json.dumps(self._payload)
+
+        def close(self):
+            return None
+
+    class FakeSession:
+        def __init__(self, response):
+            self._response = response
+
+        async def request(self, **kwargs):
+            return self._response
+
+        async def close(self):
+            return None
+
+    response_payload = {
+        "id": "resp_oneshot",
+        "output": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "lookup",
+                "arguments": "{\"query\":\"halo\"}",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": {
+                    "app_id": "resource-1",
+                    "render_url": "https://apps.example/render/1",
+                    "metadata": {"tool_call_id": "call_1"},
+                },
+                "files": [{"type": "image", "url": "data:image/png;base64,abc"}],
+            },
+        ],
+    }
+
+    async def collect_body():
+        response = await openai_router.generate_chat_completion(
+            request=SimpleNamespace(state=SimpleNamespace()),
+            form_data={
+                "model": "gpt-test",
+                "stream": True,
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+            user=SimpleNamespace(id="user-1", role="admin"),
+        )
+
+        body = []
+        async for chunk in response.body_iterator:
+            body.append(chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk)
+        return body
+
+    with (
+        patch.object(openai_router, "BYPASS_MODEL_ACCESS_CONTROL", True),
+        patch.object(openai_router.Models, "get_model_by_id", return_value=None),
+        patch.object(
+            openai_router,
+            "_get_openai_user_config",
+            return_value=(["https://api.example"], ["key"], [{}]),
+        ),
+        patch.object(
+            openai_router,
+            "_resolve_openai_connection_by_model_id",
+            return_value=(0, "https://api.example", "key", {}),
+        ),
+        patch.object(openai_router, "_should_use_responses_api", return_value=True),
+        patch.object(openai_router, "_build_upstream_headers", return_value={}),
+        patch.object(openai_router.aiohttp, "ClientSession", return_value=FakeSession(FakeResponse(response_payload))),
+    ):
+        chunks = asyncio.run(collect_body())
+
+    payloads = [
+        json.loads(chunk[len("data: ") :])
+        for chunk in chunks
+        if chunk.startswith("data: {")
+    ]
+
+    assert payloads[0]["choices"][0]["delta"]["tool_calls"] == [
+        {
+            "index": 0,
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "lookup", "arguments": "{\"query\":\"halo\"}"},
+        }
+    ]
+    assert payloads[1]["choices"][0]["delta"] == {
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": "{\"app_id\": \"resource-1\", \"render_url\": \"https://apps.example/render/1\", \"metadata\": {\"tool_call_id\": \"call_1\"}}",
+        "files": [{"type": "image", "url": "data:image/png;base64,abc"}],
+    }
+    assert payloads[-1]["choices"][0]["finish_reason"] == "tool_calls"
+    assert chunks[-1].strip() == "data: [DONE]"
 
 
 def test_convert_chat_completions_to_responses_payload_injects_native_web_search_tool():

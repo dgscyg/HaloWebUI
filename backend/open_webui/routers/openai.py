@@ -1762,8 +1762,18 @@ async def generate_chat_completion(
                     try:
                         choice0 = (cc.get("choices") or [{}])[0] if isinstance(cc.get("choices"), list) else {}
                         msg = choice0.get("message") or {}
+                        normalized_messages = (
+                            choice0.get("messages")
+                            if isinstance(choice0.get("messages"), list)
+                            else []
+                        )
                         content = msg.get("content") or ""
                         tool_calls = msg.get("tool_calls")
+                        tool_role_messages = [
+                            message
+                            for message in normalized_messages
+                            if isinstance(message, dict) and message.get("role") == "tool"
+                        ]
                         delta = {}
                         if content:
                             delta["content"] = content
@@ -1783,6 +1793,34 @@ async def generate_chat_completion(
                             )
                             + "\n\n"
                         )
+                        for tool_message in tool_role_messages:
+                            tool_delta = {
+                                "role": "tool",
+                                "tool_call_id": tool_message.get("tool_call_id"),
+                                "content": tool_message.get("content") or "",
+                            }
+                            if "files" in tool_message:
+                                tool_delta["files"] = tool_message.get("files")
+                            yield (
+                                "data: "
+                                + json.dumps(
+                                    {
+                                        "id": stream_id,
+                                        "object": "chat.completion.chunk",
+                                        "created": created,
+                                        "model": model_id,
+                                        "choices": [
+                                            {
+                                                "index": 0,
+                                                "delta": tool_delta,
+                                                "finish_reason": None,
+                                            }
+                                        ],
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n\n"
+                            )
                         yield (
                             "data: "
                             + json.dumps(

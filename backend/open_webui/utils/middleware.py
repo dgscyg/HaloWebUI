@@ -301,6 +301,109 @@ def _extract_stream_content_and_files(value: Any) -> tuple[str, list[dict]]:
     return "", []
 
 
+def _serialize_persisted_content_blocks(content_blocks):
+    content = ""
+
+    def split_content_and_whitespace(content):
+        stripped = content.rstrip()
+        trailing_whitespace = content[len(stripped):]
+        return stripped, trailing_whitespace
+
+    def is_opening_code_block(content):
+        lines = content.split('\n')
+        if not lines:
+            return False
+        last_line = lines[-1].strip()
+        return last_line.startswith('```') and last_line.count('```') == 1
+
+    for block in content_blocks:
+        if block["type"] == "text":
+            content += block["content"]
+        elif block["type"] == "html":
+            content += block["content"]
+        elif block["type"] == "citation":
+            content += "\n{{CITATION-" + str(block["id"]) + "}}\n"
+        elif block["type"] == "reasoning":
+            attributes = block.get("attributes", {})
+            reasoning_display_content = attributes.get(
+                "reasoning_display_content", block["content"]
+            )
+            reasoning_duration = attributes.get("duration", None)
+            if reasoning_duration is not None:
+                content = f'{content}\n<details type="reasoning" done="true" duration="{reasoning_duration}">\n<summary>Thought for {reasoning_duration} seconds</summary>\n{reasoning_display_content}\n</details>\n'
+            else:
+                content = f'{content}\n<details type="reasoning" done="false">\n<summary>Thinking…</summary>\n{reasoning_display_content}\n</details>\n'
+        elif block["type"] == "code_interpreter":
+            attributes = block.get("attributes", {})
+            output = block.get("output", None)
+            lang = attributes.get("lang", "")
+
+            content_stripped, original_whitespace = split_content_and_whitespace(content)
+            if is_opening_code_block(content_stripped):
+                content = (
+                    content_stripped.rstrip("`").rstrip()
+                    + original_whitespace
+                )
+            else:
+                content = content_stripped + original_whitespace
+
+            if output:
+                output = html.escape(json.dumps(output))
+                content = f'{content}\n<details type="code_interpreter" done="true" output="{output}">\n<summary>Analyzed</summary>\n```{lang}\n{block["content"]}\n```\n</details>\n'
+            else:
+                content = f'{content}\n<details type="code_interpreter" done="false">\n<summary>Analyzing...</summary>\n```{lang}\n{block["content"]}\n```\n</details>\n'
+        else:
+            block_content = str(block["content"]).strip()
+            content = f"{content}{block['type']}: {block_content}\n"
+
+    return content.strip()
+
+
+def convert_content_blocks_to_messages(content_blocks):
+    messages = []
+    temp_blocks = []
+
+    for block in content_blocks if isinstance(content_blocks, list) else []:
+        if not isinstance(block, dict):
+            continue
+
+        if block.get("type") == "tool_calls":
+            serialized = _serialize_persisted_content_blocks(temp_blocks)
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": serialized if serialized else None,
+                    "tool_calls": block.get("content"),
+                }
+            )
+
+            for result in block.get("results", []) or []:
+                if not isinstance(result, dict):
+                    continue
+
+                tool_message = {
+                    "role": "tool",
+                    "tool_call_id": result["tool_call_id"],
+                    "content": result["content"],
+                }
+                result_files = result.get("files")
+                if result_files:
+                    tool_message["files"] = result_files
+
+                messages.append(tool_message)
+
+            temp_blocks = []
+        else:
+            temp_blocks.append(block)
+
+    if temp_blocks:
+        content = _serialize_persisted_content_blocks(temp_blocks)
+        if content:
+            messages.append({"role": "assistant", "content": content})
+
+    return messages
+
+
 def _consume_stream_image_delta(
     pending_images: dict[str, dict[str, Any]], image_delta: Any
 ) -> Optional[dict]:
@@ -3045,55 +3148,6 @@ async def process_chat_response(
                         content = f"{content}{block['type']}: {block_content}\n"
 
                 return content.strip()
-
-            def convert_content_blocks_to_messages(content_blocks):
-                messages = []
-
-                temp_blocks = []
-                for idx, block in enumerate(content_blocks):
-                    if block["type"] == "tool_calls":
-                        serialized = serialize_content_blocks(temp_blocks)
-                        messages.append(
-                            {
-                                "role": "assistant",
-                                "content": serialized if serialized else None,
-                                "tool_calls": block.get("content"),
-                            }
-                        )
-
-                        results = block.get("results", [])
-
-                        for result in results:
-                            if not isinstance(result, dict):
-                                continue
-
-                            tool_message = {
-                                "role": "tool",
-                                "tool_call_id": result["tool_call_id"],
-                                "content": result["content"],
-                            }
-                            result_files = result.get("files")
-                            if result_files:
-                                tool_message["files"] = result_files
-
-                            messages.append(
-                                tool_message
-                            )
-                        temp_blocks = []
-                    else:
-                        temp_blocks.append(block)
-
-                if temp_blocks:
-                    content = serialize_content_blocks(temp_blocks)
-                    if content:
-                        messages.append(
-                            {
-                                "role": "assistant",
-                                "content": content,
-                            }
-                        )
-
-                return messages
 
             def trim_content_blocks_for_finalize(blocks, max_result_chars: int = 500):
                 trimmed_blocks = []
