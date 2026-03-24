@@ -1368,6 +1368,12 @@ ENABLE_LOGIN_FORM = PersistentConfig(
     os.environ.get("ENABLE_LOGIN_FORM", "True").lower() == "true",
 )
 
+ENABLE_GUEST_ACCESS = PersistentConfig(
+    "ENABLE_GUEST_ACCESS",
+    "auth.guest.enable",
+    os.environ.get("ENABLE_GUEST_ACCESS", "False").lower() == "true",
+)
+
 
 DEFAULT_LOCALE = PersistentConfig(
     "DEFAULT_LOCALE",

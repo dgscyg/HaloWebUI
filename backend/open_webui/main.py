@@ -319,6 +319,7 @@ from open_webui.config import (
     JWT_EXPIRES_IN,
     ENABLE_SIGNUP,
     ENABLE_LOGIN_FORM,
+    ENABLE_GUEST_ACCESS,
     ENABLE_API_KEY,
     ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
     API_KEY_ALLOWED_ENDPOINTS,
@@ -715,6 +716,7 @@ if not app.state.config.ENABLE_BASE_MODELS_CACHE:
 app.state.config.WEBUI_URL = WEBUI_URL
 app.state.config.ENABLE_SIGNUP = ENABLE_SIGNUP
 app.state.config.ENABLE_LOGIN_FORM = ENABLE_LOGIN_FORM
+app.state.config.ENABLE_GUEST_ACCESS = ENABLE_GUEST_ACCESS
 
 app.state.config.ENABLE_API_KEY = ENABLE_API_KEY
 app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS = (
@@ -1708,6 +1710,7 @@ async def get_app_config(request: Request):
             "enable_api_key": app.state.config.ENABLE_API_KEY,
             "enable_signup": app.state.config.ENABLE_SIGNUP,
             "enable_login_form": app.state.config.ENABLE_LOGIN_FORM,
+            "enable_guest_access": app.state.config.ENABLE_GUEST_ACCESS,
             "enable_websocket": ENABLE_WEBSOCKET_SUPPORT,
             **(
                 {

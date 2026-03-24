@@ -4,6 +4,7 @@ import uuid
 import time
 import datetime
 import logging
+import secrets
 from aiohttp import ClientSession
 
 from open_webui.models.auths import (
@@ -80,10 +81,11 @@ class SessionUserResponse(Token, UserResponse):
     permissions: Optional[dict] = None
 
 
-@router.get("/", response_model=SessionUserResponse)
-async def get_session_user(
-    request: Request, response: Response, user=Depends(get_current_user)
-):
+class GuestSessionResponse(SessionUserResponse):
+    guest: bool = True
+
+
+def _issue_session_response(request: Request, response: Response, user):
     expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
     expires_at = None
     if expires_delta:
@@ -100,12 +102,11 @@ async def get_session_user(
         else None
     )
 
-    # Set the cookie token
     response.set_cookie(
         key="token",
         value=token,
         expires=datetime_expires_at,
-        httponly=True,  # Ensures the cookie is not accessible via JavaScript
+        httponly=True,
         samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
         secure=WEBUI_AUTH_COOKIE_SECURE,
     )
@@ -124,6 +125,59 @@ async def get_session_user(
         "role": user.role,
         "profile_image_url": user.profile_image_url,
         "permissions": user_permissions,
+    }
+
+
+@router.get("/", response_model=SessionUserResponse)
+async def get_session_user(
+    request: Request, response: Response, user=Depends(get_current_user)
+):
+    return _issue_session_response(request, response, user)
+
+
+@router.post("/guest", response_model=GuestSessionResponse)
+async def guest_session(request: Request, response: Response):
+    if not request.app.state.config.ENABLE_GUEST_ACCESS:
+        response.delete_cookie("token")
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
+        )
+
+    role = str(request.app.state.config.DEFAULT_USER_ROLE or "user").lower()
+    if role not in {"user", "admin"}:
+        role = "user"
+
+    if role == "admin":
+        role = "user"
+
+    guest_name = "Guest"
+    guest_email = f"guest-{secrets.token_hex(8)}@guest.local"
+
+    try:
+        user = Auths.insert_new_auth(
+            email=guest_email,
+            password=get_password_hash(str(uuid.uuid4())),
+            name=guest_name,
+            role=role,
+        )
+    except Exception as err:
+        log.error(f"Guest session creation error: {str(err)}")
+        response.delete_cookie("token")
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ERROR_MESSAGES.CREATE_USER_ERROR,
+        )
+
+    if not user or user.role not in {"user", "admin"}:
+        response.delete_cookie("token")
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ERROR_MESSAGES.CREATE_USER_ERROR,
+        )
+
+    return {
+        **_issue_session_response(request, response, user),
+        "guest": True,
     }
 
 
@@ -743,6 +797,7 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
         "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,
         "WEBUI_URL": request.app.state.config.WEBUI_URL,
         "ENABLE_SIGNUP": request.app.state.config.ENABLE_SIGNUP,
+        "ENABLE_GUEST_ACCESS": request.app.state.config.ENABLE_GUEST_ACCESS,
         "ENABLE_API_KEY": request.app.state.config.ENABLE_API_KEY,
         "ENABLE_API_KEY_ENDPOINT_RESTRICTIONS": request.app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
         "API_KEY_ALLOWED_ENDPOINTS": request.app.state.config.API_KEY_ALLOWED_ENDPOINTS,
@@ -758,6 +813,7 @@ class AdminConfig(BaseModel):
     SHOW_ADMIN_DETAILS: bool
     WEBUI_URL: str
     ENABLE_SIGNUP: bool
+    ENABLE_GUEST_ACCESS: bool
     ENABLE_API_KEY: bool
     ENABLE_API_KEY_ENDPOINT_RESTRICTIONS: bool
     API_KEY_ALLOWED_ENDPOINTS: str
@@ -775,6 +831,7 @@ async def update_admin_config(
     request.app.state.config.SHOW_ADMIN_DETAILS = form_data.SHOW_ADMIN_DETAILS
     request.app.state.config.WEBUI_URL = form_data.WEBUI_URL
     request.app.state.config.ENABLE_SIGNUP = form_data.ENABLE_SIGNUP
+    request.app.state.config.ENABLE_GUEST_ACCESS = form_data.ENABLE_GUEST_ACCESS
 
     request.app.state.config.ENABLE_API_KEY = form_data.ENABLE_API_KEY
     request.app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS = (
@@ -805,6 +862,7 @@ async def update_admin_config(
         "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,
         "WEBUI_URL": request.app.state.config.WEBUI_URL,
         "ENABLE_SIGNUP": request.app.state.config.ENABLE_SIGNUP,
+        "ENABLE_GUEST_ACCESS": request.app.state.config.ENABLE_GUEST_ACCESS,
         "ENABLE_API_KEY": request.app.state.config.ENABLE_API_KEY,
         "ENABLE_API_KEY_ENDPOINT_RESTRICTIONS": request.app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
         "API_KEY_ALLOWED_ENDPOINTS": request.app.state.config.API_KEY_ALLOWED_ENDPOINTS,

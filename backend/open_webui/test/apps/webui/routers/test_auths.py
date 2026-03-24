@@ -97,6 +97,44 @@ class TestAuths(AbstractPostgresTest):
         assert data["token"] is not None and len(data["token"]) > 0
         assert data["token_type"] == "Bearer"
 
+    def test_guest_session(self):
+        response = self.fast_api_client.post(self.create_url("/guest"))
+
+        assert response.status_code == 403
+
+        from open_webui.routers import auths as auths_router
+
+        self.fast_api_client.app.state.config.ENABLE_GUEST_ACCESS = True
+        response = self.fast_api_client.post(self.create_url("/guest"))
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["guest"] is True
+        assert data["role"] == "user"
+        assert data["email"].startswith("guest-")
+        assert data["email"].endswith("@guest.local")
+        assert data["token"]
+        assert response.cookies.get("token")
+
+        guest_user = auths_router.Users.get_user_by_email(data["email"])
+        assert guest_user is not None
+        assert guest_user.role == "user"
+
+    def test_guest_session_coerces_pending_or_admin_defaults_to_non_admin_user(self):
+        self.fast_api_client.app.state.config.ENABLE_GUEST_ACCESS = True
+        self.fast_api_client.app.state.config.DEFAULT_USER_ROLE = "pending"
+
+        response = self.fast_api_client.post(self.create_url("/guest"))
+
+        assert response.status_code == 200
+        assert response.json()["role"] == "user"
+
+        self.fast_api_client.app.state.config.DEFAULT_USER_ROLE = "admin"
+        response = self.fast_api_client.post(self.create_url("/guest"))
+
+        assert response.status_code == 200
+        assert response.json()["role"] == "user"
+
     def test_signin_without_auth_bootstraps_admin_without_fixed_password(self, monkeypatch):
         from open_webui.models.auths import Auth, get_db
         from open_webui.routers import auths as auths_router
@@ -200,6 +238,35 @@ class TestAuths(AbstractPostgresTest):
             "name": "John Doe",
             "email": "john.doe@openwebui.com",
         }
+
+    def test_get_and_update_admin_config_includes_guest_access(self):
+        with mock_webui_user():
+            response = self.fast_api_client.get(self.create_url("/admin/config"))
+
+        assert response.status_code == 200
+        assert "ENABLE_GUEST_ACCESS" in response.json()
+
+        with mock_webui_user():
+            response = self.fast_api_client.post(
+                self.create_url("/admin/config"),
+                json={
+                    "SHOW_ADMIN_DETAILS": True,
+                    "WEBUI_URL": "http://localhost:3000",
+                    "ENABLE_SIGNUP": True,
+                    "ENABLE_GUEST_ACCESS": True,
+                    "ENABLE_API_KEY": True,
+                    "ENABLE_API_KEY_ENDPOINT_RESTRICTIONS": False,
+                    "API_KEY_ALLOWED_ENDPOINTS": "",
+                    "DEFAULT_USER_ROLE": "user",
+                    "JWT_EXPIRES_IN": "-1",
+                    "ENABLE_COMMUNITY_SHARING": True,
+                    "ENABLE_CHANNELS": False,
+                    "ENABLE_USER_WEBHOOKS": True,
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json()["ENABLE_GUEST_ACCESS"] is True
 
     def test_create_api_key_(self):
         user = self.auths.insert_new_auth(
