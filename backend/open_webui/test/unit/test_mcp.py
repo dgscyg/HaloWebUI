@@ -482,7 +482,34 @@ def test_get_mcp_apps_config_reports_global_and_per_server_state():
         "MCP_SERVER_APPS": {
             "0": True,
             "1": False,
-            "2": False,
+            "2": True,
+        },
+    }
+
+
+def test_get_mcp_apps_config_preserves_stored_server_toggles_even_when_global_disabled():
+    from open_webui.routers.configs import get_mcp_apps_config
+
+    request = SimpleNamespace()
+    user = SimpleNamespace(id="user-1")
+    connections = [
+        {"url": "http://one.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True}},
+        {"url": "http://two.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": False}},
+        {"url": "http://three.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True}},
+    ]
+
+    with patch(
+        "open_webui.routers.configs.get_user_mcp_server_connections",
+        return_value=connections,
+    ):
+        result = asyncio.run(get_mcp_apps_config(request, user))
+
+    assert result == {
+        "ENABLE_MCP_APPS": False,
+        "MCP_SERVER_APPS": {
+            "0": True,
+            "1": False,
+            "2": True,
         },
     }
 

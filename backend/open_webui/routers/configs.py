@@ -410,23 +410,28 @@ def _get_mcp_apps_form_state(connection: dict, *, default_global_enabled: bool) 
     return global_enabled, server_enabled
 
 
-@router.get("/mcp_servers/apps", response_model=MCPAppsConfigForm)
-async def get_mcp_apps_config(request: Request, user=Depends(get_verified_user)):
-    connections = get_user_mcp_server_connections(request, user)
+def _serialize_mcp_apps_form_state(connections: list[dict]) -> dict[str, object]:
     server_apps = {}
     enabled = False
+
     for idx, connection in enumerate(connections):
         global_enabled, server_enabled = _get_mcp_apps_form_state(
             connection,
             default_global_enabled=False,
         )
-        apps_enabled = bool(global_enabled and server_enabled)
-        server_apps[str(idx)] = apps_enabled
+        server_apps[str(idx)] = server_enabled
         enabled = enabled or global_enabled
+
     return {
         MCP_APPS_GLOBAL_ENABLE_KEY: enabled,
         "MCP_SERVER_APPS": server_apps,
     }
+
+
+@router.get("/mcp_servers/apps", response_model=MCPAppsConfigForm)
+async def get_mcp_apps_config(request: Request, user=Depends(get_verified_user)):
+    connections = get_user_mcp_server_connections(request, user)
+    return _serialize_mcp_apps_form_state(connections)
 
 
 @router.post("/mcp_servers/apps", response_model=MCPAppsConfigForm)
@@ -452,17 +457,7 @@ async def set_mcp_apps_config(
         updated_connections.append(updated)
 
     set_user_mcp_server_connections(user, updated_connections)
-
-    server_apps = {
-        str(idx): bool((connection.get(MCP_APPS_KEY) or {}).get(MCP_APPS_SERVER_ENABLE_KEY, True))
-        and form_data.ENABLE_MCP_APPS
-        for idx, connection in enumerate(updated_connections)
-    }
-
-    return {
-        MCP_APPS_GLOBAL_ENABLE_KEY: form_data.ENABLE_MCP_APPS,
-        "MCP_SERVER_APPS": server_apps,
-    }
+    return _serialize_mcp_apps_form_state(updated_connections)
 
 
 @router.get("/mcp_servers/apps/capabilities", response_model=MCPAppsCapabilitiesResponse)
