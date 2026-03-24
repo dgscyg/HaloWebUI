@@ -236,6 +236,7 @@ type Settings = {
 		height: string;
 	};
 	imageCompressionInChannels?: boolean;
+	toolServers?: ToolServerConfig[];
 
 	system?: string;
 	requestFormat?: string;
@@ -291,6 +292,7 @@ type Config = {
 	version: string;
 	default_locale: string;
 	default_models: string;
+	onboarding?: boolean;
 	default_prompt_suggestions: PromptSuggestion[];
 	features: {
 		auth: boolean;
@@ -298,6 +300,7 @@ type Config = {
 		enable_api_key: boolean;
 		enable_signup: boolean;
 		enable_login_form: boolean;
+		enable_ldap?: boolean;
 		enable_guest_access?: boolean;
 		enable_web_search?: boolean;
 		enable_halo_web_search?: boolean;
@@ -310,6 +313,7 @@ type Config = {
 		enable_admin_chat_access: boolean;
 		enable_community_sharing: boolean;
 		enable_autocomplete_generation: boolean;
+		enable_websocket?: boolean;
 	};
 	oauth: {
 		providers: {
@@ -323,10 +327,17 @@ type PromptSuggestion = {
 	title: [string, string];
 };
 
-type SessionUser = {
+export type ToolServerConfig = {
+	url: string;
+	key?: string;
+	auth_type?: string;
+};
+
+export type SessionUser = {
 	id: string;
 	email: string;
 	name: string;
 	role: string;
 	profile_image_url: string;
+	token?: string;
 };

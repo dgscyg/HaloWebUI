@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import { toast } from 'svelte-sonner';
 
 	import { onMount, getContext, tick } from 'svelte';
@@ -23,8 +23,9 @@
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import OnBoarding from '$lib/components/OnBoarding.svelte';
+	import type { SessionUser } from '$lib/stores';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<any>('i18n');
 
 	let loaded = false;
 
@@ -36,29 +37,29 @@
 
 	let ldapUsername = '';
 
-	const formatError = (error) =>
-		localizeCommonError(error, (key, options) => $i18n.t(key, options));
+	const formatError = (error: unknown) =>
+		localizeCommonError(error, (key, options) => i18n.t(key, options));
 
 	const clearClientSession = () => {
-		user.set(null);
+		user.set(undefined);
 		clearClientAuthState();
 	};
 
-	const querystringValue = (key) => {
+	const querystringValue = (key: string) => {
 		const querystring = window.location.search;
 		const urlParams = new URLSearchParams(querystring);
 		return urlParams.get(key);
 	};
 
-	const setSessionUser = async (sessionUser) => {
+	const setSessionUser = async (sessionUser: SessionUser | null) => {
 		if (sessionUser) {
 			console.log(sessionUser);
-			toast.success($i18n.t(`You're now logged in.`));
+			toast.success(i18n.t(`You're now logged in.`));
 			if (sessionUser.token) {
 				localStorage.token = sessionUser.token;
 			}
 
-			$socket.emit('user-join', { auth: { token: sessionUser.token } });
+			$socket?.emit('user-join', { auth: { token: sessionUser.token } });
 			await user.set(sessionUser);
 			await config.set(await getBackendConfig());
 
@@ -149,7 +150,7 @@
 
 	async function setLogoImage() {
 		await tick();
-		const logo = document.getElementById('logo');
+		const logo = document.getElementById('logo') as HTMLImageElement | null;
 
 		if (logo) {
 			const isDarkMode = document.documentElement.classList.contains('dark');
@@ -170,37 +171,41 @@
 		}
 	}
 
-	onMount(async () => {
-		if ($user !== undefined) {
-			const redirectPath = querystringValue('redirect') || '/';
-			goto(redirectPath);
-			return;
-		}
+	onMount(() => {
+		const init = async () => {
+			if ($user !== undefined) {
+				const redirectPath = querystringValue('redirect') || '/';
+				goto(redirectPath);
+				return;
+			}
 
-		let guestSignInSucceeded = false;
+			let guestSignInSucceeded = false;
 
-		await checkOauthCallback();
+			await checkOauthCallback();
 
-		if (
-			$page.url.searchParams.get('guest') === '1' &&
-			($config?.features?.enable_guest_access ?? false)
-		) {
-			await guestSignInHandler();
-			guestSignInSucceeded = $user !== null && $user !== undefined;
-		}
+			if (
+				$page.url.searchParams.get('guest') === '1' &&
+				($config?.features?.enable_guest_access ?? false)
+			) {
+				await guestSignInHandler();
+				guestSignInSucceeded = $user !== undefined;
+			}
 
-		loaded = true;
-		setLogoImage();
+			loaded = true;
+			setLogoImage();
 
-		if (guestSignInSucceeded) {
-			return;
-		}
+			if (guestSignInSucceeded) {
+				return;
+			}
 
-		if (($config?.features.auth_trusted_header ?? false) || $config?.features.auth === false) {
-			await signInHandler();
-		} else {
-			onboarding = $config?.onboarding ?? false;
-		}
+			if (($config?.features.auth_trusted_header ?? false) || $config?.features.auth === false) {
+				await signInHandler();
+			} else {
+				onboarding = $config?.onboarding ?? false;
+			}
+		};
+
+		void init();
 	});
 </script>
 
