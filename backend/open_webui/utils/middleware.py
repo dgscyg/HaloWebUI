@@ -3064,12 +3064,20 @@ async def process_chat_response(
                         results = block.get("results", [])
 
                         for result in results:
+                            if not isinstance(result, dict):
+                                continue
+
+                            tool_message = {
+                                "role": "tool",
+                                "tool_call_id": result["tool_call_id"],
+                                "content": result["content"],
+                            }
+                            result_files = result.get("files")
+                            if result_files:
+                                tool_message["files"] = result_files
+
                             messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": result["tool_call_id"],
-                                    "content": result["content"],
-                                }
+                                tool_message
                             )
                         temp_blocks = []
                     else:

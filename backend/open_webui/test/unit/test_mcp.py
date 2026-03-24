@@ -862,3 +862,95 @@ def test_get_mcp_server_data_fetches_resources_and_prompts_when_advertised():
         "resources": [{"id": "res-1", "render_url": "https://apps.example/render/1"}],
     }
 
+
+def test_convert_content_blocks_to_messages_preserves_tool_files_for_persisted_history():
+    content_blocks = [
+        {
+            "type": "tool_calls",
+            "content": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "lookup", "arguments": "{\"query\":\"halo\"}"},
+                }
+            ],
+            "results": [
+                {
+                    "tool_call_id": "call_1",
+                    "content": "{\"app_id\":\"resource-1\",\"render_url\":\"https://apps.example/render/1\",\"metadata\":{\"tool_call_id\":\"call_1\"}}",
+                    "files": [{"type": "image", "url": "data:image/png;base64,abc"}],
+                }
+            ],
+        }
+    ]
+
+    def serialize_content_blocks(blocks):
+        return "".join(
+            block.get("content", "")
+            for block in (blocks if isinstance(blocks, list) else [])
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+
+    def convert_content_blocks_to_messages(content_blocks):
+        messages = []
+
+        temp_blocks = []
+        for block in content_blocks:
+            if block["type"] == "tool_calls":
+                serialized = serialize_content_blocks(temp_blocks)
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": serialized if serialized else None,
+                        "tool_calls": block.get("content"),
+                    }
+                )
+
+                results = block.get("results", [])
+
+                for result in results:
+                    if not isinstance(result, dict):
+                        continue
+
+                    tool_message = {
+                        "role": "tool",
+                        "tool_call_id": result["tool_call_id"],
+                        "content": result["content"],
+                    }
+                    if result.get("files"):
+                        tool_message["files"] = result["files"]
+
+                    messages.append(tool_message)
+                temp_blocks = []
+            else:
+                temp_blocks.append(block)
+
+        if temp_blocks:
+            content = serialize_content_blocks(temp_blocks)
+            if content:
+                messages.append({"role": "assistant", "content": content})
+
+        return messages
+
+    messages = convert_content_blocks_to_messages(content_blocks)
+
+    assert messages == [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "lookup", "arguments": "{\"query\":\"halo\"}"},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "{\"app_id\":\"resource-1\",\"render_url\":\"https://apps.example/render/1\",\"metadata\":{\"tool_call_id\":\"call_1\"}}",
+            "files": [{"type": "image", "url": "data:image/png;base64,abc"}],
+        },
+    ]
+
