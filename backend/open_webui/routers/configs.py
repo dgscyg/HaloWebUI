@@ -386,19 +386,36 @@ async def verify_mcp_server_connection(
         )
 
 
+def _is_mcp_connection_enabled(connection: dict) -> bool:
+    if "enabled" in connection:
+        return bool(connection.get("enabled"))
+
+    config = connection.get("config") or {}
+    return bool(config.get("enable", True))
+
+
+def _get_mcp_apps_form_state(connection: dict, *, default_global_enabled: bool) -> tuple[bool, bool]:
+    apps_cfg = dict(connection.get(MCP_APPS_KEY) or {})
+    global_enabled = bool(
+        apps_cfg.get(MCP_APPS_GLOBAL_ENABLE_KEY, default_global_enabled)
+    )
+    server_enabled = bool(apps_cfg.get(MCP_APPS_SERVER_ENABLE_KEY, True))
+    return global_enabled, server_enabled
+
+
 @router.get("/mcp_servers/apps", response_model=MCPAppsConfigForm)
 async def get_mcp_apps_config(request: Request, user=Depends(get_verified_user)):
     connections = get_user_mcp_server_connections(request, user)
     server_apps = {}
     enabled = False
     for idx, connection in enumerate(connections):
-        apps_cfg = connection.get(MCP_APPS_KEY) or {}
-        server_enabled = bool(apps_cfg.get(MCP_APPS_SERVER_ENABLE_KEY, True))
-        apps_enabled = bool(
-            apps_cfg.get(MCP_APPS_GLOBAL_ENABLE_KEY, False) and server_enabled
+        global_enabled, server_enabled = _get_mcp_apps_form_state(
+            connection,
+            default_global_enabled=False,
         )
+        apps_enabled = bool(global_enabled and server_enabled)
         server_apps[str(idx)] = apps_enabled
-        enabled = enabled or apps_enabled
+        enabled = enabled or global_enabled
     return {
         MCP_APPS_GLOBAL_ENABLE_KEY: enabled,
         "MCP_SERVER_APPS": server_apps,
@@ -414,22 +431,24 @@ async def set_mcp_apps_config(
     connections = get_user_mcp_server_connections(request, user)
     updated_connections = []
 
-    for connection in connections:
+    for idx, connection in enumerate(connections):
         updated = dict(connection)
         apps_cfg = dict(updated.get(MCP_APPS_KEY) or {})
         apps_cfg[MCP_APPS_GLOBAL_ENABLE_KEY] = form_data.ENABLE_MCP_APPS
-        if "enabled" in updated and MCP_APPS_SERVER_ENABLE_KEY not in apps_cfg:
-            apps_cfg[MCP_APPS_SERVER_ENABLE_KEY] = bool(updated.get("enabled"))
+        apps_cfg[MCP_APPS_SERVER_ENABLE_KEY] = bool(
+            form_data.MCP_SERVER_APPS.get(
+                str(idx),
+                apps_cfg.get(MCP_APPS_SERVER_ENABLE_KEY, True),
+            )
+        )
         updated[MCP_APPS_KEY] = apps_cfg
         updated_connections.append(updated)
 
     set_user_mcp_server_connections(user, updated_connections)
 
     server_apps = {
-        str(idx): bool(
-            (connection.get(MCP_APPS_KEY) or {}).get(MCP_APPS_GLOBAL_ENABLE_KEY, False)
-            and (connection.get(MCP_APPS_KEY) or {}).get(MCP_APPS_SERVER_ENABLE_KEY, True)
-        )
+        str(idx): bool((connection.get(MCP_APPS_KEY) or {}).get(MCP_APPS_SERVER_ENABLE_KEY, True))
+        and form_data.ENABLE_MCP_APPS
         for idx, connection in enumerate(updated_connections)
     }
 
@@ -453,12 +472,13 @@ async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_
     global_enabled = False
 
     for idx, connection in enumerate(connections):
-        apps_cfg = dict(connection.get(MCP_APPS_KEY) or {})
-        server_enabled = bool(apps_cfg.get(MCP_APPS_SERVER_ENABLE_KEY, True))
-        apps_enabled = bool(
-            apps_cfg.get(MCP_APPS_GLOBAL_ENABLE_KEY, False) and server_enabled
+        base_enabled = _is_mcp_connection_enabled(connection)
+        apps_global_enabled, server_apps_enabled = _get_mcp_apps_form_state(
+            connection,
+            default_global_enabled=False,
         )
-        global_enabled = global_enabled or apps_enabled
+        apps_enabled = bool(apps_global_enabled and server_apps_enabled and base_enabled)
+        global_enabled = global_enabled or apps_global_enabled
 
         data = server_map.get(idx, {})
         resources = [
@@ -487,9 +507,7 @@ async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_
         response_servers.append(
             {
                 "idx": idx,
-                "enabled": bool(connection.get("enabled", True))
-                if "enabled" in connection
-                else bool((connection.get("config") or {}).get("enable", True)),
+                "enabled": base_enabled,
                 "apps_enabled": apps_enabled,
                 "server": {
                     "name": connection.get("name")

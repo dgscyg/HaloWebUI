@@ -273,7 +273,14 @@ def test_set_mcp_apps_config_updates_apps_flag_without_mutating_enabled_semantic
     ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter:
         setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
         result = asyncio.run(
-            set_mcp_apps_config(request, MCPAppsConfigForm(ENABLE_MCP_APPS=True), user)
+            set_mcp_apps_config(
+                request,
+                MCPAppsConfigForm(
+                    ENABLE_MCP_APPS=True,
+                    MCP_SERVER_APPS={"0": False, "1": True},
+                ),
+                user,
+            )
         )
 
     assert result == {
@@ -292,6 +299,61 @@ def test_set_mcp_apps_config_updates_apps_flag_without_mutating_enabled_semantic
         {
             "url": "http://two.example",
             "config": {"enable": True},
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
+    ]
+
+
+def test_set_mcp_apps_config_preserves_mixed_server_apps_state_round_trip():
+    from open_webui.routers.configs import MCPAppsConfigForm, set_mcp_apps_config
+
+    user = SimpleNamespace(id="user-1")
+    request = SimpleNamespace()
+    existing_connections = [
+        {"url": "http://one.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True}},
+        {"url": "http://two.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False}},
+        {"url": "http://three.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
+    ]
+    saved = {}
+
+    with patch(
+        "open_webui.routers.configs.get_user_mcp_server_connections",
+        return_value=existing_connections,
+    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter:
+        setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+        result = asyncio.run(
+            set_mcp_apps_config(
+                request,
+                MCPAppsConfigForm(
+                    ENABLE_MCP_APPS=True,
+                    MCP_SERVER_APPS={"0": True, "1": False, "2": True},
+                ),
+                user,
+            )
+        )
+
+    assert result == {
+        "ENABLE_MCP_APPS": True,
+        "MCP_SERVER_APPS": {
+            "0": True,
+            "1": False,
+            "2": True,
+        },
+    }
+    assert saved["connections"] == [
+        {
+            "url": "http://one.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
+        {
+            "url": "http://two.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+        },
+        {
+            "url": "http://three.example",
+            "enabled": False,
             "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
         },
     ]
@@ -423,8 +485,58 @@ def test_get_mcp_apps_capabilities_exposes_stable_frontend_contract():
     }
     assert result["servers"][1]["idx"] == 1
     assert result["servers"][1]["enabled"] is False
-    assert result["servers"][1]["apps_enabled"] is True
+    assert result["servers"][1]["apps_enabled"] is False
     assert result["servers"][1]["resources"] == []
+
+
+def test_get_mcp_apps_capabilities_preserves_disabled_server_index_without_leaking_active_apps_metadata():
+    from open_webui.routers.configs import get_mcp_apps_capabilities
+
+    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc")))
+    user = SimpleNamespace(id="user-1")
+    connections = [
+        {"url": "http://one.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
+        {"url": "http://two.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
+    ]
+    server_data = [
+        {
+            "idx": 0,
+            "server_info": {"name": "Server One"},
+            "capabilities": {"resources": {}},
+            "tools": [{"name": "lookup"}],
+            "resources": [{"id": "resource-1", "render_url": "https://apps.example/render/1"}],
+        }
+    ]
+
+    with patch(
+        "open_webui.routers.configs.get_user_mcp_server_connections",
+        return_value=connections,
+    ), patch("open_webui.routers.configs.get_mcp_servers_data", return_value=server_data):
+        result = asyncio.run(get_mcp_apps_capabilities(request, user))
+
+    assert result["ENABLE_MCP_APPS"] is True
+    assert [server["idx"] for server in result["servers"]] == [0, 1]
+    assert result["servers"][0]["apps_enabled"] is True
+    assert result["servers"][0]["capabilities"] == {"resources": {}}
+    assert result["servers"][0]["resources"] == [
+        {
+            "server_idx": 0,
+            "tool_name": None,
+            "app_id": "resource-1",
+            "render_url": "https://apps.example/render/1",
+            "resource_type": "resource",
+            "title": None,
+            "mime_type": None,
+            "content": None,
+            "content_url": None,
+            "metadata": {},
+        }
+    ]
+    assert result["servers"][1]["enabled"] is False
+    assert result["servers"][1]["apps_enabled"] is False
+    assert result["servers"][1]["capabilities"] == {}
+    assert result["servers"][1]["resources"] == []
+    assert result["servers"][1]["metadata"] == {"tool_count": 0, "tool_names": []}
 
 
 def test_get_mcp_server_data_fetches_resources_and_prompts_when_advertised():
