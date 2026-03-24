@@ -1,6 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-
 export const clearClientAuthState = () => {
 	if (typeof localStorage !== 'undefined') {
 		localStorage.removeItem('token');

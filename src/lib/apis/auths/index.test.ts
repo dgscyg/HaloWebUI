@@ -25,6 +25,27 @@ describe('guestUserSignIn', () => {
 		);
 	});
 
+	it('preserves the guest marker returned by the backend contract', async () => {
+		const payload = {
+			token: 'guest-token',
+			role: 'user',
+			email: 'guest@example.local',
+			guest: true
+		};
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+			ok: true,
+			json: async () => payload
+		} as Response);
+
+		const result = await guestUserSignIn();
+
+		expect(result).toMatchObject({
+			token: 'guest-token',
+			role: 'user',
+			guest: true
+		});
+	});
+
 	it('throws the backend detail when guest auth is rejected', async () => {
 		vi.spyOn(globalThis, 'fetch').mockResolvedValue({
 			ok: false,

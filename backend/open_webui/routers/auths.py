@@ -85,14 +85,20 @@ class GuestSessionResponse(SessionUserResponse):
     guest: bool = True
 
 
-def _issue_session_response(request: Request, response: Response, user):
+def _is_guest_user(user) -> bool:
+    return bool(getattr(user, "email", "") and user.email.endswith("@guest.local"))
+
+
+def _issue_session_response(request: Request, response: Response, user, guest: Optional[bool] = None):
     expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
     expires_at = None
     if expires_delta:
         expires_at = int(time.time()) + int(expires_delta.total_seconds())
 
+    guest = _is_guest_user(user) if guest is None else guest
+
     token = create_token(
-        data={"id": user.id},
+        data={"id": user.id, "guest": guest},
         expires_delta=expires_delta,
     )
 
@@ -115,7 +121,7 @@ def _issue_session_response(request: Request, response: Response, user):
         user.id, request.app.state.config.USER_PERMISSIONS
     )
 
-    return {
+    session_user = {
         "token": token,
         "token_type": "Bearer",
         "expires_at": expires_at,
@@ -126,6 +132,11 @@ def _issue_session_response(request: Request, response: Response, user):
         "profile_image_url": user.profile_image_url,
         "permissions": user_permissions,
     }
+
+    if guest:
+        session_user["guest"] = True
+
+    return session_user
 
 
 @router.get("/", response_model=SessionUserResponse)
@@ -175,10 +186,7 @@ async def guest_session(request: Request, response: Response):
             detail=ERROR_MESSAGES.CREATE_USER_ERROR,
         )
 
-    return {
-        **_issue_session_response(request, response, user),
-        "guest": True,
-    }
+    return _issue_session_response(request, response, user, guest=True)
 
 
 ############################

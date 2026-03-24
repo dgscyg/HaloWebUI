@@ -120,6 +120,36 @@ class TestAuths(AbstractPostgresTest):
         assert guest_user is not None
         assert guest_user.role == "user"
 
+    def test_guest_session_bootstrap_and_reload_preserve_guest_marker(self):
+        self.fast_api_client.app.state.config.ENABLE_GUEST_ACCESS = True
+
+        guest_response = self.fast_api_client.post(self.create_url("/guest"))
+
+        assert guest_response.status_code == 200
+        guest_token = guest_response.json()["token"]
+        assert guest_response.json()["guest"] is True
+
+        session_response = self.fast_api_client.get(
+            self.create_url(""),
+            headers={"Authorization": f"Bearer {guest_token}"},
+        )
+
+        assert session_response.status_code == 200
+        session_data = session_response.json()
+        assert session_data["id"] == guest_response.json()["id"]
+        assert session_data["email"] == guest_response.json()["email"]
+        assert session_data["role"] == "user"
+        assert session_data["guest"] is True
+        assert session_response.cookies.get("token")
+
+        reloaded_response = self.fast_api_client.get(self.create_url(""))
+
+        assert reloaded_response.status_code == 200
+        reloaded_data = reloaded_response.json()
+        assert reloaded_data["id"] == guest_response.json()["id"]
+        assert reloaded_data["guest"] is True
+        assert reloaded_data["role"] == "user"
+
     def test_guest_session_coerces_pending_or_admin_defaults_to_non_admin_user(self):
         self.fast_api_client.app.state.config.ENABLE_GUEST_ACCESS = True
         self.fast_api_client.app.state.config.DEFAULT_USER_ROLE = "pending"
