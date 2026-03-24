@@ -116,6 +116,47 @@ def test_convert_responses_to_chat_completions_basic():
     assert cc["usage"]["output_tokens"] == 1
 
 
+def test_convert_responses_to_chat_completions_preserves_function_call_outputs_for_lineage():
+    responses = {
+        "id": "resp_2",
+        "output": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "lookup",
+                "arguments": "{\"query\":\"halo\"}",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": {
+                    "app_id": "resource-1",
+                    "render_url": "https://apps.example/render/1",
+                    "metadata": {"tool_call_id": "call_1"},
+                },
+                "files": [{"type": "image", "url": "data:image/png;base64,abc"}],
+            },
+        ],
+    }
+
+    cc = convert_responses_to_chat_completions(responses, model_id="gpt-test")
+
+    assert cc["choices"][0]["message"]["tool_calls"] == [
+        {
+            "index": 0,
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "lookup", "arguments": "{\"query\":\"halo\"}"},
+        }
+    ]
+    assert cc["choices"][0]["messages"][1] == {
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": "{\"app_id\": \"resource-1\", \"render_url\": \"https://apps.example/render/1\", \"metadata\": {\"tool_call_id\": \"call_1\"}}",
+        "files": [{"type": "image", "url": "data:image/png;base64,abc"}],
+    }
+
+
 def test_convert_chat_completions_to_responses_payload_injects_native_web_search_tool():
     chat = {
         "model": "gpt-test",

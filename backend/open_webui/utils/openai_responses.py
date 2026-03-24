@@ -55,6 +55,18 @@ def _tool_call_args_from_item(item: Any) -> Any:
     )
 
 
+def _tool_output_from_item(item: Any) -> Any:
+    if not isinstance(item, dict):
+        return ""
+    return (
+        item.get("output")
+        or item.get("content")
+        or item.get("result")
+        or item.get("value")
+        or ""
+    )
+
+
 def _stringify_message_content(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -295,12 +307,15 @@ def convert_chat_completions_to_responses_payload(
                 if isinstance(content, str)
                 else json.dumps(content, ensure_ascii=False, default=str)
             )
+            tool_message: Dict[str, Any] = {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": output,
+            }
+            if "files" in msg:
+                tool_message["files"] = msg.get("files")
             input_items.append(
-                {
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": output,
-                }
+                tool_message
             )
             continue
 
@@ -408,6 +423,7 @@ def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_
     output = responses_data.get("output", []) or []
     content = ""
     tool_calls: List[dict] = []
+    output_messages: List[dict] = []
     tool_call_index = 0
 
     for item in output:
@@ -433,6 +449,19 @@ def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_
                 }
             )
             tool_call_index += 1
+        elif item_type == "function_call_output":
+            call_id = _tool_call_id_from_item(item)
+            output = _tool_output_from_item(item)
+            message: Dict[str, Any] = {
+                "role": "tool",
+                "tool_call_id": call_id or f"call_{uuid.uuid4().hex}",
+                "content": output
+                if isinstance(output, str)
+                else json.dumps(output, ensure_ascii=False, default=str),
+            }
+            if "files" in item:
+                message["files"] = item.get("files")
+            output_messages.append(message)
 
     # Some proxies put the final text in a top-level "output_text" or "text" field.
     if not content:
@@ -442,6 +471,14 @@ def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_
                 content = v
                 break
 
+    assistant_message: Dict[str, Any] = {
+        "role": "assistant",
+        "content": content,
+        **({"tool_calls": tool_calls} if tool_calls else {}),
+    }
+
+    all_messages: List[dict] = [assistant_message, *output_messages]
+
     return {
         "id": responses_data.get("id", f"chatcmpl-{uuid.uuid4().hex}"),
         "object": "chat.completion",
@@ -450,11 +487,8 @@ def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_
         "choices": [
             {
                 "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": content,
-                    **({"tool_calls": tool_calls} if tool_calls else {}),
-                },
+                "message": assistant_message,
+                **({"messages": all_messages} if output_messages else {}),
                 "finish_reason": "tool_calls" if tool_calls else "stop",
             }
         ],
