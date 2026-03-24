@@ -7,7 +7,7 @@
 	import { activeUserIds, USAGE_POOL, mobile, showSidebar, user } from '$lib/stores';
 	import { fade } from 'svelte/transition';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import { userSignOut } from '$lib/apis/auths';
+	import { clearClientAuthState, userSignOut } from '$lib/apis/auths';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	const i18n = getContext('i18n');
@@ -24,7 +24,7 @@
 		await userSignOut();
 		user.set(null);
 
-		localStorage.removeItem('token');
+		clearClientAuthState();
 		location.href = '/auth';
 
 		showSignOutConfirm = false;

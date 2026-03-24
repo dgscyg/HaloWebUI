@@ -1,5 +1,16 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
+
+export const clearClientAuthState = () => {
+	if (typeof localStorage !== 'undefined') {
+		localStorage.removeItem('token');
+	}
+
+	if (typeof document !== 'undefined') {
+		document.cookie = 'token=; Max-Age=0; path=/';
+	}
+};
+
 export const getAdminDetails = async (token: string) => {
 	let error = null;
 
@@ -90,6 +101,33 @@ export const getSessionUser = async (token: string) => {
 		headers: {
 			'Content-Type': 'application/json',
 			Authorization: `Bearer ${token}`
+		},
+		credentials: 'include'
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.log(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const guestUserSignIn = async () => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/guest`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
 		},
 		credentials: 'include'
 	})

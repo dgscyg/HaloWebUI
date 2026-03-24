@@ -6,7 +6,14 @@
 	import { page } from '$app/stores';
 
 	import { getBackendConfig } from '$lib/apis';
-	import { ldapUserSignIn, getSessionUser, userSignIn, userSignUp } from '$lib/apis/auths';
+	import {
+		guestUserSignIn,
+		ldapUserSignIn,
+		clearClientAuthState,
+		getSessionUser,
+		userSignIn,
+		userSignUp
+	} from '$lib/apis/auths';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, socket } from '$lib/stores';
@@ -32,6 +39,11 @@
 	const formatError = (error) =>
 		localizeCommonError(error, (key, options) => $i18n.t(key, options));
 
+	const clearClientSession = () => {
+		user.set(null);
+		clearClientAuthState();
+	};
+
 	const querystringValue = (key) => {
 		const querystring = window.location.search;
 		const urlParams = new URLSearchParams(querystring);
@@ -53,6 +65,22 @@
 			const redirectPath = querystringValue('redirect') || '/';
 			goto(redirectPath);
 		}
+	};
+
+	const guestSignInHandler = async () => {
+		clearClientSession();
+		const sessionUser = await guestUserSignIn().catch((error) => {
+			clearClientSession();
+			toast.error(formatError(error));
+			mode = $config?.features.enable_ldap ? 'ldap' : 'signin';
+			return null;
+		});
+
+		if (!sessionUser) {
+			return;
+		}
+
+		await setSessionUser(sessionUser);
 	};
 
 	const signInHandler = async () => {
@@ -146,11 +174,27 @@
 		if ($user !== undefined) {
 			const redirectPath = querystringValue('redirect') || '/';
 			goto(redirectPath);
+			return;
 		}
+
+		let guestSignInSucceeded = false;
+
 		await checkOauthCallback();
+
+		if (
+			$page.url.searchParams.get('guest') === '1' &&
+			($config?.features?.enable_guest_access ?? false)
+		) {
+			await guestSignInHandler();
+			guestSignInSucceeded = $user !== null && $user !== undefined;
+		}
 
 		loaded = true;
 		setLogoImage();
+
+		if (guestSignInSucceeded) {
+			return;
+		}
 
 		if (($config?.features.auth_trusted_header ?? false) || $config?.features.auth === false) {
 			await signInHandler();

@@ -135,6 +135,20 @@ class TestAuths(AbstractPostgresTest):
         assert response.status_code == 200
         assert response.json()["role"] == "user"
 
+    def test_signout_clears_guest_session_cookie(self):
+        self.fast_api_client.app.state.config.ENABLE_GUEST_ACCESS = True
+        guest_response = self.fast_api_client.post(self.create_url("/guest"))
+
+        assert guest_response.status_code == 200
+        assert guest_response.cookies.get("token")
+
+        signout_response = self.fast_api_client.get(self.create_url("/signout"))
+
+        assert signout_response.status_code == 200
+        set_cookie = signout_response.headers.get("set-cookie", "")
+        assert "token=" in set_cookie
+        assert "Max-Age=0" in set_cookie or "expires=" in set_cookie.lower()
+
     def test_signin_without_auth_bootstraps_admin_without_fixed_password(self, monkeypatch):
         from open_webui.models.auths import Auth, get_db
         from open_webui.routers import auths as auths_router

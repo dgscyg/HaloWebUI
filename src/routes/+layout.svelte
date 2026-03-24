@@ -27,7 +27,7 @@
 	import { Toaster, toast } from 'svelte-sonner';
 
 	import { executeToolServer, getBackendConfig } from '$lib/apis';
-	import { getSessionUser } from '$lib/apis/auths';
+	import { clearClientAuthState, getSessionUser } from '$lib/apis/auths';
 	import { APP_NAME } from '$lib/constants';
 
 	import '../tailwind.css';
@@ -70,6 +70,11 @@
 
 	const formatError = (error) =>
 		localizeCommonError(error, (key, options) => $i18n.t(key, options));
+
+	const clearClientSession = async () => {
+		user.set(null);
+		clearClientAuthState();
+	};
 
 	const normalizeTheme = (rawTheme) => {
 		if (rawTheme === 'system' || rawTheme === 'dark' || rawTheme === 'light') return rawTheme;
@@ -605,7 +610,7 @@
 						await user.set(sessionUser);
 					} else {
 						// Redirect Invalid Session User to /auth Page
-						localStorage.removeItem('token');
+						await clearClientSession();
 						await goto(`/auth?redirect=${encodedUrl}`);
 					}
 				} else {
