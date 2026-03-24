@@ -131,15 +131,39 @@ def _map_aliases(args_dict: dict, allowed: set[str]) -> tuple[dict, list[dict]]:
         if key in allowed:
             mapped[key] = value
             continue
-        if key.endswith("s") and key[:-1] in allowed:
-            target = key[:-1]
-            mapped[target] = value[0] if isinstance(value, list) and len(value) == 1 else value
-            repairs.append({"action": "param_alias_mapping", "from": key, "to": target})
+
+        singular_candidates = []
+        if key.endswith("ies") and len(key) > 3:
+            singular_candidates.append(f"{key[:-3]}y")
+        if key.endswith("s") and len(key) > 1:
+            singular_candidates.append(key[:-1])
+
+        matched_singular = next(
+            (candidate for candidate in singular_candidates if candidate in allowed),
+            None,
+        )
+        if matched_singular:
+            mapped[matched_singular] = (
+                value[0] if isinstance(value, list) and len(value) == 1 else value
+            )
+            repairs.append(
+                {"action": "param_alias_mapping", "from": key, "to": matched_singular}
+            )
             continue
-        plural = f"{key}s"
-        if plural in allowed:
-            mapped[plural] = value if isinstance(value, list) else [value]
-            repairs.append({"action": "param_alias_mapping", "from": key, "to": plural})
+
+        plural_candidates = [f"{key}s"]
+        if key.endswith("y") and len(key) > 1:
+            plural_candidates.insert(0, f"{key[:-1]}ies")
+
+        matched_plural = next(
+            (candidate for candidate in plural_candidates if candidate in allowed),
+            None,
+        )
+        if matched_plural:
+            mapped[matched_plural] = value if isinstance(value, list) else [value]
+            repairs.append(
+                {"action": "param_alias_mapping", "from": key, "to": matched_plural}
+            )
     return mapped, repairs
 
 
