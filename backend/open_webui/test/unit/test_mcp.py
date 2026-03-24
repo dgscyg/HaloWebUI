@@ -276,7 +276,13 @@ def test_set_mcp_apps_config_updates_apps_flag_without_mutating_enabled_semantic
             set_mcp_apps_config(request, MCPAppsConfigForm(ENABLE_MCP_APPS=True), user)
         )
 
-    assert result == {"ENABLE_MCP_APPS": True}
+    assert result == {
+        "ENABLE_MCP_APPS": True,
+        "MCP_SERVER_APPS": {
+            "0": False,
+            "1": True,
+        },
+    }
     assert saved["connections"] == [
         {
             "url": "http://one.example",
@@ -289,4 +295,184 @@ def test_set_mcp_apps_config_updates_apps_flag_without_mutating_enabled_semantic
             "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
         },
     ]
+
+
+def test_get_mcp_apps_config_reports_global_and_per_server_state():
+    from open_webui.routers.configs import get_mcp_apps_config
+
+    request = SimpleNamespace()
+    user = SimpleNamespace(id="user-1")
+    connections = [
+        {"url": "http://one.example", "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
+        {"url": "http://two.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False}},
+        {"url": "http://three.example", "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True}},
+    ]
+
+    with patch(
+        "open_webui.routers.configs.get_user_mcp_server_connections",
+        return_value=connections,
+    ):
+        result = asyncio.run(get_mcp_apps_config(request, user))
+
+    assert result == {
+        "ENABLE_MCP_APPS": True,
+        "MCP_SERVER_APPS": {
+            "0": True,
+            "1": False,
+            "2": False,
+        },
+    }
+
+
+def test_verify_mcp_server_connection_uses_session_token_for_session_auth():
+    from open_webui.routers.configs import MCPServerConnection, verify_mcp_server_connection
+
+    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="sess-token")))
+    user = SimpleNamespace(id="user-1")
+    captured = {}
+
+    async def fake_get_mcp_server_data(connection, *, session_token=None, **_kwargs):
+        captured["connection"] = connection
+        captured["session_token"] = session_token
+        return {
+            "server_info": {"name": "Session-backed"},
+            "tools": [{"name": "echo", "description": "Echo"}],
+        }
+
+    with patch("open_webui.routers.configs.get_mcp_server_data", side_effect=fake_get_mcp_server_data):
+        result = asyncio.run(
+            verify_mcp_server_connection(
+                request,
+                MCPServerConnection(url="http://mcp.local", auth_type="session"),
+                user,
+            )
+        )
+
+    assert captured["session_token"] == "sess-token"
+    assert captured["connection"]["auth_type"] == "session"
+    assert result == {
+        "server_info": {"name": "Session-backed"},
+        "tool_count": 1,
+        "tools": [{"name": "echo", "description": "Echo"}],
+    }
+
+
+def test_get_mcp_apps_capabilities_exposes_stable_frontend_contract():
+    from open_webui.routers.configs import get_mcp_apps_capabilities
+
+    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc")))
+    user = SimpleNamespace(id="user-1")
+    connections = [
+        {
+            "url": "http://one.example",
+            "name": "One",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
+        {
+            "url": "http://two.example",
+            "config": {"enable": False},
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
+    ]
+    server_data = [
+        {
+            "idx": 0,
+            "server_info": {"name": "Server One"},
+            "capabilities": {"resources": {}, "prompts": {}},
+            "tools": [{"name": "lookup"}, {"name": "preview"}],
+            "prompts": [{"name": "Assist"}],
+            "resources": [
+                {
+                    "tool_name": "lookup",
+                    "id": "resource-1",
+                    "render_url": "https://apps.example/render/1",
+                    "mime_type": "text/html",
+                    "metadata": {"tool_call_id": "call_1"},
+                }
+            ],
+        }
+    ]
+
+    with patch(
+        "open_webui.routers.configs.get_user_mcp_server_connections",
+        return_value=connections,
+    ), patch("open_webui.routers.configs.get_mcp_servers_data", return_value=server_data):
+        result = asyncio.run(get_mcp_apps_capabilities(request, user))
+
+    assert result["ENABLE_MCP_APPS"] is True
+    assert result["servers"][0]["idx"] == 0
+    assert result["servers"][0]["apps_enabled"] is True
+    assert result["servers"][0]["resources"] == [
+        {
+            "server_idx": 0,
+            "tool_name": "lookup",
+            "app_id": "resource-1",
+            "render_url": "https://apps.example/render/1",
+            "resource_type": "resource",
+            "title": None,
+            "mime_type": "text/html",
+            "content": None,
+            "content_url": None,
+            "metadata": {"tool_call_id": "call_1"},
+        }
+    ]
+    assert result["servers"][0]["metadata"] == {
+        "tool_count": 2,
+        "tool_names": ["lookup", "preview"],
+    }
+    assert result["servers"][1]["idx"] == 1
+    assert result["servers"][1]["enabled"] is False
+    assert result["servers"][1]["apps_enabled"] is True
+    assert result["servers"][1]["resources"] == []
+
+
+def test_get_mcp_server_data_fetches_resources_and_prompts_when_advertised():
+    from open_webui.utils.mcp import get_mcp_server_data
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs):
+            self.calls = []
+
+        async def initialize(self):
+            self.calls.append("initialize")
+            return {
+                "serverInfo": {"name": "TestMCP"},
+                "capabilities": {"tools": {}, "prompts": {}, "resources": {}},
+            }
+
+        async def notify_initialized(self):
+            self.calls.append("notify_initialized")
+
+        async def list_tools(self):
+            self.calls.append("list_tools")
+            return [{"name": "echo"}]
+
+        async def list_prompts(self):
+            self.calls.append("list_prompts")
+            return [{"name": "assist"}]
+
+        async def list_resources(self):
+            self.calls.append("list_resources")
+            return [{"id": "res-1", "render_url": "https://apps.example/render/1"}]
+
+    fake_client = FakeClient()
+
+    with patch("open_webui.utils.mcp.MCPStreamableHttpClient", return_value=fake_client):
+        result = asyncio.run(get_mcp_server_data({"url": "http://mcp.local"}))
+
+    assert fake_client.calls == [
+        "initialize",
+        "notify_initialized",
+        "list_tools",
+        "list_prompts",
+        "list_resources",
+    ]
+    assert result == {
+        "server_info": {"name": "TestMCP"},
+        "capabilities": {"tools": {}, "prompts": {}, "resources": {}},
+        "tools": [{"name": "echo"}],
+        "prompts": [{"name": "assist"}],
+        "resources": [{"id": "res-1", "render_url": "https://apps.example/render/1"}],
+    }
 

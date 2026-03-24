@@ -128,7 +128,10 @@ class MCPServerData:
     idx: int
     url: str
     server_info: Dict[str, Any]
+    capabilities: Dict[str, Any]
     tools: List[Dict[str, Any]]
+    prompts: List[Dict[str, Any]]
+    resources: List[Dict[str, Any]]
 
 
 class MCPStreamableHttpClient:
@@ -246,6 +249,34 @@ class MCPStreamableHttpClient:
                 break
         return tools
 
+    async def _list_paginated(self, method: str, key: str) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        cursor: Optional[str] = None
+        while True:
+            request_id = str(uuid4())
+            payload = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": {"cursor": cursor} if cursor else {},
+            }
+            msg, _ = await self._post_jsonrpc(payload)
+            if "error" in msg:
+                raise RuntimeError(msg["error"])
+
+            result = msg.get("result", {}) or {}
+            items.extend(result.get(key, []) or [])
+            cursor = result.get("nextCursor")
+            if not cursor:
+                break
+        return items
+
+    async def list_prompts(self) -> List[Dict[str, Any]]:
+        return await self._list_paginated("prompts/list", "prompts")
+
+    async def list_resources(self) -> List[Dict[str, Any]]:
+        return await self._list_paginated("resources/list", "resources")
+
     async def call_tool(
         self,
         name: str,
@@ -287,11 +318,28 @@ async def get_mcp_server_data(
     init_result = await client.initialize()
     await client.notify_initialized()
     tools = await client.list_tools()
+    prompts = []
+    resources = []
+    capabilities = init_result.get("capabilities", {}) or {}
+
+    if isinstance(capabilities, dict):
+        try:
+            if "prompts" in capabilities:
+                prompts = await client.list_prompts()
+        except Exception:
+            prompts = []
+        try:
+            if "resources" in capabilities:
+                resources = await client.list_resources()
+        except Exception:
+            resources = []
 
     return {
         "server_info": init_result.get("serverInfo", {}) or {},
-        "capabilities": init_result.get("capabilities", {}) or {},
+        "capabilities": capabilities,
         "tools": tools,
+        "prompts": prompts,
+        "resources": resources,
     }
 
 
@@ -326,6 +374,8 @@ async def get_mcp_servers_data(
                 "server_info": response.get("server_info", {}) or {},
                 "capabilities": response.get("capabilities", {}) or {},
                 "tools": response.get("tools", []) or [],
+                "prompts": response.get("prompts", []) or [],
+                "resources": response.get("resources", []) or [],
             }
         )
 

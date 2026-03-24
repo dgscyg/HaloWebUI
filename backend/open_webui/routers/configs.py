@@ -289,8 +289,38 @@ class MCPServerConnection(BaseModel):
 
 class MCPAppsConfigForm(BaseModel):
     ENABLE_MCP_APPS: bool = False
+    MCP_SERVER_APPS: dict[str, bool] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="allow")
+
+
+class MCPAppsResourceResponse(BaseModel):
+    server_idx: int
+    tool_name: Optional[str] = None
+    app_id: str
+    render_url: str
+    resource_type: str = "resource"
+    title: Optional[str] = None
+    mime_type: Optional[str] = None
+    content: Optional[str] = None
+    content_url: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class MCPAppsServerCapabilities(BaseModel):
+    idx: int
+    enabled: bool
+    apps_enabled: bool
+    server: dict = Field(default_factory=dict)
+    capabilities: dict = Field(default_factory=dict)
+    resources: list[MCPAppsResourceResponse] = Field(default_factory=list)
+    prompts: list[dict] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+
+class MCPAppsCapabilitiesResponse(BaseModel):
+    ENABLE_MCP_APPS: bool = False
+    servers: list[MCPAppsServerCapabilities] = Field(default_factory=list)
 
 
 class MCPServersConfigForm(BaseModel):
@@ -359,11 +389,20 @@ async def verify_mcp_server_connection(
 @router.get("/mcp_servers/apps", response_model=MCPAppsConfigForm)
 async def get_mcp_apps_config(request: Request, user=Depends(get_verified_user)):
     connections = get_user_mcp_server_connections(request, user)
-    enabled = any(
-        bool((connection.get(MCP_APPS_KEY) or {}).get(MCP_APPS_GLOBAL_ENABLE_KEY, False))
-        for connection in connections
-    )
-    return {MCP_APPS_GLOBAL_ENABLE_KEY: enabled}
+    server_apps = {}
+    enabled = False
+    for idx, connection in enumerate(connections):
+        apps_cfg = connection.get(MCP_APPS_KEY) or {}
+        server_enabled = bool(apps_cfg.get(MCP_APPS_SERVER_ENABLE_KEY, True))
+        apps_enabled = bool(
+            apps_cfg.get(MCP_APPS_GLOBAL_ENABLE_KEY, False) and server_enabled
+        )
+        server_apps[str(idx)] = apps_enabled
+        enabled = enabled or apps_enabled
+    return {
+        MCP_APPS_GLOBAL_ENABLE_KEY: enabled,
+        "MCP_SERVER_APPS": server_apps,
+    }
 
 
 @router.post("/mcp_servers/apps", response_model=MCPAppsConfigForm)
@@ -386,7 +425,100 @@ async def set_mcp_apps_config(
 
     set_user_mcp_server_connections(user, updated_connections)
 
-    return {MCP_APPS_GLOBAL_ENABLE_KEY: form_data.ENABLE_MCP_APPS}
+    server_apps = {
+        str(idx): bool(
+            (connection.get(MCP_APPS_KEY) or {}).get(MCP_APPS_GLOBAL_ENABLE_KEY, False)
+            and (connection.get(MCP_APPS_KEY) or {}).get(MCP_APPS_SERVER_ENABLE_KEY, True)
+        )
+        for idx, connection in enumerate(updated_connections)
+    }
+
+    return {
+        MCP_APPS_GLOBAL_ENABLE_KEY: form_data.ENABLE_MCP_APPS,
+        "MCP_SERVER_APPS": server_apps,
+    }
+
+
+@router.get("/mcp_servers/apps/capabilities", response_model=MCPAppsCapabilitiesResponse)
+async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_user)):
+    connections = get_user_mcp_server_connections(request, user)
+    session_token = getattr(request.state.token, "credentials", None)
+    servers_data = await get_mcp_servers_data(
+        connections,
+        session_token=session_token,
+    )
+
+    server_map = {server.get("idx"): server for server in servers_data}
+    response_servers = []
+    global_enabled = False
+
+    for idx, connection in enumerate(connections):
+        apps_cfg = dict(connection.get(MCP_APPS_KEY) or {})
+        server_enabled = bool(apps_cfg.get(MCP_APPS_SERVER_ENABLE_KEY, True))
+        apps_enabled = bool(
+            apps_cfg.get(MCP_APPS_GLOBAL_ENABLE_KEY, False) and server_enabled
+        )
+        global_enabled = global_enabled or apps_enabled
+
+        data = server_map.get(idx, {})
+        resources = [
+            {
+                "server_idx": idx,
+                "tool_name": resource.get("tool_name"),
+                "app_id": resource.get("app_id")
+                or resource.get("id")
+                or f"mcp-app:{idx}:{resource_idx}",
+                "render_url": resource.get("render_url")
+                or resource.get("url")
+                or "",
+                "resource_type": resource.get("resource_type")
+                or resource.get("type")
+                or "resource",
+                "title": resource.get("title"),
+                "mime_type": resource.get("mime_type"),
+                "content": resource.get("content"),
+                "content_url": resource.get("content_url"),
+                "metadata": dict(resource.get("metadata") or {}),
+            }
+            for resource_idx, resource in enumerate(data.get("resources", []) or [])
+            if isinstance(resource, dict)
+        ]
+
+        response_servers.append(
+            {
+                "idx": idx,
+                "enabled": bool(connection.get("enabled", True))
+                if "enabled" in connection
+                else bool((connection.get("config") or {}).get("enable", True)),
+                "apps_enabled": apps_enabled,
+                "server": {
+                    "name": connection.get("name")
+                    or (data.get("server_info") or {}).get("name"),
+                    "url": connection.get("url"),
+                    "description": connection.get("description"),
+                },
+                "capabilities": dict(data.get("capabilities") or {}),
+                "resources": resources,
+                "prompts": [
+                    prompt
+                    for prompt in (data.get("prompts", []) or [])
+                    if isinstance(prompt, dict)
+                ],
+                "metadata": {
+                    "tool_count": len(data.get("tools", []) or []),
+                    "tool_names": [
+                        tool.get("name")
+                        for tool in (data.get("tools", []) or [])
+                        if isinstance(tool, dict) and tool.get("name")
+                    ],
+                },
+            }
+        )
+
+    return {
+        MCP_APPS_GLOBAL_ENABLE_KEY: global_enabled,
+        "servers": response_servers,
+    }
 
 
 ############################
