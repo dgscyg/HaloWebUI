@@ -258,7 +258,11 @@ def normalize_mcp_server_connection(connection: Any) -> dict:
         )
         normalized[MCP_APPS_KEY] = mcp_apps
 
-    if "enabled" in normalized and MCP_APPS_SERVER_ENABLE_KEY not in mcp_apps:
+    if (
+        "enabled" in normalized
+        and MCP_APPS_SERVER_ENABLE_KEY not in mcp_apps
+        and "apps_enabled" not in normalized
+    ):
         mcp_apps[MCP_APPS_SERVER_ENABLE_KEY] = _as_bool(
             normalized["enabled"], default=True
         )

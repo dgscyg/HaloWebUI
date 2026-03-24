@@ -215,9 +215,28 @@ def test_get_user_mcp_connections_normalize_apps_metadata():
             "url": "http://legacy.example",
             "enabled": False,
             "apps_enabled": "true",
-            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+            "mcp_apps": {"ENABLE_MCP_APPS": True},
         }
     ]
+
+
+def test_normalize_mcp_server_connection_preserves_legacy_apps_enabled_independent_from_base_enabled():
+    from open_webui.utils.user_tools import normalize_mcp_server_connection
+
+    connection = normalize_mcp_server_connection(
+        {
+            "url": "http://legacy.example",
+            "enabled": False,
+            "apps_enabled": True,
+        }
+    )
+
+    assert connection == {
+        "url": "http://legacy.example",
+        "enabled": False,
+        "apps_enabled": True,
+        "mcp_apps": {"ENABLE_MCP_APPS": True},
+    }
 
 
 def test_set_mcp_servers_config_preserves_legacy_enabled_and_apps_state():
@@ -254,6 +273,46 @@ def test_set_mcp_servers_config_preserves_legacy_enabled_and_apps_state():
         ]
     }
     assert saved["connections"] == result["MCP_SERVER_CONNECTIONS"]
+
+
+def test_set_mcp_servers_config_preserves_legacy_apps_enabled_without_collapsing_to_base_enabled():
+    from open_webui.routers.configs import MCPServerConnection, MCPServersConfigForm, set_mcp_servers_config
+
+    user = SimpleNamespace(id="user-1")
+    request = SimpleNamespace()
+
+    saved = {}
+
+    with patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter:
+        setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+        form = MCPServersConfigForm(
+            MCP_SERVER_CONNECTIONS=[
+                MCPServerConnection(
+                    url="http://legacy.example",
+                    enabled=False,
+                    apps_enabled=True,
+                )
+            ]
+        )
+
+        result = asyncio.run(set_mcp_servers_config(request, form, user))
+
+    assert result == {
+        "MCP_SERVER_CONNECTIONS": [
+            {
+                "url": "http://legacy.example",
+                "enabled": False,
+                "apps_enabled": True,
+            }
+        ]
+    }
+    assert saved["connections"] == [
+        {
+            "url": "http://legacy.example",
+            "enabled": False,
+            "apps_enabled": True,
+        }
+    ]
 
 
 def test_set_mcp_apps_config_updates_apps_flag_without_mutating_enabled_semantics():
@@ -301,6 +360,48 @@ def test_set_mcp_apps_config_updates_apps_flag_without_mutating_enabled_semantic
             "config": {"enable": True},
             "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
         },
+    ]
+
+
+def test_set_mcp_apps_config_preserves_legacy_apps_enabled_round_trip_when_base_disabled():
+    from open_webui.routers.configs import MCPAppsConfigForm, set_mcp_apps_config
+
+    user = SimpleNamespace(id="user-1")
+    request = SimpleNamespace()
+    existing_connections = [
+        {"url": "http://legacy.example", "enabled": False, "apps_enabled": True},
+    ]
+    saved = {}
+
+    with patch(
+        "open_webui.routers.configs.get_user_mcp_server_connections",
+        return_value=existing_connections,
+    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter:
+        setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+        result = asyncio.run(
+            set_mcp_apps_config(
+                request,
+                MCPAppsConfigForm(
+                    ENABLE_MCP_APPS=True,
+                    MCP_SERVER_APPS={"0": True},
+                ),
+                user,
+            )
+        )
+
+    assert result == {
+        "ENABLE_MCP_APPS": True,
+        "MCP_SERVER_APPS": {
+            "0": True,
+        },
+    }
+    assert saved["connections"] == [
+        {
+            "url": "http://legacy.example",
+            "enabled": False,
+            "apps_enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        }
     ]
 
 
