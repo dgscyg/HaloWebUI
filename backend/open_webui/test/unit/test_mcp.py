@@ -539,6 +539,51 @@ def test_get_mcp_apps_capabilities_preserves_disabled_server_index_without_leaki
     assert result["servers"][1]["metadata"] == {"tool_count": 0, "tool_names": []}
 
 
+def test_get_mcp_apps_capabilities_blanks_prompt_and_tool_metadata_for_disabled_base_connection():
+    from open_webui.routers.configs import get_mcp_apps_capabilities
+
+    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc")))
+    user = SimpleNamespace(id="user-1")
+    connections = [
+        {"url": "http://one.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
+        {"url": "http://two.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
+    ]
+    server_data = [
+        {
+            "idx": 0,
+            "server_info": {"name": "Server One"},
+            "capabilities": {"resources": {}, "prompts": {}},
+            "tools": [{"name": "lookup"}],
+            "prompts": [{"name": "assist"}],
+            "resources": [{"id": "resource-1", "render_url": "https://apps.example/render/1"}],
+        },
+        {
+            "idx": 1,
+            "server_info": {"name": "Server Two"},
+            "capabilities": {"resources": {}, "prompts": {}},
+            "tools": [{"name": "should-not-leak"}],
+            "prompts": [{"name": "hidden"}],
+            "resources": [{"id": "resource-2", "render_url": "https://apps.example/render/2"}],
+        },
+    ]
+
+    with patch(
+        "open_webui.routers.configs.get_user_mcp_server_connections",
+        return_value=connections,
+    ), patch("open_webui.routers.configs.get_mcp_servers_data", return_value=server_data):
+        result = asyncio.run(get_mcp_apps_capabilities(request, user))
+
+    assert [server["idx"] for server in result["servers"]] == [0, 1]
+    assert result["servers"][0]["prompts"] == [{"name": "assist"}]
+    assert result["servers"][0]["metadata"] == {"tool_count": 1, "tool_names": ["lookup"]}
+    assert result["servers"][1]["enabled"] is False
+    assert result["servers"][1]["apps_enabled"] is False
+    assert result["servers"][1]["capabilities"] == {}
+    assert result["servers"][1]["prompts"] == []
+    assert result["servers"][1]["resources"] == []
+    assert result["servers"][1]["metadata"] == {"tool_count": 0, "tool_names": []}
+
+
 def test_get_mcp_server_data_fetches_resources_and_prompts_when_advertised():
     from open_webui.utils.mcp import get_mcp_server_data
 

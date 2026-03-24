@@ -481,28 +481,45 @@ async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_
         global_enabled = global_enabled or apps_global_enabled
 
         data = server_map.get(idx, {})
-        resources = [
-            {
-                "server_idx": idx,
-                "tool_name": resource.get("tool_name"),
-                "app_id": resource.get("app_id")
-                or resource.get("id")
-                or f"mcp-app:{idx}:{resource_idx}",
-                "render_url": resource.get("render_url")
-                or resource.get("url")
-                or "",
-                "resource_type": resource.get("resource_type")
-                or resource.get("type")
-                or "resource",
-                "title": resource.get("title"),
-                "mime_type": resource.get("mime_type"),
-                "content": resource.get("content"),
-                "content_url": resource.get("content_url"),
-                "metadata": dict(resource.get("metadata") or {}),
+        capabilities = dict(data.get("capabilities") or {}) if apps_enabled else {}
+        resources = []
+        prompts = []
+        metadata = {"tool_count": 0, "tool_names": []}
+
+        if apps_enabled:
+            resources = [
+                {
+                    "server_idx": idx,
+                    "tool_name": resource.get("tool_name"),
+                    "app_id": resource.get("app_id")
+                    or resource.get("id")
+                    or f"mcp-app:{idx}:{resource_idx}",
+                    "render_url": resource.get("render_url")
+                    or resource.get("url")
+                    or "",
+                    "resource_type": resource.get("resource_type")
+                    or resource.get("type")
+                    or "resource",
+                    "title": resource.get("title"),
+                    "mime_type": resource.get("mime_type"),
+                    "content": resource.get("content"),
+                    "content_url": resource.get("content_url"),
+                    "metadata": dict(resource.get("metadata") or {}),
+                }
+                for resource_idx, resource in enumerate(data.get("resources", []) or [])
+                if isinstance(resource, dict)
+            ]
+            prompts = [
+                prompt for prompt in (data.get("prompts", []) or []) if isinstance(prompt, dict)
+            ]
+            metadata = {
+                "tool_count": len(data.get("tools", []) or []),
+                "tool_names": [
+                    tool.get("name")
+                    for tool in (data.get("tools", []) or [])
+                    if isinstance(tool, dict) and tool.get("name")
+                ],
             }
-            for resource_idx, resource in enumerate(data.get("resources", []) or [])
-            if isinstance(resource, dict)
-        ]
 
         response_servers.append(
             {
@@ -515,21 +532,10 @@ async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_
                     "url": connection.get("url"),
                     "description": connection.get("description"),
                 },
-                "capabilities": dict(data.get("capabilities") or {}),
+                "capabilities": capabilities,
                 "resources": resources,
-                "prompts": [
-                    prompt
-                    for prompt in (data.get("prompts", []) or [])
-                    if isinstance(prompt, dict)
-                ],
-                "metadata": {
-                    "tool_count": len(data.get("tools", []) or []),
-                    "tool_names": [
-                        tool.get("name")
-                        for tool in (data.get("tools", []) or [])
-                        if isinstance(tool, dict) and tool.get("name")
-                    ],
-                },
+                "prompts": prompts,
+                "metadata": metadata,
             }
         )
 
