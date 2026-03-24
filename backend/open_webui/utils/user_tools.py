@@ -35,6 +35,9 @@ TOOLS_KEY = "tools"
 NATIVE_TOOLS_KEY = "native_tools"
 TOOL_SERVER_CONNECTIONS_KEY = "tool_server_connections"
 MCP_SERVER_CONNECTIONS_KEY = "mcp_server_connections"
+MCP_APPS_KEY = "mcp_apps"
+MCP_APPS_GLOBAL_ENABLE_KEY = "ENABLE_MCP_APPS"
+MCP_APPS_SERVER_ENABLE_KEY = "enabled"
 TOOL_CALLING_MODE_KEY = "TOOL_CALLING_MODE"
 TOOL_CALLING_MODE_DEFAULT = "default"
 TOOL_CALLING_MODE_NATIVE = "native"
@@ -83,6 +86,20 @@ def _as_dict(v: Any) -> dict:
 
 def _as_list(v: Any) -> list:
     return v if isinstance(v, list) else []
+
+
+def _as_bool(v: Any, default: bool = False) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        normalized = v.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    if v is None:
+        return default
+    return bool(v)
 
 
 def _get_settings_dict(user: Optional[UserModel]) -> dict:
@@ -184,7 +201,7 @@ def set_user_tool_server_connections(user: UserModel, connections: list[dict]) -
 def get_user_mcp_server_connections(request, user: Optional[UserModel]) -> list[dict]:
     tools = _get_tools_settings(user)
     if MCP_SERVER_CONNECTIONS_KEY in tools:
-        return _as_list(tools.get(MCP_SERVER_CONNECTIONS_KEY))
+        return normalize_mcp_server_connections(_as_list(tools.get(MCP_SERVER_CONNECTIONS_KEY)))
 
     # Admin migration fallback (read-only)
     if user and getattr(user, "role", None) == "admin":
@@ -193,13 +210,69 @@ def get_user_mcp_server_connections(request, user: Optional[UserModel]) -> list[
         legacy = getattr(cfg, "MCP_SERVER_CONNECTIONS", None) if cfg is not None else None
         legacy = legacy if isinstance(legacy, list) else []
         if legacy:
-            return deepcopy(legacy)
+            return normalize_mcp_server_connections(deepcopy(legacy))
 
     return []
 
 
 def set_user_mcp_server_connections(user: UserModel, connections: list[dict]) -> Optional[UserModel]:
-    return _update_tools_settings(user.id, {MCP_SERVER_CONNECTIONS_KEY: connections})
+    return _update_tools_settings(
+        user.id, {MCP_SERVER_CONNECTIONS_KEY: normalize_mcp_server_connections(connections)}
+    )
+
+
+def normalize_mcp_apps_config(value: Any) -> dict:
+    cfg = deepcopy(_as_dict(value))
+
+    if "enable" in cfg and MCP_APPS_GLOBAL_ENABLE_KEY not in cfg:
+        cfg[MCP_APPS_GLOBAL_ENABLE_KEY] = _as_bool(cfg.pop("enable"), default=False)
+
+    if MCP_APPS_GLOBAL_ENABLE_KEY in cfg:
+        cfg[MCP_APPS_GLOBAL_ENABLE_KEY] = _as_bool(
+            cfg.get(MCP_APPS_GLOBAL_ENABLE_KEY), default=False
+        )
+
+    return cfg
+
+
+def normalize_mcp_server_connection(connection: Any) -> dict:
+    normalized = deepcopy(_as_dict(connection))
+
+    config = deepcopy(_as_dict(normalized.get("config")))
+    if config:
+        normalized["config"] = config
+
+    mcp_apps = normalize_mcp_apps_config(normalized.get(MCP_APPS_KEY))
+    if not mcp_apps and isinstance(config.get(MCP_APPS_KEY), dict):
+        mcp_apps = normalize_mcp_apps_config(config.get(MCP_APPS_KEY))
+
+    if mcp_apps:
+        normalized[MCP_APPS_KEY] = mcp_apps
+
+    if (
+        "apps_enabled" in normalized
+        and MCP_APPS_GLOBAL_ENABLE_KEY not in mcp_apps
+    ):
+        mcp_apps[MCP_APPS_GLOBAL_ENABLE_KEY] = _as_bool(
+            normalized["apps_enabled"], default=False
+        )
+        normalized[MCP_APPS_KEY] = mcp_apps
+
+    if "enabled" in normalized and MCP_APPS_SERVER_ENABLE_KEY not in mcp_apps:
+        mcp_apps[MCP_APPS_SERVER_ENABLE_KEY] = _as_bool(
+            normalized["enabled"], default=True
+        )
+        normalized[MCP_APPS_KEY] = mcp_apps
+
+    return normalized
+
+
+def normalize_mcp_server_connections(connections: Any) -> list[dict]:
+    return [
+        normalize_mcp_server_connection(connection)
+        for connection in _as_list(connections)
+        if isinstance(connection, dict)
+    ]
 
 
 def _native_defaults_from_global(request) -> dict:

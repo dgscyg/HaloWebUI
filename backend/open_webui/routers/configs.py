@@ -11,6 +11,9 @@ from open_webui.config import BannerModel
 from open_webui.utils.tools import get_tool_server_data, get_tool_servers_data
 from open_webui.utils.mcp import get_mcp_server_data, get_mcp_servers_data
 from open_webui.utils.user_tools import (
+    MCP_APPS_GLOBAL_ENABLE_KEY,
+    MCP_APPS_KEY,
+    MCP_APPS_SERVER_ENABLE_KEY,
     MAX_TOOL_CALL_ROUNDS_DEFAULT,
     MAX_TOOL_CALL_ROUNDS_MAX,
     MAX_TOOL_CALL_ROUNDS_MIN,
@@ -279,6 +282,13 @@ class MCPServerConnection(BaseModel):
     config: Optional[dict] = None
     server_info: Optional[dict] = None
     tool_count: Optional[int] = None
+    mcp_apps: Optional[dict] = Field(default=None, alias=MCP_APPS_KEY)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class MCPAppsConfigForm(BaseModel):
+    ENABLE_MCP_APPS: bool = False
 
     model_config = ConfigDict(extra="allow")
 
@@ -299,7 +309,8 @@ async def set_mcp_servers_config(
     request: Request, form_data: MCPServersConfigForm, user=Depends(get_verified_user)
 ):
     connections = [
-        connection.model_dump() for connection in form_data.MCP_SERVER_CONNECTIONS
+        connection.model_dump(by_alias=True, exclude_none=True)
+        for connection in form_data.MCP_SERVER_CONNECTIONS
     ]
 
     set_user_mcp_server_connections(user, connections)
@@ -322,7 +333,7 @@ async def verify_mcp_server_connection(
             token = request.state.token.credentials
 
         data = await get_mcp_server_data(
-            form_data.model_dump(),
+            form_data.model_dump(by_alias=True, exclude_none=True),
             session_token=token,
         )
 
@@ -343,6 +354,39 @@ async def verify_mcp_server_connection(
             status_code=400,
             detail=f"Failed to connect to the MCP server: {str(e)}",
         )
+
+
+@router.get("/mcp_servers/apps", response_model=MCPAppsConfigForm)
+async def get_mcp_apps_config(request: Request, user=Depends(get_verified_user)):
+    connections = get_user_mcp_server_connections(request, user)
+    enabled = any(
+        bool((connection.get(MCP_APPS_KEY) or {}).get(MCP_APPS_GLOBAL_ENABLE_KEY, False))
+        for connection in connections
+    )
+    return {MCP_APPS_GLOBAL_ENABLE_KEY: enabled}
+
+
+@router.post("/mcp_servers/apps", response_model=MCPAppsConfigForm)
+async def set_mcp_apps_config(
+    request: Request,
+    form_data: MCPAppsConfigForm,
+    user=Depends(get_verified_user),
+):
+    connections = get_user_mcp_server_connections(request, user)
+    updated_connections = []
+
+    for connection in connections:
+        updated = dict(connection)
+        apps_cfg = dict(updated.get(MCP_APPS_KEY) or {})
+        apps_cfg[MCP_APPS_GLOBAL_ENABLE_KEY] = form_data.ENABLE_MCP_APPS
+        if "enabled" in updated and MCP_APPS_SERVER_ENABLE_KEY not in apps_cfg:
+            apps_cfg[MCP_APPS_SERVER_ENABLE_KEY] = bool(updated.get("enabled"))
+        updated[MCP_APPS_KEY] = apps_cfg
+        updated_connections.append(updated)
+
+    set_user_mcp_server_connections(user, updated_connections)
+
+    return {MCP_APPS_GLOBAL_ENABLE_KEY: form_data.ENABLE_MCP_APPS}
 
 
 ############################

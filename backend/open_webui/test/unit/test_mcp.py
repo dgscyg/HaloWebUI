@@ -3,6 +3,7 @@ import json
 import pathlib
 import sys
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 # Ensure `open_webui` is importable when running tests from repo root.
@@ -185,4 +186,107 @@ def test_get_tools_exposes_mcp_tool_and_routes_call(monkeypatch):
     assert called["name"] == "foo/bar"
     assert called["arguments"] == {"a": "x"}
     assert called["session_token"] == "tok_abc"
+
+
+def test_get_user_mcp_connections_normalize_apps_metadata():
+    from open_webui.utils.user_tools import get_user_mcp_server_connections
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                config=SimpleNamespace(
+                    MCP_SERVER_CONNECTIONS=[
+                        {
+                            "url": "http://legacy.example",
+                            "enabled": False,
+                            "apps_enabled": "true",
+                        }
+                    ]
+                )
+            )
+        )
+    )
+    user = SimpleNamespace(role="admin", settings=None)
+
+    connections = get_user_mcp_server_connections(request, user)
+
+    assert connections == [
+        {
+            "url": "http://legacy.example",
+            "enabled": False,
+            "apps_enabled": "true",
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+        }
+    ]
+
+
+def test_set_mcp_servers_config_preserves_legacy_enabled_and_apps_state():
+    from open_webui.routers.configs import MCPServerConnection, MCPServersConfigForm, set_mcp_servers_config
+
+    user = SimpleNamespace(id="user-1")
+    request = SimpleNamespace()
+
+    saved = {}
+
+    with patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter:
+        setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+        form = MCPServersConfigForm(
+            MCP_SERVER_CONNECTIONS=[
+                MCPServerConnection(
+                    url="http://mcp.local",
+                    enabled=False,
+                    mcp_apps={"ENABLE_MCP_APPS": True, "enabled": False},
+                    server_info={"name": "Kept"},
+                )
+            ]
+        )
+
+        result = asyncio.run(set_mcp_servers_config(request, form, user))
+
+    assert result == {
+        "MCP_SERVER_CONNECTIONS": [
+            {
+                "url": "http://mcp.local",
+                "enabled": False,
+                "server_info": {"name": "Kept"},
+                "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+            }
+        ]
+    }
+    assert saved["connections"] == result["MCP_SERVER_CONNECTIONS"]
+
+
+def test_set_mcp_apps_config_updates_apps_flag_without_mutating_enabled_semantics():
+    from open_webui.routers.configs import MCPAppsConfigForm, set_mcp_apps_config
+
+    user = SimpleNamespace(id="user-1")
+    request = SimpleNamespace()
+    existing_connections = [
+        {"url": "http://one.example", "enabled": False},
+        {"url": "http://two.example", "config": {"enable": True}, "mcp_apps": {"enabled": True}},
+    ]
+    saved = {}
+
+    with patch(
+        "open_webui.routers.configs.get_user_mcp_server_connections",
+        return_value=existing_connections,
+    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter:
+        setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+        result = asyncio.run(
+            set_mcp_apps_config(request, MCPAppsConfigForm(ENABLE_MCP_APPS=True), user)
+        )
+
+    assert result == {"ENABLE_MCP_APPS": True}
+    assert saved["connections"] == [
+        {
+            "url": "http://one.example",
+            "enabled": False,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+        },
+        {
+            "url": "http://two.example",
+            "config": {"enable": True},
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
+    ]
 
