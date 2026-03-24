@@ -1,0 +1,73 @@
+{
+  "milestone": "guest-mode",
+  "round": 3,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "source /home/dragon/.nvm/nvm.sh && nvm use 22 >/dev/null && cd /data/other/HaloWebUI && npx vitest run && cd /data/other/HaloWebUI/backend && ../.venv/bin/python -m pytest open_webui/test/unit/test_mcp.py -q",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "source /home/dragon/.nvm/nvm.sh && nvm use 22 >/dev/null && cd /data/other/HaloWebUI && (npm run check > /tmp/halo-mission-typecheck.out 2>&1 || true) && python3 -c \"from pathlib import Path; import sys; targets=['src/routes/auth/+page.svelte','src/routes/+layout.svelte','src/lib/apis/auths/index.ts','src/lib/apis/auths/index.test.ts','src/routes/auth/guest-flow.test.ts','src/lib/components/layout/Sidebar/UserMenu.svelte','src/lib/components/layout/Overlay/AccountPending.svelte','backend/open_webui/routers/auths.py','backend/open_webui/config.py','backend/open_webui/main.py']; output=Path('/tmp/halo-mission-typecheck.out').read_text(); hits=[line for line in output.splitlines() if any(t in line for t in targets)]; print('\\n'.join(hits)) if hits else print('Scoped mission typecheck passed for currently touched guest-mode files.'); sys.exit(1 if hits else 0)\"",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "source /home/dragon/.nvm/nvm.sh && nvm use 22 >/dev/null && cd /data/other/HaloWebUI && npx prettier --check \"src/lib/apis/auths/index.ts\" \"src/lib/apis/auths/index.test.ts\" \"src/routes/auth/+page.svelte\" \"src/routes/auth/guest-flow.test.ts\" \"src/routes/+layout.svelte\" \"src/lib/components/layout/Sidebar/UserMenu.svelte\" \"src/lib/components/layout/Overlay/AccountPending.svelte\" && ./.venv/bin/python -m py_compile backend/open_webui/routers/auths.py backend/open_webui/config.py backend/open_webui/main.py",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 6,
+    "passed": 4,
+    "failed": 2,
+    "failedFeatures": [
+      "guest-mode-frontend-entry-and-session-bootstrap",
+      "guest-mode-scoped-diagnostics-cleanup"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "guest-mode-frontend-entry-and-session-bootstrap",
+      "severity": "blocking",
+      "description": "The added portable guest-flow test file still reimplements decision helpers locally instead of exercising the real Svelte auth/bootstrap implementation, so it does not prove the shipped `/auth` and root-layout guest flow cannot regress."
+    },
+    {
+      "featureId": "guest-mode-frontend-entry-and-session-bootstrap",
+      "severity": "blocking",
+      "description": "Reviewed evidence still does not demonstrate the enabled guest success path entering the signed-in shell and surviving reload; only blocked fallback behavior is directly evidenced, leaving VAL-GUEST-001/003/005 insufficiently proven."
+    },
+    {
+      "featureId": "guest-mode-scoped-diagnostics-cleanup",
+      "severity": "blocking",
+      "description": "The reviewed feature does not actually implement the promised scoped diagnostics cleanup: the cited diff only changes `src/routes/auth/guest-flow.test.ts`, while the feature contract targets guest-mode frontend/backend implementation files and the validator contract in `.factory/services.yaml`."
+    },
+    {
+      "featureId": "guest-mode-scoped-diagnostics-cleanup",
+      "severity": "blocking",
+      "description": "The handoff for the diagnostics-cleanup feature relied on an ad-hoc narrowed pylint invocation that still exited non-zero instead of proving the declared mission-scoped lint contract; this leaves the feature's claimed validator-cleanup outcome unsupported."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Clarify in `auth-fullstack-worker` that helper-only guest-flow tests are not sufficient evidence for auth/bootstrap features; workers must either exercise the real UI/bootstrap implementation or explicitly document why success-path proof is impossible and what substitute evidence closes the gap.",
+      "evidence": "The failing review for `guest-mode-frontend-entry-and-session-bootstrap` found that the worker followed the existing procedure but still shipped local helper tests and blocked-path-only manual evidence, leaving the actual success path unproven.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "The fixed-port Postgres and ModuleNotFoundError limitations of the legacy auth integration harness should be documented in library guidance.",
+      "reason": "already-documented"
+    },
+    {
+      "observation": "The services manifest is out of sync because a worker chose to run a different backend lint inspection command than the declared scrutiny validator.",
+      "reason": "ambiguous"
+    }
+  ],
+  "previousRound": "/data/other/HaloWebUI/.factory/validation/guest-mode/scrutiny/synthesis.json"
+}
