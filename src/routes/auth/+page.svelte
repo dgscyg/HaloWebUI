@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 
-	import { onMount, getContext, tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
+	import { get } from 'svelte/store';
+	import i18n from '$lib/i18n';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
@@ -25,8 +27,6 @@
 	import OnBoarding from '$lib/components/OnBoarding.svelte';
 	import type { SessionUser } from '$lib/stores';
 
-	const i18n = getContext<any>('i18n');
-
 	let loaded = false;
 
 	let mode = $config?.features.enable_ldap ? 'ldap' : 'signin';
@@ -37,8 +37,9 @@
 
 	let ldapUsername = '';
 
-	const formatError = (error: unknown) =>
-		localizeCommonError(error, (key, options) => i18n.t(key, options));
+	const translate = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
+
+	const formatError = (error: unknown) => localizeCommonError(error, translate);
 
 	const clearClientSession = () => {
 		user.set(undefined);
@@ -53,8 +54,7 @@
 
 	const setSessionUser = async (sessionUser: SessionUser | null) => {
 		if (sessionUser) {
-			console.log(sessionUser);
-			toast.success(i18n.t(`You're now logged in.`));
+			toast.success(translate(`You're now logged in.`));
 			if (sessionUser.token) {
 				localStorage.token = sessionUser.token;
 			}
