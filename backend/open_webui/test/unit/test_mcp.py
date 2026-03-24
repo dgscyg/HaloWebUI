@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 
+
 # Ensure `open_webui` is importable when running tests from repo root.
 _BACKEND_DIR = pathlib.Path(__file__).resolve().parents[3]
 if str(_BACKEND_DIR) not in sys.path:
@@ -512,6 +513,82 @@ def test_get_mcp_apps_config_preserves_stored_server_toggles_even_when_global_di
             "2": True,
         },
     }
+
+
+def test_mcp_apps_route_sequence_persists_nested_apps_state_through_db_backed_reload(monkeypatch):
+    from open_webui.routers.configs import (
+        MCPAppsConfigForm,
+        get_mcp_apps_config,
+        set_mcp_apps_config,
+    )
+
+    stored_connections = [
+        {"url": "http://one.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True}},
+        {"url": "http://two.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False}},
+        {"url": "http://three.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
+    ]
+    persisted_settings = {"tools": {"mcp_server_connections": stored_connections}}
+    persisted_snapshots = []
+
+    def fake_get_user_by_id(user_id):
+        assert user_id == "user-1"
+        return SimpleNamespace(id="user-1", role="user", settings=persisted_settings)
+
+    def fake_update_user_settings_by_id(user_id, updated):
+        assert user_id == "user-1"
+        persisted_settings.update(updated)
+        persisted_snapshots.append(json.loads(json.dumps(persisted_settings)))
+        return SimpleNamespace(id="user-1", role="user", settings=persisted_settings)
+
+    monkeypatch.setattr("open_webui.utils.user_tools.Users.get_user_by_id", fake_get_user_by_id)
+    monkeypatch.setattr(
+        "open_webui.utils.user_tools.Users.update_user_settings_by_id",
+        fake_update_user_settings_by_id,
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(config=SimpleNamespace())),
+        state=SimpleNamespace(token=SimpleNamespace(credentials="session-token")),
+    )
+    user = SimpleNamespace(id="user-1", role="user", settings=persisted_settings)
+
+    post_result = asyncio.run(
+        set_mcp_apps_config(
+            request,
+            MCPAppsConfigForm(
+                ENABLE_MCP_APPS=True,
+                MCP_SERVER_APPS={"0": True, "1": False, "2": True},
+            ),
+            user,
+        )
+    )
+    get_result = asyncio.run(get_mcp_apps_config(request, user))
+
+    assert post_result == {
+        "ENABLE_MCP_APPS": True,
+        "MCP_SERVER_APPS": {"0": True, "1": False, "2": True},
+    }
+    assert get_result == {
+        "ENABLE_MCP_APPS": True,
+        "MCP_SERVER_APPS": {"0": True, "1": False, "2": True},
+    }
+
+    assert persisted_snapshots[-1]["tools"]["mcp_server_connections"] == [
+        {
+            "url": "http://one.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
+        {
+            "url": "http://two.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+        },
+        {
+            "url": "http://three.example",
+            "enabled": False,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
+    ]
 
 
 def test_verify_mcp_server_connection_uses_session_token_for_session_auth():
