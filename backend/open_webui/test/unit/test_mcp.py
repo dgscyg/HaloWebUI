@@ -520,6 +520,30 @@ def test_verify_mcp_server_connection_uses_session_token_for_session_auth():
     }
 
 
+def test_verify_mcp_server_connection_requires_authenticated_session_for_session_auth():
+    from fastapi import HTTPException
+    from open_webui.routers.configs import MCPServerConnection, verify_mcp_server_connection
+
+    request = SimpleNamespace(state=SimpleNamespace())
+    user = SimpleNamespace(id="user-1")
+
+    with patch("open_webui.routers.configs.get_mcp_server_data") as get_mcp_server_data:
+        try:
+            asyncio.run(
+                verify_mcp_server_connection(
+                    request,
+                    MCPServerConnection(url="http://mcp.local", auth_type="session"),
+                    user,
+                )
+            )
+            raise AssertionError("Expected HTTPException")
+        except HTTPException as exc:
+            assert exc.status_code == 403
+            assert exc.detail == "Not authenticated"
+
+    get_mcp_server_data.assert_not_called()
+
+
 def test_get_mcp_apps_capabilities_exposes_stable_frontend_contract():
     from open_webui.routers.configs import get_mcp_apps_capabilities
 

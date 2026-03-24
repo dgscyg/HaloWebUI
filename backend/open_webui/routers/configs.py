@@ -360,7 +360,12 @@ async def verify_mcp_server_connection(
     try:
         token = None
         if (form_data.auth_type or "none").lower() == "session":
-            token = request.state.token.credentials
+            token = getattr(getattr(request.state, "token", None), "credentials", None)
+            if not token:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Not authenticated",
+                )
 
         data = await get_mcp_server_data(
             form_data.model_dump(by_alias=True, exclude_none=True),
@@ -379,6 +384,8 @@ async def verify_mcp_server_connection(
                 for t in tools[:50]
             ],
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=400,
