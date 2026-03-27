@@ -1,10 +1,17 @@
 <script lang="ts">
 	import { clearClientAuthState, getAdminDetails } from '$lib/apis/auths';
 	import { onMount, tick, getContext } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 
-	const i18n = getContext('i18n');
+	type AdminDetails = {
+		name: string;
+		email: string;
+	};
 
-	let adminDetails = null;
+	const i18n = getContext('i18n') as Writable<i18nType>;
+
+	let adminDetails: AdminDetails | null = null;
 
 	onMount(async () => {
 		adminDetails = await getAdminDetails(localStorage.token).catch((err) => {
