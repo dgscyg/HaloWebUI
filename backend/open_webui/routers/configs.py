@@ -789,6 +789,33 @@ class SetDefaultSuggestionsForm(BaseModel):
     suggestions: list[PromptSuggestion]
 
 
+class PromptSuggestionsConfigForm(BaseModel):
+    ENABLE_DEFAULT_PROMPT_SUGGESTIONS: bool
+
+
+@router.get("/prompt_suggestions", response_model=PromptSuggestionsConfigForm)
+async def get_prompt_suggestions_config(
+    request: Request, user=Depends(get_admin_user)
+):
+    return {
+        "ENABLE_DEFAULT_PROMPT_SUGGESTIONS": request.app.state.config.ENABLE_DEFAULT_PROMPT_SUGGESTIONS,
+    }
+
+
+@router.post("/prompt_suggestions", response_model=PromptSuggestionsConfigForm)
+async def set_prompt_suggestions_config(
+    request: Request,
+    form_data: PromptSuggestionsConfigForm,
+    user=Depends(get_admin_user),
+):
+    request.app.state.config.ENABLE_DEFAULT_PROMPT_SUGGESTIONS = (
+        form_data.ENABLE_DEFAULT_PROMPT_SUGGESTIONS
+    )
+    return {
+        "ENABLE_DEFAULT_PROMPT_SUGGESTIONS": request.app.state.config.ENABLE_DEFAULT_PROMPT_SUGGESTIONS,
+    }
+
+
 @router.post("/suggestions", response_model=list[PromptSuggestion])
 async def set_default_suggestions(
     request: Request,

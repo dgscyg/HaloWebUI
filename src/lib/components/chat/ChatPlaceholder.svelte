@@ -34,6 +34,8 @@
 	onMount(() => {
 		mounted = true;
 	});
+
+	$: promptSuggestionsEnabled = $config?.features?.enable_prompt_suggestions ?? true;
 </script>
 
 {#key mounted}
@@ -125,17 +127,19 @@
 			</div>
 		</div>
 
-		<div class=" w-full font-primary" in:fade={{ duration: 200, delay: 300 }}>
-			<Suggestions
-				className="grid grid-cols-2"
-				suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??
-					models[selectedModelIdx]?.info?.meta?.suggestion_prompts ??
-					$config?.default_prompt_suggestions ??
-					[]}
-				on:select={(e) => {
-					submitPrompt(e.detail);
-				}}
-			/>
-		</div>
+		{#if promptSuggestionsEnabled}
+			<div class=" w-full font-primary" in:fade={{ duration: 200, delay: 300 }}>
+				<Suggestions
+					className="grid grid-cols-2"
+					suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??
+						models[selectedModelIdx]?.info?.meta?.suggestion_prompts ??
+						$config?.default_prompt_suggestions ??
+						[]}
+					on:select={(e) => {
+						submitPrompt(e.detail);
+					}}
+				/>
+			</div>
+		{/if}
 	</div>
 {/key}

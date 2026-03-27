@@ -336,6 +336,7 @@ type Config = {
 		enable_admin_chat_access: boolean;
 		enable_community_sharing: boolean;
 		enable_autocomplete_generation: boolean;
+		enable_prompt_suggestions?: boolean;
 		enable_websocket?: boolean;
 	};
 	oauth: {

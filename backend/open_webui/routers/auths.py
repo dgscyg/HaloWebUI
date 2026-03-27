@@ -21,7 +21,7 @@ from open_webui.models.auths import (
     UserResponse,
 )
 from open_webui.models.users import Users
-from open_webui.models.groups import Groups, GroupUpdateForm
+from open_webui.models.groups import Groups, GroupForm, GroupUpdateForm
 
 from open_webui.constants import ERROR_MESSAGES, WEBHOOK_MESSAGES
 from open_webui.env import (
@@ -76,6 +76,9 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 # Lock to prevent race conditions during first-user (admin) creation
 _signup_lock = asyncio.Lock()
+_guest_group_lock = asyncio.Lock()
+_GUEST_GROUP_NAME = "Guest"
+_GUEST_GROUP_DESCRIPTION = "Automatically managed guest users."
 
 ############################
 # GetSessionUser
@@ -145,6 +148,54 @@ def _issue_session_response(request: Request, response: Response, user, guest: O
     return session_user
 
 
+def _get_group_by_name(group_name: str):
+    normalized_group_name = str(group_name or "").strip().casefold()
+    if not normalized_group_name:
+        return None
+
+    for group in Groups.get_groups():
+        if str(group.name or "").strip().casefold() == normalized_group_name:
+            return group
+
+    return None
+
+
+def _ensure_user_in_group(user_id: str, group_name: str, description: str = "") -> None:
+    group = _get_group_by_name(group_name)
+
+    if group is None:
+        group = Groups.insert_new_group(
+            user_id="system",
+            form_data=GroupForm(
+                name=group_name,
+                description=description or group_name,
+                permissions={},
+            ),
+        )
+        if group is None:
+            group = _get_group_by_name(group_name)
+
+    if group is None:
+        raise RuntimeError(f"Unable to resolve group: {group_name}")
+
+    user_ids = list(group.user_ids or [])
+    if user_id in user_ids:
+        return
+
+    updated_group = Groups.update_group_by_id(
+        id=group.id,
+        form_data=GroupUpdateForm(
+            name=group.name,
+            description=group.description,
+            permissions=group.permissions or {},
+            user_ids=[*user_ids, user_id],
+        ),
+        overwrite=False,
+    )
+    if updated_group is None:
+        raise RuntimeError(f"Unable to add user {user_id} to group: {group_name}")
+
+
 @router.get("/", response_model=SessionUserResponse)
 async def get_session_user(
     request: Request, response: Response, user=Depends(get_current_user)
@@ -186,6 +237,22 @@ async def guest_session(request: Request, response: Response):
         )
 
     if not user or user.role not in {"user", "admin"}:
+        response.delete_cookie("token")
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ERROR_MESSAGES.CREATE_USER_ERROR,
+        )
+
+    try:
+        async with _guest_group_lock:
+            _ensure_user_in_group(
+                user.id,
+                _GUEST_GROUP_NAME,
+                _GUEST_GROUP_DESCRIPTION,
+            )
+    except Exception as err:
+        log.error(f"Guest group assignment error: {err}")
+        Auths.delete_auth_by_id(user.id)
         response.delete_cookie("token")
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,

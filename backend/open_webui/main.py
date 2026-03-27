@@ -333,6 +333,7 @@ from open_webui.config import (
     OAUTH_GROUP_DEFAULT_SHARE,
     DEFAULT_USER_ROLE,
     DEFAULT_PROMPT_SUGGESTIONS,
+    ENABLE_DEFAULT_PROMPT_SUGGESTIONS,
     DEFAULT_MODELS,
     MODEL_ORDER_LIST,
     # WebUI (OAuth)
@@ -735,6 +736,7 @@ app.state.config.ADMIN_EMAIL = ADMIN_EMAIL
 
 app.state.config.DEFAULT_MODELS = DEFAULT_MODELS
 app.state.config.DEFAULT_PROMPT_SUGGESTIONS = DEFAULT_PROMPT_SUGGESTIONS
+app.state.config.ENABLE_DEFAULT_PROMPT_SUGGESTIONS = ENABLE_DEFAULT_PROMPT_SUGGESTIONS
 app.state.config.DEFAULT_USER_ROLE = DEFAULT_USER_ROLE
 
 app.state.config.USER_PERMISSIONS = USER_PERMISSIONS
@@ -1738,6 +1740,7 @@ async def get_app_config(request: Request):
                     "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,
                     "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     "enable_onedrive_integration": app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
+                    "enable_prompt_suggestions": app.state.config.ENABLE_DEFAULT_PROMPT_SUGGESTIONS,
                 }
                 if user is not None
                 else {}

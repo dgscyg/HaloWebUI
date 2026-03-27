@@ -79,6 +79,15 @@ const extractServerIdFromRenderUrl = (renderUrl: string): string | undefined => 
 	}
 };
 
+const extractServerIdFromToolName = (toolName: string): string | undefined => {
+	if (!toolName) {
+		return undefined;
+	}
+
+	const match = toolName.match(/^mcp_(\d+)__/i);
+	return match?.[1]?.trim() || undefined;
+};
+
 const normalizeMCPAppInvocation = (value: unknown) => {
 	const payload = asObject(value);
 	if (!payload) {
@@ -116,9 +125,9 @@ const normalizePayload = (
 		return null;
 	}
 
+	const toolName = getString(context.toolName);
 	const renderUrl = getString(payload?.render_url ?? payload?.renderUrl);
 	const content = getString(payload?.content ?? payload?.html ?? payload?.srcdoc);
-	const serverId = invocation?.serverId ?? extractServerIdFromRenderUrl(renderUrl);
 	const resourceUri = getString(
 		invocation?.resourceUri ??
 			metadata?.resource_uri ??
@@ -128,8 +137,15 @@ const normalizePayload = (
 			payload?.app_id ??
 			payload?.appId
 	);
+	const serverId =
+		invocation?.serverId ??
+		extractServerIdFromRenderUrl(renderUrl) ??
+		extractServerIdFromToolName(toolName);
 
-	const isPreviewable = Boolean((invocation && resourceUri) || renderUrl || content);
+	const hasInlineAppContent = Boolean(content && resourceUri);
+	const hasResourceBackedApp = Boolean(renderUrl && resourceUri && serverId);
+	const hasInvocationResource = Boolean(invocation && resourceUri && serverId);
+	const isPreviewable = hasInvocationResource || hasInlineAppContent || hasResourceBackedApp;
 	if (!isPreviewable) {
 		return null;
 	}
@@ -139,7 +155,6 @@ const normalizePayload = (
 	const title = getString(
 		payload?.title ?? payload?.name ?? invocation?.title ?? resourceId ?? appId
 	);
-	const toolName = getString(context.toolName);
 	const resultPayload =
 		context.toolResult !== undefined
 			? context.toolResult
@@ -177,8 +192,7 @@ export const resolveMCPAppServerId = (
 		return payload.serverId;
 	}
 
-	const match = toolName.match(/^mcp_(\d+)__/i);
-	return match?.[1];
+	return extractServerIdFromToolName(toolName);
 };
 
 export const resolveMCPAppResourceUri = (payload: MCPAppPreviewPayload | null | undefined) =>

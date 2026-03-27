@@ -13,7 +13,13 @@
 	import type { UserSettingsContext } from '$lib/types/user-settings';
 	import type { Banner } from '$lib/types';
 	import { getBackendConfig, getTaskConfig, updateTaskConfig } from '$lib/apis';
-	import { getBanners, setBanners, setDefaultPromptSuggestions } from '$lib/apis/configs';
+	import {
+		getBanners,
+		getPromptSuggestionsConfig,
+		setBanners,
+		setDefaultPromptSuggestions,
+		setPromptSuggestionsConfig
+	} from '$lib/apis/configs';
 	import { updateUserInfo } from '$lib/apis/users';
 	import { getUserPosition } from '$lib/utils';
 	import { getLanguages, changeLanguage } from '$lib/i18n';
@@ -138,6 +144,7 @@
 	let renderMarkdownInPreviews = true;
 	let displayMultiModelResponsesInTabs = false;
 	let stylizedPdfExport = true;
+	let promptSuggestionsEnabled = true;
 	let showFloatingActionButtons = true;
 	let floatingActionButtons: Array<{
 		id: string;
@@ -235,6 +242,7 @@
 			temporaryChatByDefault: boolean;
 			collapseCodeBlocks: boolean;
 			expandDetails: boolean;
+			promptSuggestionsEnabled: boolean;
 			insertSuggestionPrompt: boolean;
 			keepFollowUpPrompts: boolean;
 			insertFollowUpPrompt: boolean;
@@ -561,6 +569,7 @@
 			temporaryChatByDefault,
 			collapseCodeBlocks,
 			expandDetails,
+			promptSuggestionsEnabled,
 			insertSuggestionPrompt,
 			keepFollowUpPrompts,
 			insertFollowUpPrompt,
@@ -636,6 +645,7 @@
 		temporaryChatByDefault = snapshot.temporaryChatByDefault;
 		collapseCodeBlocks = snapshot.collapseCodeBlocks;
 		expandDetails = snapshot.expandDetails;
+		promptSuggestionsEnabled = snapshot.promptSuggestionsEnabled;
 		insertSuggestionPrompt = snapshot.insertSuggestionPrompt;
 		keepFollowUpPrompts = snapshot.keepFollowUpPrompts;
 		insertFollowUpPrompt = snapshot.insertFollowUpPrompt;
@@ -702,6 +712,7 @@
 		enableAutoScrollOnStreaming;
 		collapseCodeBlocks;
 		expandDetails;
+		promptSuggestionsEnabled;
 		insertSuggestionPrompt;
 		keepFollowUpPrompts;
 		insertFollowUpPrompt;
@@ -1011,6 +1022,12 @@
 				imageCompressionSize: normalizeImageCompressionSize(imageCompressionSize),
 				imageCompressionInChannels
 			});
+			if ($user?.role === 'admin') {
+				await setPromptSuggestionsConfig(localStorage.token, {
+					ENABLE_DEFAULT_PROMPT_SUGGESTIONS: promptSuggestionsEnabled
+				});
+				await config.set(await getBackendConfig());
+			}
 			await tick();
 			startSectionBaselineSync();
 			updateSectionBaseline('chat');
@@ -1144,6 +1161,7 @@
 		temporaryChatByDefault = $settings?.temporaryChatByDefault ?? false;
 		transitionMode = resolveChatTransitionMode($settings);
 		enableAutoScrollOnStreaming = $settings?.enableAutoScrollOnStreaming ?? true;
+		promptSuggestionsEnabled = $config?.features?.enable_prompt_suggestions ?? true;
 		insertSuggestionPrompt = $settings?.insertSuggestionPrompt ?? false;
 		keepFollowUpPrompts = $settings?.keepFollowUpPrompts ?? false;
 		insertFollowUpPrompt = $settings?.insertFollowUpPrompt ?? false;
@@ -1168,6 +1186,15 @@
 			enableAutocompleteGeneration = adminTaskConfig.ENABLE_AUTOCOMPLETE_GENERATION ?? false;
 			autocompleteGenerationInputMaxLength =
 				adminTaskConfig.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH ?? -1;
+		}
+		if ($user?.role === 'admin') {
+			const promptSuggestionsConfig = await getPromptSuggestionsConfig(localStorage.token).catch(
+				() => null
+			);
+			if (promptSuggestionsConfig) {
+				promptSuggestionsEnabled =
+					promptSuggestionsConfig.ENABLE_DEFAULT_PROMPT_SUGGESTIONS ?? true;
+			}
 		}
 		showFormattingToolbar = $settings?.showFormattingToolbar ?? false;
 		insertPromptAsRichText = $settings?.insertPromptAsRichText ?? false;
@@ -2110,6 +2137,14 @@
 												bind:state={expandDetails}
 											/>
 										</div>
+										{#if $user?.role === 'admin'}
+											<div class="flex items-center justify-between glass-item px-4 py-3">
+												<div class="text-sm font-medium">
+													{$i18n.t('Default Prompt Suggestions')}
+												</div>
+												<Switch bind:state={promptSuggestionsEnabled} />
+											</div>
+										{/if}
 										<div class="flex items-center justify-between glass-item px-4 py-3">
 											<div class="text-sm font-medium">
 												{$i18n.t('Render Markdown in Previews')}
