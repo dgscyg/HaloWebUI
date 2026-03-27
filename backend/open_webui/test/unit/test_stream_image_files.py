@@ -7,9 +7,15 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 from open_webui.utils.middleware import (  # noqa: E402
+    WEB_SEARCH_MODE_HALO,
+    WEB_SEARCH_MODE_NATIVE,
+    WEB_SEARCH_MODE_OFF,
     _consume_stream_image_delta,
     _extract_stream_content_and_files,
+    _get_builtin_web_tools_to_suppress,
     _merge_message_files,
+    merge_message_files,
+    normalize_message_files,
 )
 
 
@@ -84,3 +90,31 @@ def test_merge_message_files_preserves_existing_non_image_files_and_deduplicates
         {"type": "image", "url": "data:image/png;base64,abcd"},
         {"type": "image", "url": "data:image/png;base64,efgh"},
     ]
+
+
+def test_legacy_message_file_helper_aliases_remain_compatible():
+    files = normalize_message_files(
+        [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abcd"}},
+            {"type": "image", "url": "data:image/png;base64,abcd"},
+        ]
+    )
+
+    assert files == [{"type": "image", "url": "data:image/png;base64,abcd"}]
+    assert merge_message_files(
+        [{"type": "image", "url": "data:image/png;base64,abcd"}],
+        [{"type": "image", "url": "data:image/png;base64,efgh"}],
+    ) == [
+        {"type": "image", "url": "data:image/png;base64,abcd"},
+        {"type": "image", "url": "data:image/png;base64,efgh"},
+    ]
+
+
+def test_builtin_web_tools_suppression_matches_runtime_mode():
+    assert _get_builtin_web_tools_to_suppress(WEB_SEARCH_MODE_OFF) == set()
+    assert _get_builtin_web_tools_to_suppress(WEB_SEARCH_MODE_HALO) == {"search_web"}
+    assert _get_builtin_web_tools_to_suppress(WEB_SEARCH_MODE_NATIVE) == {
+        "search_web",
+        "fetch_url",
+        "fetch_url_rendered",
+    }

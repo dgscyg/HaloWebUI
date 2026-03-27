@@ -11,6 +11,8 @@ from open_webui.env import SRC_LOG_LEVELS
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["RAG"])
 
+_MOJIBAKE_RE = re.compile(r"[ÃÂÅÆÇÐÑÒÓÔÕÖØÙÚÛÜÝÞßà-ÿ]")
+
 
 def search_grok(
     api_key: str,
@@ -49,6 +51,46 @@ def search_grok(
     except Exception as e:
         log.error(f"Error searching with Grok API ({api_mode}): {e}")
         return []
+
+
+def _maybe_repair_mojibake(text: str) -> str:
+    if not isinstance(text, str) or not text:
+        return text
+
+    suspicious = len(_MOJIBAKE_RE.findall(text))
+    if suspicious < 3:
+        return text
+
+    try:
+        repaired = text.encode("latin-1").decode("utf-8")
+    except Exception:
+        return text
+
+    if repaired == text:
+        return text
+
+    original_cjk = len(re.findall(r"[\u4e00-\u9fff]", text))
+    repaired_cjk = len(re.findall(r"[\u4e00-\u9fff]", repaired))
+    if repaired_cjk > original_cjk or suspicious >= max(6, len(text) // 12):
+        return repaired
+
+    return text
+
+
+def _decode_response_bytes(payload: bytes, fallback_encoding: Optional[str] = None) -> str:
+    if not isinstance(payload, (bytes, bytearray)):
+        return str(payload or "")
+
+    for encoding in ("utf-8", fallback_encoding or "", "utf-8-sig"):
+        normalized_encoding = str(encoding or "").strip()
+        if not normalized_encoding:
+            continue
+        try:
+            return payload.decode(normalized_encoding)
+        except UnicodeDecodeError:
+            continue
+
+    return payload.decode("utf-8", errors="replace")
 
 
 def _search_via_chat_completions(
@@ -93,20 +135,27 @@ def _search_via_chat_completions(
 
     response = requests.post(url, json=payload, headers=headers, timeout=60, stream=True)
     response.raise_for_status()
+    response.encoding = response.encoding or "utf-8"
 
     content_type = response.headers.get("content-type", "")
 
     # If server returns non-streaming JSON despite stream=True, handle it
     if "application/json" in content_type:
         json_response = response.json()
-        return _parse_chat_completions_json(json_response, count, filter_list)
+        return _parse_chat_completions_json(
+            json_response,
+            count,
+            filter_list,
+            extract_urls_from_content=False,
+        )
 
     # Parse SSE stream
     content_parts = []
     citations = []
-    for line in response.iter_lines(decode_unicode=True):
-        if not line:
+    for raw_line in response.iter_lines(decode_unicode=False):
+        if not raw_line:
             continue
+        line = _decode_response_bytes(raw_line, response.encoding)
         if not line.startswith("data: "):
             continue
         data_str = line[6:]  # strip "data: "
@@ -130,7 +179,7 @@ def _search_via_chat_completions(
 
         # Collect content
         if delta.get("content"):
-            content_parts.append(delta["content"])
+            content_parts.append(_maybe_repair_mojibake(delta["content"]))
 
         # Collect citations from choice/delta level
         for key in ("citations",):
@@ -143,14 +192,21 @@ def _search_via_chat_completions(
                     if c not in citations:
                         citations.append(c)
 
-    content = "".join(content_parts)
-    return _build_results(content, citations, count, filter_list)
+    content = _maybe_repair_mojibake("".join(content_parts))
+    return _build_results(
+        content,
+        citations,
+        count,
+        filter_list,
+        extract_urls_from_content=False,
+    )
 
 
 def _parse_chat_completions_json(
     json_response: dict,
     count: int,
     filter_list: Optional[list[str]],
+    extract_urls_from_content: bool = True,
 ) -> list[SearchResult]:
     """Parse a non-streaming chat completions JSON response."""
     content = ""
@@ -159,14 +215,20 @@ def _parse_chat_completions_json(
     choices = json_response.get("choices", [])
     if choices:
         message = choices[0].get("message", {})
-        content = message.get("content", "") or ""
+        content = _maybe_repair_mojibake(message.get("content", "") or "")
 
         # xAI returns citations at response level or in message
         citations = json_response.get("citations", [])
         if not citations:
             citations = message.get("citations", [])
 
-    return _build_results(content, citations, count, filter_list)
+    return _build_results(
+        content,
+        citations,
+        count,
+        filter_list,
+        extract_urls_from_content=extract_urls_from_content,
+    )
 
 
 def _search_via_responses(
@@ -193,8 +255,9 @@ def _search_via_responses(
 
     response = requests.post(url, json=payload, headers=headers, timeout=60)
     response.raise_for_status()
-
-    json_response = response.json()
+    json_response = json.loads(
+        _decode_response_bytes(response.content, response.encoding or "utf-8")
+    )
 
     # Extract text content from output items
     content = ""
@@ -202,7 +265,7 @@ def _search_via_responses(
         if item.get("type") == "message":
             for part in item.get("content", []):
                 if part.get("type") == "output_text":
-                    content = part.get("text", "")
+                    content = _maybe_repair_mojibake(part.get("text", "") or "")
                     break
 
     citations = json_response.get("citations", [])
@@ -229,9 +292,11 @@ def _build_results(
     citations: list,
     count: int,
     filter_list: Optional[list[str]],
+    extract_urls_from_content: bool = True,
 ) -> list[SearchResult]:
     """Build SearchResult list from content and citations."""
     # Strip <think>...</think> blocks (Grok reasoning traces)
+    content = _maybe_repair_mojibake(content)
     raw_content = content
     content = re.sub(r"<think>[\s\S]*?</think>", "", content).strip()
     # Also strip orphan <think> without closing tag (streaming cutoff)
@@ -261,8 +326,12 @@ def _build_results(
         if isinstance(citation, dict):
             result = {
                 "link": citation.get("url", citation.get("link", "")),
-                "title": citation.get("title", f"Source {i + 1}"),
-                "snippet": citation.get("snippet", citation.get("text", content if i == 0 else "")),
+                "title": _maybe_repair_mojibake(
+                    citation.get("title", f"Source {i + 1}")
+                ),
+                "snippet": _maybe_repair_mojibake(
+                    citation.get("snippet", citation.get("text", content if i == 0 else ""))
+                ),
             }
         else:
             # citation is a URL string
@@ -274,7 +343,7 @@ def _build_results(
         results.append(result)
 
     # If no citations but we have content, extract URLs from the text
-    if not results and content:
+    if not results and content and extract_urls_from_content:
         extracted_urls = _extract_urls_from_text(content)
         if extracted_urls:
             log.info(f"Grok: no citations, extracted {len(extracted_urls)} URLs from content")
@@ -285,14 +354,16 @@ def _build_results(
                     "title": f"Source {i + 1}",
                     "snippet": content[:500] if i == 0 else "",
                 })
-        else:
-            # No URLs found either — return content as-is
-            log.info("Grok: no citations and no URLs in content, returning content only")
-            results.append({
-                "link": "",
-                "title": "Grok Search Result",
-                "snippet": content[:500],
-            })
+    if not results and content:
+        # No structured citations/URLs were available. Preserve the raw search
+        # text so the downstream model can read it directly instead of forcing
+        # the content back through URL extraction and page fetching.
+        log.info("Grok: no citations and no URLs in content, returning content only")
+        results.append({
+            "link": "",
+            "title": "Grok Search Result",
+            "snippet": content[:4000],
+        })
 
     if filter_list:
         results = get_filtered_results(results, filter_list)

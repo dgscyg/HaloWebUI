@@ -1,0 +1,8 @@
+{
+  "name": "pw-debug",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}

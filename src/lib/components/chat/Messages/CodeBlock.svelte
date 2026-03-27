@@ -6,7 +6,14 @@
 
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import SvgPanZoom from '$lib/components/common/SVGPanZoom.svelte';
-	import { artifactPreviewTarget, config, settings, showArtifacts, showControls } from '$lib/stores';
+	import {
+		artifactPreviewTarget,
+		config,
+		settings,
+		showArtifacts,
+		showControls,
+		showOverview
+	} from '$lib/stores';
 	import { executeCode } from '$lib/apis/utils';
 	import { toast } from 'svelte-sonner';
 	import ChevronUpDown from '$lib/components/icons/ChevronUpDown.svelte';
@@ -95,6 +102,7 @@
 			type: 'svg',
 			content: previewContent
 		});
+		showOverview.set(false);
 		showArtifacts.set(true);
 		showControls.set(true);
 	};
