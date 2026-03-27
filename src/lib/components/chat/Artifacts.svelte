@@ -17,13 +17,32 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import SvgPanZoom from '../common/SVGPanZoom.svelte';
 	import ArrowLeft from '../icons/ArrowLeft.svelte';
+	import MCPAppHost from './Messages/MCPAppHost.svelte';
 	import { extractSvgMarkupBlocks, normalizeSvgMarkup } from './Messages/Markdown/svgMarkupTokens';
+	import {
+		type MCPAppPreviewPayload,
+		getMCPAppPreviewPayloadsForMessageContent
+	} from './mcpAppPreview';
 
 	export let overlay = false;
 	export let history;
 	let messages = [];
 
-	let contents: Array<{ type: string; content: string; messageId: string }> = [];
+	let contents: Array<{
+		type: string;
+		content: string;
+		messageId: string;
+		toolCallId?: string;
+		appId?: string;
+		resourceId?: string;
+		resourceUri?: string;
+		title?: string;
+		toolName?: string;
+		toolArguments?: unknown;
+		toolResult?: unknown;
+		serverId?: string;
+		preview?: MCPAppPreviewPayload;
+	}> = [];
 	let selectedContentIdx = 0;
 
 	let copied = false;
@@ -124,7 +143,10 @@
                         </body>
                         </html>
                     `;
-					contents = [...contents, { type: 'iframe', content: renderedContent, messageId: message.id }];
+					contents = [
+						...contents,
+						{ type: 'iframe', content: renderedContent, messageId: message.id }
+					];
 				}
 
 				for (const block of codeBlocks) {
@@ -140,6 +162,34 @@
 					contents = [
 						...contents,
 						{ type: 'svg', content: normalizeSvgMarkup(markup), messageId: message.id }
+					];
+				}
+
+				for (const appPayload of getMCPAppPreviewPayloadsForMessageContent(cleanedContent)) {
+					const previewContent = appPayload.renderUrl ?? appPayload.content ?? '';
+					if (!previewContent && !appPayload.resourceUri) {
+						continue;
+					}
+
+					contents = [
+						...contents,
+						{
+							type: appPayload.content ? 'iframe' : 'mcp-app',
+							content: previewContent,
+							messageId: message.id,
+							toolCallId: appPayload.toolCallId,
+							...(appPayload.appId ? { appId: appPayload.appId } : {}),
+							...(appPayload.resourceId ? { resourceId: appPayload.resourceId } : {}),
+							...(appPayload.resourceUri ? { resourceUri: appPayload.resourceUri } : {}),
+							...(appPayload.title ? { title: appPayload.title } : {}),
+							...(appPayload.toolName ? { toolName: appPayload.toolName } : {}),
+							...(appPayload.toolArguments !== undefined
+								? { toolArguments: appPayload.toolArguments }
+								: {}),
+							...(appPayload.toolResult !== undefined ? { toolResult: appPayload.toolResult } : {}),
+							...(appPayload.serverId ? { serverId: appPayload.serverId } : {}),
+							preview: appPayload
+						}
 					];
 				}
 			}
@@ -179,12 +229,68 @@
 			return;
 		}
 
+		if (target?.type === 'mcp-app') {
+			const existingIdx = contents.findIndex(
+				(content) =>
+					content.messageId === target.messageId &&
+					content.toolCallId === target.toolCallId &&
+					(content.appId ?? '') === (target.appId ?? '') &&
+					(content.resourceId ?? '') === (target.resourceId ?? '') &&
+					(content.resourceUri ?? '') === (target.resourceUri ?? '') &&
+					content.content === (target.content ?? target.renderUrl ?? '')
+			);
+
+			if (existingIdx >= 0) {
+				selectedContentIdx = existingIdx;
+				return;
+			}
+
+			contents = [
+				...contents,
+				{
+					type: 'mcp-app',
+					content: target.content ?? target.renderUrl ?? '',
+					messageId: target.messageId,
+					toolCallId: target.toolCallId,
+					...(target.appId ? { appId: target.appId } : {}),
+					...(target.resourceId ? { resourceId: target.resourceId } : {}),
+					...(target.resourceUri ? { resourceUri: target.resourceUri } : {}),
+					...(target.title ? { title: target.title } : {}),
+					...(target.toolName ? { toolName: target.toolName } : {}),
+					...(target.toolArguments !== undefined ? { toolArguments: target.toolArguments } : {}),
+					...(target.toolResult !== undefined ? { toolResult: target.toolResult } : {}),
+					...(target.serverId ? { serverId: target.serverId } : {}),
+					preview: {
+						toolCallId: target.toolCallId,
+						...(target.appId ? { appId: target.appId } : {}),
+						...(target.resourceId ? { resourceId: target.resourceId } : {}),
+						...(target.resourceUri ? { resourceUri: target.resourceUri } : {}),
+						...(target.serverId ? { serverId: target.serverId } : {}),
+						...(target.renderUrl ? { renderUrl: target.renderUrl } : {}),
+						...(target.content ? { content: target.content } : {}),
+						...(target.title ? { title: target.title } : {}),
+						...(target.toolName ? { toolName: target.toolName } : {}),
+						...(target.toolArguments !== undefined ? { toolArguments: target.toolArguments } : {}),
+						...(target.toolResult !== undefined ? { toolResult: target.toolResult } : {})
+					}
+				}
+			];
+			selectedContentIdx = contents.length - 1;
+			return;
+		}
+
 		if (target?.messageId) {
 			for (let idx = contents.length - 1; idx >= 0; idx -= 1) {
 				const content = contents[idx];
 				if (
 					content.messageId === target.messageId &&
-					(!target.type || content.type === target.type)
+					(!target.type ||
+						(target.type === 'mcp-app'
+							? content.toolCallId === target.toolCallId &&
+								(content.appId ?? '') === (target.appId ?? '') &&
+								(content.resourceId ?? '') === (target.resourceId ?? '') &&
+								(content.resourceUri ?? '') === (target.resourceUri ?? '')
+							: content.type === target.type))
 				) {
 					selectedContentIdx = idx;
 					return;
@@ -377,7 +483,7 @@
 						{#if contents[selectedContentIdx].type === 'iframe'}
 							<iframe
 								bind:this={iframeElement}
-								title="Content"
+								title={contents[selectedContentIdx].title ?? 'Content'}
 								srcdoc={contents[selectedContentIdx].content}
 								class="w-full border-0 h-full rounded-none"
 								sandbox="allow-scripts{($settings?.iframeSandboxAllowForms ?? false)
@@ -387,6 +493,10 @@
 									: ''}"
 								on:load={iframeLoadHandler}
 							></iframe>
+						{:else if contents[selectedContentIdx].type === 'mcp-app' && contents[selectedContentIdx].preview}
+							<div class="h-full overflow-auto p-3">
+								<MCPAppHost preview={contents[selectedContentIdx].preview} />
+							</div>
 						{:else if contents[selectedContentIdx].type === 'svg'}
 							<SvgPanZoom
 								className=" w-full h-full max-h-full overflow-hidden"

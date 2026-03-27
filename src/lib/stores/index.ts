@@ -89,9 +89,28 @@ export const showControls = writable(false);
 export const showOverview = writable(false);
 export const showArtifacts = writable(false);
 export const showCallOverlay = writable(false);
-export const artifactPreviewTarget: Writable<
-	{ messageId?: string; type?: 'svg' | 'iframe'; content?: string } | null
-> = writable(null);
+export type ArtifactPreviewTarget =
+	| {
+			messageId?: string;
+			type?: 'svg' | 'iframe';
+			content?: string;
+	  }
+	| {
+			messageId: string;
+			type: 'mcp-app';
+			toolCallId: string;
+			appId?: string;
+			resourceId?: string;
+			resourceUri?: string;
+			serverId?: string;
+			renderUrl?: string;
+			content?: string;
+			title?: string;
+			toolName?: string;
+			toolArguments?: unknown;
+			toolResult?: unknown;
+	  };
+export const artifactPreviewTarget: Writable<ArtifactPreviewTarget | null> = writable(null);
 
 export const temporaryChatEnabled = writable(false);
 export const scrollPaginationEnabled = writable(false);
@@ -227,6 +246,7 @@ type Settings = {
 	largeTextAsFile?: boolean;
 	webSearch?: null | 'always';
 	webSearchMode?: 'off' | 'halo' | 'native' | 'auto';
+	mcpAppDisplayMode?: 'inline' | 'sidebar';
 	userLocation?: boolean;
 	iframeSandboxAllowSameOrigin?: boolean;
 	iframeSandboxAllowForms?: boolean;
@@ -302,6 +322,7 @@ type Config = {
 		enable_login_form: boolean;
 		enable_ldap?: boolean;
 		enable_guest_access?: boolean;
+		guest_access_mode?: 'button' | 'auto';
 		enable_web_search?: boolean;
 		enable_halo_web_search?: boolean;
 		enable_native_web_search?: boolean;

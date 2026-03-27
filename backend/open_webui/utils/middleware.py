@@ -86,7 +86,10 @@ from open_webui.utils.misc import (
     convert_logit_bias_input_to_json,
 )
 from open_webui.utils.tools import get_tools, get_tool_servers_data
-from open_webui.utils.mcp import get_mcp_servers_data
+from open_webui.utils.mcp import (
+    build_mcp_app_resource_proxy_path,
+    get_mcp_servers_data,
+)
 from open_webui.utils.builtin_tools import get_builtin_tools
 from open_webui.utils.user_tools import (
     MAX_TOOL_CALL_ROUNDS_DEFAULT,
@@ -156,6 +159,92 @@ def _safe_json_loads(value: Any) -> Any:
         return json.loads(value)
     except Exception:
         return value
+
+
+def _is_previewable_mcp_app_result(value: Any) -> bool:
+    parsed = _safe_json_loads(value)
+    if not isinstance(parsed, dict):
+        return False
+
+    render_url = str(parsed.get("render_url") or parsed.get("renderUrl") or "").strip()
+    inline_content = ""
+    for key in ("content", "html", "srcdoc"):
+        candidate = parsed.get(key)
+        if isinstance(candidate, str) and candidate.strip():
+            inline_content = candidate.strip()
+            break
+
+    return bool(render_url or inline_content)
+
+
+def _build_mcp_app_display_result(tool: dict, tool_call_id: str, raw_tool_result: Any) -> Optional[str]:
+    if _is_previewable_mcp_app_result(raw_tool_result):
+        return None
+
+    mcp_meta = ((tool.get("metadata") or {}).get("mcp") or {})
+    if not isinstance(mcp_meta, dict):
+        return None
+
+    if not bool(mcp_meta.get("apps_enabled")):
+        return None
+
+    resource_uri = str(mcp_meta.get("ui_resource_uri") or "").strip()
+    if not resource_uri:
+        return None
+
+    try:
+        server_idx = int(mcp_meta.get("server_idx"))
+    except Exception:
+        return None
+
+    render_url = build_mcp_app_resource_proxy_path(server_idx, resource_uri)
+    if not render_url:
+        return None
+
+    preview_payload: dict[str, Any] = {
+        "app_id": resource_uri,
+        "resource_id": resource_uri,
+        "render_url": render_url,
+        "metadata": {
+            "tool_call_id": tool_call_id,
+            "resource_uri": resource_uri,
+        },
+    }
+
+    title = str(mcp_meta.get("title") or mcp_meta.get("tool_name") or "").strip()
+    if title:
+        preview_payload["title"] = title
+
+    parsed_tool_result = _safe_json_loads(raw_tool_result)
+    if isinstance(parsed_tool_result, dict):
+        structured_content = parsed_tool_result.get("structuredContent")
+        if structured_content is not None:
+            preview_payload["structuredContent"] = structured_content
+
+    return json.dumps(preview_payload, ensure_ascii=False, indent=2)
+
+
+def _build_mcp_app_invocation(tool: dict) -> Optional[dict[str, Any]]:
+    mcp_meta = ((tool.get("metadata") or {}).get("mcp") or {})
+    if not isinstance(mcp_meta, dict):
+        return None
+
+    if not bool(mcp_meta.get("apps_enabled")):
+        return None
+
+    resource_uri = str(mcp_meta.get("ui_resource_uri") or "").strip()
+    if not resource_uri:
+        return None
+
+    try:
+        server_idx = int(mcp_meta.get("server_idx"))
+    except Exception:
+        return None
+
+    return {
+        "serverId": str(server_idx),
+        "resourceUri": resource_uri,
+    }
 
 
 _DATA_IMAGE_MARKDOWN_RE = re.compile(
@@ -3062,15 +3151,32 @@ async def process_chat_response(
                                 )
 
                                 tool_result = None
+                                tool_result_display = None
                                 tool_result_files = None
+                                tool_mcp_app = None
                                 for result in results:
                                     if tool_call_id == result.get("tool_call_id", ""):
                                         tool_result = result.get("content", None)
+                                        tool_result_display = result.get(
+                                            "display_content",
+                                            tool_result,
+                                        )
                                         tool_result_files = result.get("files", None)
+                                        tool_mcp_app = result.get("mcp_app")
                                         break
 
-                                if tool_result:
-                                    tool_calls_display_content = f'{tool_calls_display_content}\n<details type="tool_calls" done="true" id="{tool_call_id}" name="{tool_name}" arguments="{html.escape(json.dumps(tool_arguments))}" result="{html.escape(json.dumps(tool_result))}" files="{html.escape(json.dumps(tool_result_files)) if tool_result_files else ""}">\n<summary>Tool Executed</summary>\n</details>\n'
+                                if tool_result is not None:
+                                    serialized_result = (
+                                        tool_result
+                                        if tool_mcp_app
+                                        else tool_result_display
+                                    )
+                                    mcp_app_attr = (
+                                        f' mcp_app="{html.escape(json.dumps(tool_mcp_app, ensure_ascii=False))}"'
+                                        if tool_mcp_app
+                                        else ""
+                                    )
+                                    tool_calls_display_content = f'{tool_calls_display_content}\n<details type="tool_calls" done="true" id="{tool_call_id}" name="{tool_name}" arguments="{html.escape(json.dumps(tool_arguments))}" result="{html.escape(json.dumps(serialized_result))}" files="{html.escape(json.dumps(tool_result_files)) if tool_result_files else ""}"{mcp_app_attr}>\n<summary>Tool Executed</summary>\n</details>\n'
                                 else:
                                     tool_calls_display_content = f'{tool_calls_display_content}\n<details type="tool_calls" done="false" id="{tool_call_id}" name="{tool_name}" arguments="{html.escape(json.dumps(tool_arguments))}">\n<summary>Executing...</summary>\n</details>'
 
@@ -5483,7 +5589,7 @@ async def process_chat_response(
                                 async with governor_lock:
                                     tool_exec_fetch += 1
 
-                        tool_result_files = normalize_message_files(tool_result)
+                        tool_result_files = _normalize_message_files(tool_result)
                         if isinstance(tool_result, list):
                             kept_items = []
                             for item in tool_result:
@@ -5502,12 +5608,19 @@ async def process_chat_response(
                                 rendered_result, indent=2, ensure_ascii=False
                             )
 
+                        display_result = (
+                            _build_mcp_app_display_result(tool, tool_call_id, tool_result)
+                            or rendered_result
+                        )
+
                         return {
                             "tool_call_id": tool_call_id,
                             "tool_name": tool_name,
                             "params": tool_function_params,
                             "raw_result": tool_result,
                             "result": rendered_result,
+                            "display_result": display_result,
+                            "mcp_app": _build_mcp_app_invocation(tool),
                             "files": tool_result_files,
                             "tool_id": tool.get("tool_id", "") or "",
                         }
@@ -5633,7 +5746,7 @@ async def process_chat_response(
                         except Exception:
                             pass
 
-                        exec_item_files = normalize_message_files(exec_item.get("files"))
+                        exec_item_files = _normalize_message_files(exec_item.get("files"))
                         if exec_item_files:
                             round_message_files = merge_message_files(
                                 round_message_files, exec_item_files
@@ -5643,6 +5756,18 @@ async def process_chat_response(
                             {
                                 "tool_call_id": exec_item.get("tool_call_id", ""),
                                 "content": exec_item.get("result", ""),
+                                **(
+                                    {"mcp_app": exec_item.get("mcp_app")}
+                                    if exec_item.get("mcp_app")
+                                    else {}
+                                ),
+                                **(
+                                    {"display_content": exec_item.get("display_result")}
+                                    if exec_item.get("display_result")
+                                    and exec_item.get("display_result")
+                                    != exec_item.get("result", "")
+                                    else {}
+                                ),
                                 **(
                                     {"files": exec_item_files}
                                     if exec_item_files

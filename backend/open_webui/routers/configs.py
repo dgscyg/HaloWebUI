@@ -1,5 +1,7 @@
 import asyncio
+import base64
 from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from typing import Optional
@@ -9,7 +11,12 @@ from open_webui.config import get_config, save_config
 from open_webui.config import BannerModel
 
 from open_webui.utils.tools import get_tool_server_data, get_tool_servers_data
-from open_webui.utils.mcp import get_mcp_server_data, get_mcp_servers_data
+from open_webui.utils.mcp import (
+    build_mcp_app_resource_proxy_path,
+    get_mcp_server_data,
+    get_mcp_servers_data,
+    read_mcp_resource,
+)
 from open_webui.utils.user_tools import (
     MCP_APPS_GLOBAL_ENABLE_KEY,
     MCP_APPS_KEY,
@@ -428,6 +435,29 @@ def _serialize_mcp_apps_form_state(connections: list[dict]) -> dict[str, object]
     }
 
 
+def _get_mcp_app_resource_proxy_url(server_idx: int, resource: dict) -> str:
+    resource_uri = str(resource.get("uri") or resource.get("resource_uri") or "").strip()
+    return build_mcp_app_resource_proxy_path(server_idx, resource_uri) if resource_uri else ""
+
+
+def _pick_mcp_resource_content(resource_result: dict, resource_uri: str) -> dict | None:
+    contents = resource_result.get("contents") or []
+    if not isinstance(contents, list):
+        return None
+
+    selected = None
+    for item in contents:
+        if not isinstance(item, dict):
+            continue
+        if resource_uri and str(item.get("uri") or "").strip() == resource_uri:
+            selected = item
+            break
+        if selected is None:
+            selected = item
+
+    return selected
+
+
 @router.get("/mcp_servers/apps", response_model=MCPAppsConfigForm)
 async def get_mcp_apps_config(request: Request, user=Depends(get_verified_user)):
     connections = get_user_mcp_server_connections(request, user)
@@ -495,18 +525,29 @@ async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_
                     "tool_name": resource.get("tool_name"),
                     "app_id": resource.get("app_id")
                     or resource.get("id")
+                    or resource.get("uri")
                     or f"mcp-app:{idx}:{resource_idx}",
                     "render_url": resource.get("render_url")
                     or resource.get("url")
+                    or _get_mcp_app_resource_proxy_url(idx, resource)
                     or "",
                     "resource_type": resource.get("resource_type")
                     or resource.get("type")
                     or "resource",
-                    "title": resource.get("title"),
-                    "mime_type": resource.get("mime_type"),
+                    "title": resource.get("title") or resource.get("name"),
+                    "mime_type": resource.get("mime_type") or resource.get("mimeType"),
                     "content": resource.get("content"),
-                    "content_url": resource.get("content_url"),
-                    "metadata": dict(resource.get("metadata") or {}),
+                    "content_url": resource.get("content_url")
+                    or _get_mcp_app_resource_proxy_url(idx, resource)
+                    or None,
+                    "metadata": {
+                        **dict(resource.get("metadata") or {}),
+                        **(
+                            {"resource_uri": resource.get("uri")}
+                            if resource.get("uri")
+                            else {}
+                        ),
+                    },
                 }
                 for resource_idx, resource in enumerate(data.get("resources", []) or [])
                 if isinstance(resource, dict)
@@ -545,6 +586,67 @@ async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_
         MCP_APPS_GLOBAL_ENABLE_KEY: global_enabled,
         "servers": response_servers,
     }
+
+
+@router.get("/mcp_servers/apps/resource")
+async def get_mcp_app_resource(
+    request: Request,
+    server_idx: int,
+    uri: str,
+    user=Depends(get_verified_user),
+):
+    connections = get_user_mcp_server_connections(request, user)
+    if server_idx < 0 or server_idx >= len(connections):
+        raise HTTPException(status_code=404, detail="MCP app resource not found")
+
+    connection = connections[server_idx]
+    base_enabled = _is_mcp_connection_enabled(connection)
+    apps_global_enabled, server_apps_enabled = _get_mcp_apps_form_state(
+        connection,
+        default_global_enabled=False,
+    )
+    if not (base_enabled and apps_global_enabled and server_apps_enabled):
+        raise HTTPException(status_code=403, detail="MCP apps are disabled for this server")
+
+    session_token = getattr(getattr(request.state, "token", None), "credentials", None)
+
+    try:
+        resource_result = await read_mcp_resource(
+            connection,
+            uri=uri,
+            session_token=session_token,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to read MCP app resource: {str(exc)}",
+        )
+
+    selected = _pick_mcp_resource_content(resource_result, uri)
+    if not selected:
+        raise HTTPException(status_code=404, detail="MCP app resource content not found")
+
+    media_type = str(
+        selected.get("mimeType")
+        or selected.get("mime_type")
+        or "text/plain"
+    ).strip() or "text/plain"
+
+    text_content = selected.get("text")
+    if isinstance(text_content, str):
+        return Response(content=text_content, media_type=media_type)
+
+    binary_content = selected.get("blob") or selected.get("data")
+    if isinstance(binary_content, str):
+        try:
+            payload = base64.b64decode(binary_content)
+        except Exception:
+            payload = binary_content.encode("utf-8")
+        return Response(content=payload, media_type=media_type)
+
+    raise HTTPException(status_code=404, detail="Unsupported MCP app resource payload")
 
 
 ############################

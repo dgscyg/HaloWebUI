@@ -42,8 +42,12 @@
 	import ChevronDown from '../icons/ChevronDown.svelte';
 	import Spinner from './Spinner.svelte';
 	import CodeBlock from '../chat/Messages/CodeBlock.svelte';
+	import MCPAppHost from '../chat/Messages/MCPAppHost.svelte';
 	import Markdown from '../chat/Messages/Markdown.svelte';
 	import Image from './Image.svelte';
+	import GlobeAlt from '../icons/GlobeAlt.svelte';
+	import { artifactPreviewTarget, settings, showArtifacts, showControls } from '$lib/stores';
+	import { getMCPAppPreviewPayload } from '../chat/mcpAppPreview';
 
 	export let open = false;
 
@@ -55,6 +59,7 @@
 	export let dir: string | undefined = undefined;
 
 	export let id = '';
+	export let messageId = '';
 	export let title = null;
 	export let attributes: any = null;
 
@@ -92,6 +97,56 @@
 
 	function isImageGenerationTool(name: string): boolean {
 		return ['generate_image', 'edit_image'].includes(name?.toLowerCase() ?? '');
+	}
+
+	const getToolCallPreviewPayload = () =>
+		getMCPAppPreviewPayload({
+			attributes: attributes ?? {}
+		});
+
+	$: mcpAppPreview = attributes?.type === 'tool_calls' ? getToolCallPreviewPayload() : null;
+	$: mcpAppDisplayMode = $settings?.mcpAppDisplayMode ?? 'inline';
+	$: showInlineMCPApp = Boolean(mcpAppPreview) && mcpAppDisplayMode === 'inline';
+
+	let autoOpenedMCPAppPreviewId = '';
+
+	const openMCPAppPreview = (preview = mcpAppPreview) => {
+		if (!preview || !attributes?.id) {
+			return;
+		}
+
+		artifactPreviewTarget.set({
+			messageId: messageId || id || collapsibleId,
+			type: 'mcp-app',
+			toolCallId: attributes.id,
+			...(preview.appId ? { appId: preview.appId } : {}),
+			...(preview.resourceId ? { resourceId: preview.resourceId } : {}),
+			...(preview.resourceUri ? { resourceUri: preview.resourceUri } : {}),
+			...(preview.serverId ? { serverId: preview.serverId } : {}),
+			...(preview.renderUrl ? { renderUrl: preview.renderUrl } : {}),
+			...(preview.content ? { content: preview.content } : {}),
+			...(preview.title ? { title: preview.title } : {}),
+			...(preview.toolName ? { toolName: preview.toolName } : {}),
+			...(preview.toolArguments !== undefined ? { toolArguments: preview.toolArguments } : {}),
+			...(preview.toolResult !== undefined ? { toolResult: preview.toolResult } : {})
+		});
+		showArtifacts.set(true);
+		showControls.set(true);
+	};
+
+	$: if (
+		typeof window !== 'undefined' &&
+		attributes?.type === 'tool_calls' &&
+		attributes?.done === 'true' &&
+		mcpAppPreview &&
+		mcpAppDisplayMode === 'sidebar' &&
+		($settings?.detectArtifacts ?? true) &&
+		autoOpenedMCPAppPreviewId !== String(attributes?.id ?? '')
+	) {
+		autoOpenedMCPAppPreviewId = String(attributes?.id ?? '');
+		window.setTimeout(() => {
+			openMCPAppPreview(mcpAppPreview);
+		}, 0);
 	}
 </script>
 
@@ -233,13 +288,49 @@
 				<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
 					{#if attributes?.type === 'tool_calls'}
 						{#if attributes?.done === 'true'}
-							<Markdown
-								id={`${collapsibleId}-tool-calls-${attributes?.id}-result`}
-								content={`> \`\`\`json
+							{#if mcpAppPreview}
+								{#if showInlineMCPApp}
+									<MCPAppHost preview={mcpAppPreview} />
+								{:else}
+									<div class="rounded-xl border border-primary-200/70 bg-primary-50/70 p-3 dark:border-primary-800/40 dark:bg-primary-950/20">
+										<div class="flex items-start justify-between gap-3">
+											<div class="min-w-0 flex-1">
+												<div class="flex items-center gap-2 text-xs font-medium text-primary-700 dark:text-primary-300">
+													<GlobeAlt className="size-3.5 shrink-0" strokeWidth="2" />
+													<span>MCP App</span>
+												</div>
+												<div class="mt-1 text-sm font-medium text-gray-800 dark:text-gray-100">
+													{mcpAppPreview.title || attributes?.name || 'Open preview'}
+												</div>
+												<div class="mt-1 break-all text-[11px] text-gray-500 dark:text-gray-400">
+													{mcpAppPreview.resourceUri ||
+														mcpAppPreview.renderUrl ||
+														mcpAppPreview.resourceId ||
+														mcpAppPreview.appId}
+												</div>
+											</div>
+											<button
+												class="inline-flex items-center gap-2 rounded-lg border border-primary-200/80 bg-white px-3 py-2 text-xs font-medium text-primary-700 transition-colors hover:bg-primary-100 dark:border-primary-700/50 dark:bg-primary-950/30 dark:text-primary-300 dark:hover:bg-primary-900/40"
+												type="button"
+												on:click={() => {
+													openMCPAppPreview(mcpAppPreview);
+												}}
+											>
+												<GlobeAlt className="size-3.5 shrink-0" strokeWidth="2" />
+												<span>打开预览</span>
+											</button>
+										</div>
+									</div>
+								{/if}
+							{:else}
+								<Markdown
+									id={`${collapsibleId}-tool-calls-${attributes?.id}-result`}
+									content={`> \`\`\`json
 > ${formatJSONString(args)}
 > ${formatJSONString(result)}
 > \`\`\``}
-							/>
+								/>
+							{/if}
 						{:else}
 							<Markdown
 								id={`${collapsibleId}-tool-calls-${attributes?.id}-result`}

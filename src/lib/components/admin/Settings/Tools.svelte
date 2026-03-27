@@ -4,7 +4,7 @@
 	import { onMount, getContext, createEventDispatcher } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import { goto } from '$app/navigation';
-	import { config, tools as toolsStore, user } from '$lib/stores';
+	import { config, settings, tools as toolsStore, user } from '$lib/stores';
 	import { getBackendConfig } from '$lib/apis';
 
 	const { saveAs } = fileSaver;
@@ -33,7 +33,10 @@
 		getNativeToolsConfig,
 		setNativeToolsConfig,
 		getMCPServerConnections,
-		setMCPServerConnections
+		setMCPServerConnections,
+		getMCPAppsConfig,
+		setMCPAppsConfig,
+		getMCPAppsCapabilities
 	} from '$lib/apis/configs';
 
 	import {
@@ -44,6 +47,7 @@
 		getTools,
 		updateToolById
 	} from '$lib/apis/tools';
+	import { updateUserSettings } from '$lib/apis/users';
 
 	// ==================== 标签页状态 ====================
 	$: canManageGlobalToolPolicies = !roleAware || $user?.role === 'admin';
@@ -161,18 +165,28 @@
 			ENABLE_CHANNEL_TOOLS: nativeToolsConfig.ENABLE_CHANNEL_TOOLS,
 			ENABLE_TERMINAL_TOOL: nativeToolsConfig.ENABLE_TERMINAL_TOOL
 		},
-		mcp: mcpServers,
+		mcp: {
+			servers: mcpServers,
+			apps: mcpAppsConfig,
+			displayMode: mcpAppDisplayMode
+		},
 		openapi: openAPIServers
 	});
 
 	let snapshot: {
 		native: Record<string, any>;
-		mcp: Array<any>;
+		mcp: {
+			servers: Array<any>;
+			apps: Record<string, any>;
+			displayMode: 'inline' | 'sidebar';
+		};
 		openapi: Array<any>;
 	};
 	$: {
 		nativeToolsConfig;
 		mcpServers;
+		mcpAppsConfig;
+		mcpAppDisplayMode;
 		openAPIServers;
 		snapshot = buildSnapshot();
 	}
@@ -201,6 +215,21 @@
 	let mcpServers: Array<any> = [];
 	let showMCPModal = false;
 	let editingMCPServerIndex: number | null = null;
+	const defaultMCPAppsConfig = {
+		ENABLE_MCP_APPS: false,
+		MCP_SERVER_APPS: {}
+	};
+	const normalizeMCPAppDisplayMode = (value: unknown): 'inline' | 'sidebar' =>
+		value === 'sidebar' ? 'sidebar' : 'inline';
+	const defaultMCPAppsCapabilities = {
+		ENABLE_MCP_APPS: false,
+		servers: []
+	};
+	let mcpAppsConfig = cloneSettingsSnapshot(defaultMCPAppsConfig);
+	let mcpAppsCapabilities = cloneSettingsSnapshot(defaultMCPAppsCapabilities);
+	let mcpAppDisplayMode: 'inline' | 'sidebar' = normalizeMCPAppDisplayMode(
+		$settings?.mcpAppDisplayMode
+	);
 
 	const getServerDisplayName = (server: any): string => {
 		if (server.name) return server.name;
@@ -211,6 +240,42 @@
 			return server.url;
 		}
 	};
+
+	const normalizeMCPAppsConfig = (value: Record<string, any> | null | undefined) => ({
+		...cloneSettingsSnapshot(defaultMCPAppsConfig),
+		...(value ?? {}),
+		ENABLE_MCP_APPS: Boolean(value?.ENABLE_MCP_APPS),
+		MCP_SERVER_APPS:
+			value?.MCP_SERVER_APPS && typeof value.MCP_SERVER_APPS === 'object'
+				? Object.fromEntries(
+						Object.entries(value.MCP_SERVER_APPS).map(([key, enabled]) => [key, Boolean(enabled)])
+					)
+				: {}
+	});
+
+	const normalizeMCPAppsCapabilities = (value: Record<string, any> | null | undefined) => ({
+		ENABLE_MCP_APPS: Boolean(value?.ENABLE_MCP_APPS),
+		servers: Array.isArray(value?.servers)
+			? value.servers.map((server: any) => ({
+					idx: Number(server?.idx ?? -1),
+					enabled: Boolean(server?.enabled),
+					apps_enabled: Boolean(server?.apps_enabled),
+					server:
+						server?.server && typeof server.server === 'object' ? server.server : {},
+					capabilities:
+						server?.capabilities && typeof server.capabilities === 'object'
+							? server.capabilities
+							: {},
+					resources: Array.isArray(server?.resources) ? server.resources : [],
+					prompts: Array.isArray(server?.prompts) ? server.prompts : [],
+					metadata:
+						server?.metadata && typeof server.metadata === 'object' ? server.metadata : {}
+				}))
+			: []
+	});
+
+	const getMCPAppsServerCapability = (idx: number) =>
+		mcpAppsCapabilities.servers.find((server: any) => server.idx === idx) ?? null;
 
 	// ==================== OpenAPI Servers 配置 ====================
 	let openAPIServers: Array<{
@@ -232,7 +297,9 @@
 		if (section === 'native') {
 			nativeToolsConfig = normalizeNativeToolsConfig(initialSnapshot.native);
 		} else if (section === 'mcp') {
-			mcpServers = cloneSettingsSnapshot(initialSnapshot.mcp);
+			mcpServers = cloneSettingsSnapshot(initialSnapshot.mcp.servers);
+			mcpAppsConfig = cloneSettingsSnapshot(initialSnapshot.mcp.apps);
+			mcpAppDisplayMode = normalizeMCPAppDisplayMode(initialSnapshot.mcp.displayMode);
 		} else if (section === 'openapi') {
 			openAPIServers = cloneSettingsSnapshot(initialSnapshot.openapi);
 		}
@@ -388,6 +455,22 @@
 		}));
 	};
 
+	const loadMCPAppsState = async ({ silent = false }: { silent?: boolean } = {}) => {
+		const [appsRes, capabilitiesRes] = await Promise.all([
+			getMCPAppsConfig(localStorage.token).catch(() => {
+				if (!silent) toast.error($i18n.t('加载 MCP Apps 配置失败'));
+				return null;
+			}),
+			getMCPAppsCapabilities(localStorage.token).catch(() => {
+				if (!silent) toast.error($i18n.t('加载 MCP Apps 能力失败'));
+				return null;
+			})
+		]);
+
+		mcpAppsConfig = normalizeMCPAppsConfig(appsRes);
+		mcpAppsCapabilities = normalizeMCPAppsCapabilities(capabilitiesRes);
+	};
+
 	const addMCPServer = async (server: any) => {
 		mcpServers = [...mcpServers, server];
 		await saveMCPServers();
@@ -413,8 +496,75 @@
 		});
 
 		if (res) {
+			mcpServers = (res?.MCP_SERVER_CONNECTIONS || []).map((c: any) => ({
+				...c,
+				config: {
+					...(c?.config ?? {}),
+					enable: c?.config?.enable ?? c?.enabled ?? true
+				}
+			}));
+			await loadMCPAppsState({ silent: true });
 			if (!silent) toast.success($i18n.t('MCP 服务器已保存'));
 			toolsStore.set(await getTools(localStorage.token));
+			return true;
+		}
+
+		return false;
+	};
+
+	const saveMCPApps = async ({ silent = false }: { silent?: boolean } = {}) => {
+		const res = await setMCPAppsConfig(localStorage.token, mcpAppsConfig).catch(() => {
+			if (!silent) toast.error($i18n.t('保存 MCP Apps 配置失败'));
+			return null;
+		});
+
+		if (res) {
+			mcpAppsConfig = normalizeMCPAppsConfig(res);
+			await loadMCPAppsState({ silent: true });
+			if (!silent) toast.success($i18n.t('MCP Apps 配置已保存'));
+			return true;
+		}
+
+		return false;
+	};
+
+	const updateMCPAppsGlobal = async (enabled: boolean) => {
+		mcpAppsConfig = {
+			...mcpAppsConfig,
+			ENABLE_MCP_APPS: enabled
+		};
+		await saveMCPApps();
+	};
+
+	const updateMCPServerAppToggle = async (index: number, enabled: boolean) => {
+		mcpAppsConfig = {
+			...mcpAppsConfig,
+			MCP_SERVER_APPS: {
+				...mcpAppsConfig.MCP_SERVER_APPS,
+				[String(index)]: enabled
+			}
+		};
+		await saveMCPApps();
+	};
+
+	const saveMCPAppDisplayMode = async (
+		mode: 'inline' | 'sidebar',
+		{ silent = false }: { silent?: boolean } = {}
+	) => {
+		const nextSettings = {
+			...($settings ?? {}),
+			mcpAppDisplayMode: mode
+		};
+
+		const res = await updateUserSettings(localStorage.token, { ui: nextSettings }).catch(() => {
+			if (!silent) toast.error($i18n.t('保存 MCP Apps 展示方式失败'));
+			return null;
+		});
+
+		if (res !== null) {
+			settings.set(nextSettings);
+			mcpAppDisplayMode = mode;
+			if (!silent) toast.success($i18n.t('MCP Apps 展示方式已保存'));
 			return true;
 		}
 
@@ -469,9 +619,13 @@
 				? await saveNativeToolsConfig({ silent: true })
 				: true;
 			const okMCP = await saveMCPServers({ silent: true });
+			const okMCPApps = await saveMCPApps({ silent: true });
+			const okMCPAppDisplayMode = await saveMCPAppDisplayMode(mcpAppDisplayMode, {
+				silent: true
+			});
 			const okOpenAPI = await saveOpenAPIServers({ silent: true });
 
-			if (okNative && okMCP && okOpenAPI) {
+			if (okNative && okMCP && okMCPApps && okMCPAppDisplayMode && okOpenAPI) {
 				initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
 				dispatch('save');
 			} else {
@@ -495,6 +649,8 @@
 
 			nativeToolsConfig = normalizeNativeToolsConfig(nativeRes);
 			openAPIServers = toolServerRes.TOOL_SERVER_CONNECTIONS || [];
+			await loadMCPAppsState({ silent: true });
+			mcpAppDisplayMode = normalizeMCPAppDisplayMode($settings?.mcpAppDisplayMode);
 
 			// 创建初始快照
 			initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
@@ -959,6 +1115,125 @@
 									</div>
 								</div>
 							</div>
+						</div>
+
+						<!-- MCP Apps -->
+						<div
+							class="glass-item p-4"
+						>
+							<div class="flex items-center justify-between gap-3">
+								<div>
+									<div class="text-sm font-medium">{$i18n.t('MCP Apps')}</div>
+									<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+										{$i18n.t('启用后可读取服务器暴露的应用资源、渲染链接和提示能力。')}
+									</div>
+								</div>
+								<Switch
+									state={mcpAppsConfig.ENABLE_MCP_APPS}
+									on:change={(event) => {
+										void updateMCPAppsGlobal(Boolean(event.detail));
+									}}
+								/>
+							</div>
+
+							<div class="mt-4 flex items-center justify-between gap-3 rounded-xl border border-gray-200/70 bg-white/70 p-3 dark:border-gray-800/70 dark:bg-gray-900/40">
+								<div>
+									<div class="text-sm font-medium">{$i18n.t('展示方式')}</div>
+									<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+										{$i18n.t('可切换为聊天区内联渲染，或继续使用右侧预览面板。')}
+									</div>
+								</div>
+								<HaloSelect
+									value={mcpAppDisplayMode}
+									options={[
+										{ value: 'inline', label: $i18n.t('聊天区内联') },
+										{ value: 'sidebar', label: $i18n.t('右侧面板') }
+									]}
+									className="w-fit text-right"
+									on:change={(event) => {
+										const nextMode = normalizeMCPAppDisplayMode(event.detail?.value);
+										mcpAppDisplayMode = nextMode;
+										void saveMCPAppDisplayMode(nextMode);
+									}}
+								/>
+							</div>
+
+							{#if mcpServers.length > 0}
+								<div class="mt-4 space-y-3">
+									{#each mcpServers as server, idx}
+										{@const capability = getMCPAppsServerCapability(idx)}
+										<div class="rounded-xl border border-gray-200/70 bg-white/70 p-3 dark:border-gray-800/70 dark:bg-gray-900/40">
+											<div class="flex items-start justify-between gap-3">
+												<div class="min-w-0 flex-1">
+													<div class="flex flex-wrap items-center gap-2">
+														<div class="text-sm font-medium truncate">{getServerDisplayName(server)}</div>
+														<span class="rounded-full px-2 py-0.5 text-[10px] font-medium {server.config?.enable ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}">
+															{server.config?.enable ? $i18n.t('服务器已启用') : $i18n.t('服务器已禁用')}
+														</span>
+														<span class="rounded-full px-2 py-0.5 text-[10px] font-medium {capability?.apps_enabled ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}">
+															{capability?.apps_enabled ? $i18n.t('Apps 已生效') : $i18n.t('Apps 未生效')}
+														</span>
+													</div>
+													<div class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
+														{server.url}
+													</div>
+												</div>
+												<Switch
+													state={mcpAppsConfig.MCP_SERVER_APPS[String(idx)] ?? true}
+													on:change={(event) => {
+														void updateMCPServerAppToggle(idx, Boolean(event.detail));
+													}}
+												/>
+											</div>
+
+											<div class="mt-3 grid gap-2 md:grid-cols-3">
+												<div class="rounded-lg bg-gray-100/80 px-3 py-2 dark:bg-gray-800/70">
+													<div class="text-[11px] text-gray-500 dark:text-gray-400">{$i18n.t('工具数')}</div>
+													<div class="mt-1 text-sm font-medium text-gray-800 dark:text-gray-100">
+														{capability?.metadata?.tool_count ?? server.tool_count ?? 0}
+													</div>
+												</div>
+												<div class="rounded-lg bg-gray-100/80 px-3 py-2 dark:bg-gray-800/70">
+													<div class="text-[11px] text-gray-500 dark:text-gray-400">{$i18n.t('资源数')}</div>
+													<div class="mt-1 text-sm font-medium text-gray-800 dark:text-gray-100">
+														{capability?.resources?.length ?? 0}
+													</div>
+												</div>
+												<div class="rounded-lg bg-gray-100/80 px-3 py-2 dark:bg-gray-800/70">
+													<div class="text-[11px] text-gray-500 dark:text-gray-400">{$i18n.t('提示数')}</div>
+													<div class="mt-1 text-sm font-medium text-gray-800 dark:text-gray-100">
+														{capability?.prompts?.length ?? 0}
+													</div>
+												</div>
+											</div>
+
+											{#if capability?.resources?.length}
+												<div class="mt-3">
+													<div class="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+														{$i18n.t('可渲染资源')}
+													</div>
+													<div class="space-y-1.5">
+														{#each capability.resources.slice(0, 3) as resource}
+															<div class="rounded-lg border border-gray-200/70 px-3 py-2 text-xs dark:border-gray-800/70">
+																<div class="font-medium text-gray-700 dark:text-gray-200">
+																	{resource.title || resource.app_id}
+																</div>
+																<div class="mt-1 truncate text-gray-500 dark:text-gray-400">
+																	{resource.render_url}
+																</div>
+															</div>
+														{/each}
+													</div>
+												</div>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							{:else}
+								<div class="mt-3 rounded-xl border border-dashed border-gray-200/80 px-4 py-4 text-sm text-gray-500 dark:border-gray-800/80 dark:text-gray-400">
+									{$i18n.t('请先添加 MCP 服务器，随后才能查看和启用 Apps 能力。')}
+								</div>
+							{/if}
 						</div>
 
 						<!-- MCP Servers Management -->

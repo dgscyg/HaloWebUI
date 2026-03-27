@@ -133,7 +133,7 @@
 <!-- {JSON.stringify(tokens)} -->
 {#each renderItems as item, idx (idx)}
 	{#if item.kind === 'tool_call_group'}
-		<ToolCallGroup id={`${id}-tcg-${item.startIdx}`} tokens={item.tokens} />
+		<ToolCallGroup id={`${id}-tcg-${item.startIdx}`} {messageId} tokens={item.tokens} />
 	{:else}
 		{@const token = item.token}
 		{@const tokenIdx = item.originalIdx}
@@ -320,6 +320,7 @@
 		{:else if token.type === 'details'}
 			<Collapsible
 				title={token.summary}
+				{messageId}
 				open={token?.attributes?.type === 'error' || token?.attributes?.type === 'warning'
 					? true
 					: ($settings?.expandDetails ?? false)}

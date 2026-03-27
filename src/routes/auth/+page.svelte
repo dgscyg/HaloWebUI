@@ -52,6 +52,11 @@
 		return urlParams.get(key);
 	};
 
+	const shouldAutoGuestSignIn = () =>
+		($config?.features?.enable_guest_access ?? false) &&
+		($page.url.searchParams.get('guest') === '1' ||
+			$config?.features?.guest_access_mode === 'auto');
+
 	const setSessionUser = async (sessionUser: SessionUser | null) => {
 		if (sessionUser) {
 			toast.success(translate(`You're now logged in.`));
@@ -183,10 +188,7 @@
 
 			await checkOauthCallback();
 
-			if (
-				$page.url.searchParams.get('guest') === '1' &&
-				($config?.features?.enable_guest_access ?? false)
-			) {
+			if (shouldAutoGuestSignIn()) {
 				await guestSignInHandler();
 				guestSignInSucceeded = $user !== undefined;
 			}
@@ -527,6 +529,34 @@
 											: $i18n.t('Continue with LDAP')}</span
 									>
 								</button>
+							</div>
+						{/if}
+
+						{#if ($config?.features?.enable_guest_access ?? false) && $config?.features?.guest_access_mode !== 'auto'}
+							<div class="mt-4">
+								{#if ($config?.features.enable_login_form || $config?.features.enable_ldap) || Object.keys($config?.oauth?.providers ?? {}).length > 0}
+									<div class="inline-flex items-center justify-center w-full mb-4">
+										<hr class="w-32 h-px border-0 dark:bg-gray-100/10 bg-gray-700/10" />
+										<span
+											class="px-3 text-sm font-medium text-gray-500 dark:text-gray-400 bg-transparent"
+											>{$i18n.t('guest')}</span
+										>
+										<hr class="w-32 h-px border-0 dark:bg-gray-100/10 bg-gray-700/10" />
+									</div>
+								{/if}
+
+								<button
+									class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+									type="button"
+									on:click={() => {
+										void guestSignInHandler();
+									}}
+								>
+									{$i18n.t('Continue as Guest')}
+								</button>
+								<div class="mt-2 text-xs text-center text-gray-500 dark:text-gray-400">
+									{$i18n.t('Creates a temporary guest session with standard user permissions.')}
+								</div>
 							</div>
 						{/if}
 					</div>

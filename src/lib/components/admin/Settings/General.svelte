@@ -49,12 +49,16 @@
 
 	// 定义区块字段映射
 	const sectionFields = {
-		security: ['DEFAULT_USER_ROLE', 'ENABLE_SIGNUP', 'SHOW_ADMIN_DETAILS', 'ENABLE_API_KEY', 'ENABLE_API_KEY_ENDPOINT_RESTRICTIONS', 'API_KEY_ALLOWED_ENDPOINTS', 'JWT_EXPIRES_IN'],
+		security: ['DEFAULT_USER_ROLE', 'ENABLE_SIGNUP', 'ENABLE_GUEST_ACCESS', 'GUEST_ACCESS_MODE', 'SHOW_ADMIN_DETAILS', 'ENABLE_API_KEY', 'ENABLE_API_KEY_ENDPOINT_RESTRICTIONS', 'API_KEY_ALLOWED_ENDPOINTS', 'JWT_EXPIRES_IN'],
 		features: ['ENABLE_CHANNELS', 'ENABLE_USER_WEBHOOKS'],
 		system: ['WEBUI_URL']
 	};
 
 	const cloneConfig = (value: typeof adminConfig) => JSON.parse(JSON.stringify(value));
+	const normalizeAdminConfig = (value: typeof adminConfig) => ({
+		GUEST_ACCESS_MODE: 'button',
+		...(value ?? {})
+	});
 
 	// 计算各区块的 dirty 状态
 	const getDirtySections = (
@@ -139,6 +143,7 @@
 			const res = await updateAdminConfig(localStorage.token, adminConfig);
 
 			if (res) {
+				adminConfig = normalizeAdminConfig(res);
 				initialAdminConfig = cloneConfig(adminConfig);
 				await saveHandler?.();
 			} else {
@@ -154,7 +159,7 @@
 
 		await Promise.all([
 			(async () => {
-				adminConfig = await getAdminConfig(localStorage.token);
+				adminConfig = normalizeAdminConfig(await getAdminConfig(localStorage.token));
 				initialAdminConfig = cloneConfig(adminConfig);
 			})(),
 
@@ -425,6 +430,43 @@
 									<div class="text-sm font-medium">{$i18n.t('Enable New Sign Ups')}</div>
 									<Switch bind:state={adminConfig.ENABLE_SIGNUP} />
 								</div>
+								<div
+									class="flex items-center justify-between glass-item px-4 py-3"
+								>
+									<div>
+										<div class="text-sm font-medium">{$i18n.t('Enable Guest Access')}</div>
+										<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+											{$i18n.t('Allow temporary guest sessions from the sign-in page.')}
+										</div>
+									</div>
+									<Switch bind:state={adminConfig.ENABLE_GUEST_ACCESS} />
+								</div>
+								{#if adminConfig?.ENABLE_GUEST_ACCESS}
+									<div
+										class="flex items-center justify-between glass-item px-4 py-3"
+									>
+										<div>
+											<div class="text-sm font-medium">{$i18n.t('Guest Access Mode')}</div>
+											<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+												{$i18n.t('Choose whether guests see a button or enter directly.')}
+											</div>
+										</div>
+										<HaloSelect
+											bind:value={adminConfig.GUEST_ACCESS_MODE}
+											options={[
+												{
+													value: 'button',
+													label: $i18n.t('Show Continue as Guest Button')
+												},
+												{
+													value: 'auto',
+													label: $i18n.t('Direct Guest Entry')
+												}
+											]}
+											className="w-fit max-w-[16rem]"
+										/>
+									</div>
+								{/if}
 								<div
 									class="flex items-center justify-between glass-item px-4 py-3"
 								>

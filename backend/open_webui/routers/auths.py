@@ -34,7 +34,13 @@ from open_webui.env import (
 )
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse, Response
-from open_webui.config import OPENID_PROVIDER_URL, OPENID_END_SESSION_ENDPOINT, ENABLE_OAUTH_SIGNUP, ENABLE_LDAP
+from open_webui.config import (
+    OPENID_PROVIDER_URL,
+    OPENID_END_SESSION_ENDPOINT,
+    ENABLE_OAUTH_SIGNUP,
+    ENABLE_LDAP,
+    normalize_guest_access_mode,
+)
 from open_webui.config import (
     ENABLE_OAUTH_TOKEN_EXCHANGE,
     OAUTH_TOKEN_EXCHANGE_ISSUER,
@@ -806,6 +812,7 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
         "WEBUI_URL": request.app.state.config.WEBUI_URL,
         "ENABLE_SIGNUP": request.app.state.config.ENABLE_SIGNUP,
         "ENABLE_GUEST_ACCESS": request.app.state.config.ENABLE_GUEST_ACCESS,
+        "GUEST_ACCESS_MODE": request.app.state.config.GUEST_ACCESS_MODE,
         "ENABLE_API_KEY": request.app.state.config.ENABLE_API_KEY,
         "ENABLE_API_KEY_ENDPOINT_RESTRICTIONS": request.app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
         "API_KEY_ALLOWED_ENDPOINTS": request.app.state.config.API_KEY_ALLOWED_ENDPOINTS,
@@ -822,6 +829,7 @@ class AdminConfig(BaseModel):
     WEBUI_URL: str
     ENABLE_SIGNUP: bool
     ENABLE_GUEST_ACCESS: bool
+    GUEST_ACCESS_MODE: str = "button"
     ENABLE_API_KEY: bool
     ENABLE_API_KEY_ENDPOINT_RESTRICTIONS: bool
     API_KEY_ALLOWED_ENDPOINTS: str
@@ -840,6 +848,9 @@ async def update_admin_config(
     request.app.state.config.WEBUI_URL = form_data.WEBUI_URL
     request.app.state.config.ENABLE_SIGNUP = form_data.ENABLE_SIGNUP
     request.app.state.config.ENABLE_GUEST_ACCESS = form_data.ENABLE_GUEST_ACCESS
+    request.app.state.config.GUEST_ACCESS_MODE = normalize_guest_access_mode(
+        form_data.GUEST_ACCESS_MODE
+    )
 
     request.app.state.config.ENABLE_API_KEY = form_data.ENABLE_API_KEY
     request.app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS = (
@@ -871,6 +882,7 @@ async def update_admin_config(
         "WEBUI_URL": request.app.state.config.WEBUI_URL,
         "ENABLE_SIGNUP": request.app.state.config.ENABLE_SIGNUP,
         "ENABLE_GUEST_ACCESS": request.app.state.config.ENABLE_GUEST_ACCESS,
+        "GUEST_ACCESS_MODE": request.app.state.config.GUEST_ACCESS_MODE,
         "ENABLE_API_KEY": request.app.state.config.ENABLE_API_KEY,
         "ENABLE_API_KEY_ENDPOINT_RESTRICTIONS": request.app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
         "API_KEY_ALLOWED_ENDPOINTS": request.app.state.config.API_KEY_ALLOWED_ENDPOINTS,

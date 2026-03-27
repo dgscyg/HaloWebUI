@@ -79,6 +79,7 @@ from open_webui.routers import (
     files,
     functions,
     memories,
+    mcp,
     models,
     knowledge,
     notes,
@@ -320,6 +321,7 @@ from open_webui.config import (
     ENABLE_SIGNUP,
     ENABLE_LOGIN_FORM,
     ENABLE_GUEST_ACCESS,
+    GUEST_ACCESS_MODE,
     ENABLE_API_KEY,
     ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
     API_KEY_ALLOWED_ENDPOINTS,
@@ -717,6 +719,7 @@ app.state.config.WEBUI_URL = WEBUI_URL
 app.state.config.ENABLE_SIGNUP = ENABLE_SIGNUP
 app.state.config.ENABLE_LOGIN_FORM = ENABLE_LOGIN_FORM
 app.state.config.ENABLE_GUEST_ACCESS = ENABLE_GUEST_ACCESS
+app.state.config.GUEST_ACCESS_MODE = GUEST_ACCESS_MODE
 
 app.state.config.ENABLE_API_KEY = ENABLE_API_KEY
 app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS = (
@@ -1201,6 +1204,7 @@ app.include_router(audio.router, prefix="/api/v1/audio", tags=["audio"])
 app.include_router(retrieval.router, prefix="/api/v1/retrieval", tags=["retrieval"])
 
 app.include_router(configs.router, prefix="/api/v1/configs", tags=["configs"])
+app.include_router(mcp.router, prefix="/api/v1/mcp", tags=["mcp"])
 
 app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
@@ -1711,6 +1715,7 @@ async def get_app_config(request: Request):
             "enable_signup": app.state.config.ENABLE_SIGNUP,
             "enable_login_form": app.state.config.ENABLE_LOGIN_FORM,
             "enable_guest_access": app.state.config.ENABLE_GUEST_ACCESS,
+            "guest_access_mode": app.state.config.GUEST_ACCESS_MODE,
             "enable_websocket": ENABLE_WEBSOCKET_SUPPORT,
             **(
                 {

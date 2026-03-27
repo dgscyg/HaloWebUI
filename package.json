@@ -58,6 +58,7 @@
 		"@codemirror/language-data": "^6.5.1",
 		"@codemirror/theme-one-dark": "^6.1.2",
 		"@huggingface/transformers": "^3.0.0",
+		"@modelcontextprotocol/ext-apps": "^1.0.1",
 		"@sveltejs/adapter-node": "^2.0.0",
 		"@sveltejs/svelte-virtual-list": "^3.0.1",
 		"@tiptap/core": "^2.10.0",

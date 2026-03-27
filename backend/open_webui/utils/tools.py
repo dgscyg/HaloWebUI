@@ -44,6 +44,58 @@ import copy
 log = logging.getLogger(__name__)
 
 
+def _as_dict(value: Any) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _normalize_visibility(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value.strip().lower()] if value.strip() else []
+    if isinstance(value, list):
+        normalized = []
+        for item in value:
+            item_text = str(item or "").strip().lower()
+            if item_text:
+                normalized.append(item_text)
+        return normalized
+    return []
+
+
+def _is_mcp_connection_enabled(connection: dict) -> bool:
+    config = _as_dict(connection.get("config"))
+    if "enable" in config:
+        return bool(config.get("enable"))
+    if "enabled" in connection:
+        return bool(connection.get("enabled"))
+    return True
+
+
+def _is_mcp_apps_enabled(connection: dict) -> bool:
+    apps_cfg = _as_dict(connection.get("mcp_apps"))
+    return (
+        _is_mcp_connection_enabled(connection)
+        and bool(apps_cfg.get("ENABLE_MCP_APPS"))
+        and bool(apps_cfg.get("enabled", True))
+    )
+
+
+def _get_mcp_tool_ui_resource_uri(mcp_tool: dict) -> str:
+    meta = _as_dict(mcp_tool.get("_meta"))
+    ui_meta = _as_dict(meta.get("ui"))
+    return str(
+        ui_meta.get("resourceUri")
+        or meta.get("ui/resourceUri")
+        or ""
+    ).strip()
+
+
+def _is_mcp_tool_app_only(mcp_tool: dict) -> bool:
+    meta = _as_dict(mcp_tool.get("_meta"))
+    ui_meta = _as_dict(meta.get("ui"))
+    visibility = _normalize_visibility(ui_meta.get("visibility"))
+    return bool(visibility) and set(visibility) == {"app"}
+
+
 def get_async_tool_function_and_apply_extra_params(
     function: Callable, extra_params: dict
 ) -> Callable[..., Awaitable]:
@@ -206,10 +258,14 @@ def get_tools(
                     return base
 
                 for mcp_tool in mcp_server_data.get("tools", []) or []:
+                    if _is_mcp_tool_app_only(mcp_tool):
+                        continue
+
                     original_tool_name = mcp_tool.get("name") or ""
                     function_name = make_mcp_function_name(
                         server_idx, original_tool_name
                     )
+                    ui_resource_uri = _get_mcp_tool_ui_resource_uri(mcp_tool)
 
                     input_schema = mcp_tool.get("inputSchema") or {}
                     if not isinstance(input_schema, dict):
@@ -298,6 +354,9 @@ def get_tools(
                             "mcp": {
                                 "server_idx": server_idx,
                                 "tool_name": original_tool_name,
+                                "apps_enabled": _is_mcp_apps_enabled(mcp_server_connection),
+                                "ui_resource_uri": ui_resource_uri,
+                                "title": mcp_tool.get("title") or original_tool_name,
                             }
                         },
                     }

@@ -76,18 +76,52 @@
 	export let onChange = () => {};
 
 	let _value = '';
+	let suppressDocChangeCallback = false;
 
 	$: if (value !== undefined && value !== null) {
 		updateValue();
 	}
 
+	const queueEditorDispatch = (callback: () => void) => {
+		window.setTimeout(() => {
+			if (!codeEditor) {
+				return;
+			}
+
+			callback();
+		}, 0);
+	};
+
 	const updateValue = () => {
 		if (_value !== value) {
-			const changes = findChanges(_value, value);
 			_value = value;
 
-			if (codeEditor && changes.length > 0) {
-				codeEditor.dispatch({ changes });
+			if (codeEditor) {
+				const nextValue = String(value ?? '');
+				queueEditorDispatch(() => {
+					if (!codeEditor) {
+						return;
+					}
+
+					const currentDoc = codeEditor.state.doc.toString();
+					if (currentDoc === nextValue) {
+						return;
+					}
+
+					const changes = findChanges(currentDoc, nextValue);
+					if (changes.length === 0) {
+						return;
+					}
+
+					suppressDocChangeCallback = true;
+					try {
+						codeEditor.dispatch({ changes });
+					} finally {
+						window.setTimeout(() => {
+							suppressDocChangeCallback = false;
+						}, 0);
+					}
+				});
 			}
 		}
 	};
@@ -207,7 +241,9 @@
 		EditorView.updateListener.of((e) => {
 			if (e.docChanged) {
 				_value = e.state.doc.toString();
-				onChange(_value);
+				if (!suppressDocChangeCallback) {
+					onChange(_value);
+				}
 			}
 		}),
 		editorChromeTheme.of([]),
@@ -228,8 +264,10 @@
 	const setLanguage = async () => {
 		const language = await getLang();
 		if (language && codeEditor) {
-			codeEditor.dispatch({
-				effects: editorLanguage.reconfigure(language)
+			queueEditorDispatch(() => {
+				codeEditor?.dispatch({
+					effects: editorLanguage.reconfigure(language)
+				});
 			});
 		}
 	};
@@ -287,11 +325,13 @@
 		if (!codeEditor) return;
 
 		const chromeTheme = await getEditorChromeTheme(DEFAULT_HIGHLIGHTER_THEME, darkMode);
-		codeEditor.dispatch({
-			effects: [
-				editorChromeTheme.reconfigure(buildEditorChromeExtension(chromeTheme, darkMode)),
-				editorSyntaxTheme.reconfigure(darkMode ? oneDark : githubLight)
-			]
+		queueEditorDispatch(() => {
+			codeEditor?.dispatch({
+				effects: [
+					editorChromeTheme.reconfigure(buildEditorChromeExtension(chromeTheme, darkMode)),
+					editorSyntaxTheme.reconfigure(darkMode ? oneDark : githubLight)
+				]
+			});
 		});
 	};
 
@@ -315,17 +355,21 @@
 
 			if (!codeEditor || currentRequestId !== themeApplyRequestId) return;
 
-			codeEditor.dispatch({
-				effects: [
-					editorChromeTheme.reconfigure(buildEditorChromeExtension(chromeTheme, darkMode)),
-					editorSyntaxTheme.reconfigure(
-						shikiModule.default({
-							highlighter,
-							language: resolvedLanguage,
-							theme: runtimeThemeId
-						})
-					)
-				]
+			queueEditorDispatch(() => {
+				if (!codeEditor || currentRequestId !== themeApplyRequestId) return;
+
+				codeEditor.dispatch({
+					effects: [
+						editorChromeTheme.reconfigure(buildEditorChromeExtension(chromeTheme, darkMode)),
+						editorSyntaxTheme.reconfigure(
+							shikiModule.default({
+								highlighter,
+								language: resolvedLanguage,
+								theme: runtimeThemeId
+							})
+						)
+					]
+				});
 			});
 		} catch (error) {
 			console.error('Failed to apply shiki theme to CodeMirror', error);
@@ -335,7 +379,6 @@
 	};
 
 	onMount(() => {
-		console.log(value);
 		if (value === '') {
 			value = boilerplate;
 		}

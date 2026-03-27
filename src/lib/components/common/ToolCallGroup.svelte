@@ -10,11 +10,15 @@
 	import ChevronDown from '../icons/ChevronDown.svelte';
 	import WrenchSolid from '../icons/WrenchSolid.svelte';
 	import Spinner from './Spinner.svelte';
+	import MCPAppHost from '../chat/Messages/MCPAppHost.svelte';
 	import Markdown from '../chat/Messages/Markdown.svelte';
 	import Image from './Image.svelte';
 	import GlobeAlt from '../icons/GlobeAlt.svelte';
+	import { artifactPreviewTarget, settings, showArtifacts, showControls } from '$lib/stores';
+	import { getMCPAppPreviewPayload } from '../chat/mcpAppPreview';
 
 	export let id: string = '';
+	export let messageId: string = '';
 	export let tokens: any[] = [];
 
 	$: totalCount = tokens.length;
@@ -125,6 +129,97 @@
 	$: selectedToken = selectedIdx !== null ? tokens[selectedIdx] : null;
 	$: selectedAttrs = selectedToken?.attributes;
 	$: selectedDone = selectedAttrs?.done === 'true';
+	$: selectedAppPreview = getMCPAppPreviewPayload(selectedToken);
+	$: mcpAppDisplayMode = $settings?.mcpAppDisplayMode ?? 'inline';
+	$: showInlineMCPApp = Boolean(selectedAppPreview) && mcpAppDisplayMode === 'inline';
+
+	let autoOpenedMCPAppPreviewId = '';
+
+	const findFirstMCPAppPreviewToken = () =>
+		tokens.find((token) => token?.attributes?.done === 'true' && getMCPAppPreviewPayload(token));
+
+	function openAppPreview() {
+		if (!selectedAppPreview || !selectedAttrs?.id) {
+			return;
+		}
+
+		artifactPreviewTarget.set({
+			messageId,
+			type: 'mcp-app',
+			toolCallId: selectedAttrs.id,
+			...(selectedAppPreview.appId ? { appId: selectedAppPreview.appId } : {}),
+			...(selectedAppPreview.resourceId ? { resourceId: selectedAppPreview.resourceId } : {}),
+			...(selectedAppPreview.resourceUri ? { resourceUri: selectedAppPreview.resourceUri } : {}),
+			...(selectedAppPreview.serverId ? { serverId: selectedAppPreview.serverId } : {}),
+			...(selectedAppPreview.renderUrl ? { renderUrl: selectedAppPreview.renderUrl } : {}),
+			...(selectedAppPreview.content ? { content: selectedAppPreview.content } : {}),
+			...(selectedAppPreview.title ? { title: selectedAppPreview.title } : {}),
+			...(selectedAppPreview.toolName ? { toolName: selectedAppPreview.toolName } : {}),
+			...(selectedAppPreview.toolArguments !== undefined
+				? { toolArguments: selectedAppPreview.toolArguments }
+				: {}),
+			...(selectedAppPreview.toolResult !== undefined
+				? { toolResult: selectedAppPreview.toolResult }
+				: {})
+		});
+		showArtifacts.set(true);
+		showControls.set(true);
+	}
+
+	function openAppPreviewForToken(token) {
+		const preview = getMCPAppPreviewPayload(token);
+		const attrs = token?.attributes;
+		if (!preview || !attrs?.id) {
+			return;
+		}
+
+		artifactPreviewTarget.set({
+			messageId,
+			type: 'mcp-app',
+			toolCallId: attrs.id,
+			...(preview.appId ? { appId: preview.appId } : {}),
+			...(preview.resourceId ? { resourceId: preview.resourceId } : {}),
+			...(preview.resourceUri ? { resourceUri: preview.resourceUri } : {}),
+			...(preview.serverId ? { serverId: preview.serverId } : {}),
+			...(preview.renderUrl ? { renderUrl: preview.renderUrl } : {}),
+			...(preview.content ? { content: preview.content } : {}),
+			...(preview.title ? { title: preview.title } : {}),
+			...(preview.toolName ? { toolName: preview.toolName } : {}),
+			...(preview.toolArguments !== undefined ? { toolArguments: preview.toolArguments } : {}),
+			...(preview.toolResult !== undefined ? { toolResult: preview.toolResult } : {})
+		});
+		showArtifacts.set(true);
+		showControls.set(true);
+	}
+
+	$: if (selectedIdx === null) {
+		const firstPreviewToken = findFirstMCPAppPreviewToken();
+		if (firstPreviewToken) {
+			const previewIdx = tokens.indexOf(firstPreviewToken);
+			if (previewIdx >= 0) {
+				selectedIdx = previewIdx;
+			}
+		}
+	}
+
+	$: {
+		const firstPreviewToken = findFirstMCPAppPreviewToken();
+		const preview = firstPreviewToken ? getMCPAppPreviewPayload(firstPreviewToken) : null;
+		const previewId = String(firstPreviewToken?.attributes?.id ?? '');
+		if (
+			typeof window !== 'undefined' &&
+			preview &&
+			previewId &&
+			mcpAppDisplayMode === 'sidebar' &&
+			($settings?.detectArtifacts ?? true) &&
+			autoOpenedMCPAppPreviewId !== previewId
+		) {
+			autoOpenedMCPAppPreviewId = previewId;
+			window.setTimeout(() => {
+				openAppPreviewForToken(firstPreviewToken);
+			}, 0);
+		}
+	}
 </script>
 
 <div class="-mx-0.5">
@@ -218,7 +313,49 @@
 						{toolName}
 					</div>
 
-					{#if isWebSearchTool(toolName) && selectedDone}
+					{#if selectedAppPreview && selectedDone}
+						{#if showInlineMCPApp}
+							<MCPAppHost preview={selectedAppPreview} />
+						{:else}
+							<div class="mb-2">
+								<button
+									class="inline-flex items-center gap-2 rounded-lg border border-primary-200/60 bg-primary-50/80 px-3 py-2 text-xs font-medium text-primary-700 transition-colors hover:bg-primary-100 dark:border-primary-700/40 dark:bg-primary-900/20 dark:text-primary-300 dark:hover:bg-primary-900/30"
+									on:click={openAppPreview}
+								>
+									<GlobeAlt className="size-3.5 shrink-0" strokeWidth="2" />
+									<span>{selectedAppPreview.title || 'Open preview'}</span>
+								</button>
+							</div>
+
+							<div class="rounded-xl border border-primary-200/70 bg-primary-50/70 p-3 dark:border-primary-800/40 dark:bg-primary-950/20">
+								<div class="flex items-start justify-between gap-3">
+									<div class="min-w-0 flex-1">
+										<div class="flex items-center gap-2 text-xs font-medium text-primary-700 dark:text-primary-300">
+											<GlobeAlt className="size-3.5 shrink-0" strokeWidth="2" />
+											<span>MCP App</span>
+										</div>
+										<div class="mt-1 text-sm font-medium text-gray-800 dark:text-gray-100">
+											{selectedAppPreview.title || toolName || 'Open preview'}
+										</div>
+										<div class="mt-1 break-all text-[11px] text-gray-500 dark:text-gray-400">
+											{selectedAppPreview.resourceUri ||
+												selectedAppPreview.renderUrl ||
+												selectedAppPreview.resourceId ||
+												selectedAppPreview.appId}
+										</div>
+									</div>
+									<button
+										class="inline-flex items-center gap-2 rounded-lg border border-primary-200/80 bg-white px-3 py-2 text-xs font-medium text-primary-700 transition-colors hover:bg-primary-100 dark:border-primary-700/50 dark:bg-primary-950/30 dark:text-primary-300 dark:hover:bg-primary-900/40"
+										type="button"
+										on:click={openAppPreview}
+									>
+										<GlobeAlt className="size-3.5 shrink-0" strokeWidth="2" />
+										<span>打开预览</span>
+									</button>
+								</div>
+							</div>
+						{/if}
+					{:else if isWebSearchTool(toolName) && selectedDone}
 						{@const searchQuery = parseSearchQuery(args)}
 						{@const searchResults = parseSearchResults(result)}
 
@@ -333,15 +470,15 @@
 						/>
 					{/if}
 
-						{#if selectedDone && !isImageGenerationTool(toolName) && typeof files === 'object'}
-							{#each files ?? [] as file}
-								{#if typeof file === 'string' && file.startsWith('data:image/')}
-									<Image src={file} alt="Image" />
-								{:else if file?.type === 'image' && file?.url}
-									<Image src={file.url} alt="Image" />
-								{/if}
-							{/each}
-						{/if}
+					{#if selectedDone && !isImageGenerationTool(toolName) && typeof files === 'object'}
+						{#each files ?? [] as file}
+							{#if typeof file === 'string' && file.startsWith('data:image/')}
+								<Image src={file} alt="Image" />
+							{:else if file?.type === 'image' && file?.url}
+								<Image src={file.url} alt="Image" />
+							{/if}
+						{/each}
+					{/if}
 				</div>
 			{/if}
 		</div>

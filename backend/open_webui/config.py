@@ -417,11 +417,18 @@ class AppConfig:
                     if self._state[key].value != decoded_value:
                         self._state[key].value = decoded_value
                         log.info(f"Updated {key} from Redis: {decoded_value}")
-
                 except json.JSONDecodeError:
                     log.error(f"Invalid JSON format in Redis for {key}: {redis_value}")
 
         return self._state[key].value
+
+
+VALID_GUEST_ACCESS_MODES = {"button", "auto"}
+
+
+def normalize_guest_access_mode(value: object) -> str:
+    mode = str(value or "").strip().lower()
+    return mode if mode in VALID_GUEST_ACCESS_MODES else "button"
 
 
 ####################################
@@ -1372,6 +1379,12 @@ ENABLE_GUEST_ACCESS = PersistentConfig(
     "ENABLE_GUEST_ACCESS",
     "auth.guest.enable",
     os.environ.get("ENABLE_GUEST_ACCESS", "False").lower() == "true",
+)
+
+GUEST_ACCESS_MODE = PersistentConfig(
+    "GUEST_ACCESS_MODE",
+    "auth.guest.mode",
+    normalize_guest_access_mode(os.environ.get("GUEST_ACCESS_MODE", "button")),
 )
 
 

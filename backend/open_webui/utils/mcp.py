@@ -4,6 +4,7 @@ import logging
 import ssl
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
+from urllib.parse import quote
 from uuid import uuid4
 
 import aiohttp
@@ -83,44 +84,85 @@ async def _read_jsonrpc_response(
     if "text/event-stream" not in content_type:
         return await response.json()
 
-    # SSE: read `data: {...}` lines and stop when we see the final JSON-RPC message for request_id.
-    buffer = ""
-    async for raw_line in response.content:
-        try:
-            line = raw_line.decode("utf-8", errors="ignore").strip()
-        except Exception:
-            continue
+    async def iter_sse_payloads():
+        frame_buffer = ""
 
-        if not line:
-            continue
-
-        if line.startswith("data:"):
-            payload = line[len("data:") :].strip()
-            if not payload:
+        async for raw_chunk in response.content.iter_chunked(65536):
+            if not raw_chunk:
                 continue
-            if payload == "[DONE]":
-                break
 
-            # Handle both one-line JSON and chunked JSON.
-            candidate = payload if not buffer else buffer + payload
             try:
-                msg = json.loads(candidate)
-                buffer = ""
+                frame_buffer += raw_chunk.decode("utf-8", errors="ignore")
             except Exception:
-                buffer = candidate
                 continue
 
-            if str(msg.get("id", "")) == str(request_id):
-                return msg
+            frame_buffer = frame_buffer.replace("\r\n", "\n")
 
-            # Forward intermediate notifications (no id → JSON-RPC notification).
-            if "id" not in msg and on_notification is not None:
-                try:
-                    await on_notification(msg)
-                except Exception:
-                    pass
+            while "\n\n" in frame_buffer:
+                frame, frame_buffer = frame_buffer.split("\n\n", 1)
+                data_lines: list[str] = []
+
+                for raw_line in frame.split("\n"):
+                    line = raw_line.strip()
+                    if not line or line.startswith(":"):
+                        continue
+                    if line.startswith("data:"):
+                        data_lines.append(line[len("data:") :].strip())
+
+                if data_lines:
+                    yield "\n".join(data_lines).strip()
+
+        trailing_frame = frame_buffer.strip()
+        if trailing_frame:
+            data_lines: list[str] = []
+            for raw_line in trailing_frame.split("\n"):
+                line = raw_line.strip()
+                if not line or line.startswith(":"):
+                    continue
+                if line.startswith("data:"):
+                    data_lines.append(line[len("data:") :].strip())
+
+            if data_lines:
+                yield "\n".join(data_lines).strip()
+
+    # SSE: read `data: {...}` payloads and stop when we see the final JSON-RPC message for request_id.
+    buffer = ""
+    async for payload in iter_sse_payloads():
+        if not payload:
+            continue
+        if payload == "[DONE]":
+            break
+
+        # Handle both one-frame JSON and chunked JSON fragments.
+        candidate = payload if not buffer else buffer + payload
+        try:
+            msg = json.loads(candidate)
+            buffer = ""
+        except Exception:
+            buffer = candidate
+            continue
+
+        if str(msg.get("id", "")) == str(request_id):
+            return msg
+
+        # Forward intermediate notifications (no id → JSON-RPC notification).
+        if "id" not in msg and on_notification is not None:
+            try:
+                await on_notification(msg)
+            except Exception:
+                pass
 
     raise RuntimeError("MCP server closed the stream before sending a response.")
+
+
+def build_mcp_app_resource_proxy_path(server_idx: int, uri: str) -> str:
+    normalized_uri = str(uri or "").strip()
+    if not normalized_uri:
+        return ""
+    return (
+        f"/api/v1/configs/mcp_servers/apps/resource"
+        f"?server_idx={int(server_idx)}&uri={quote(normalized_uri, safe='')}"
+    )
 
 
 @dataclass
@@ -277,6 +319,19 @@ class MCPStreamableHttpClient:
     async def list_resources(self) -> List[Dict[str, Any]]:
         return await self._list_paginated("resources/list", "resources")
 
+    async def read_resource(self, uri: str) -> Dict[str, Any]:
+        request_id = str(uuid4())
+        payload = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "resources/read",
+            "params": {"uri": uri},
+        }
+        msg, _ = await self._post_jsonrpc(payload)
+        if "error" in msg:
+            raise RuntimeError(msg["error"])
+        return msg.get("result", {}) or {}
+
     async def call_tool(
         self,
         name: str,
@@ -412,3 +467,23 @@ async def execute_mcp_tool(
     await client.notify_initialized()
     return await client.call_tool(name=name, arguments=arguments or {}, on_notification=on_notification)
 
+
+async def read_mcp_resource(
+    connection: Dict[str, Any],
+    *,
+    uri: str,
+    session_token: Optional[str] = None,
+    protocol_version: str = DEFAULT_MCP_PROTOCOL_VERSION,
+) -> Dict[str, Any]:
+    url = connection.get("url") or ""
+    if not url:
+        raise ValueError("Missing MCP server URL")
+
+    client = MCPStreamableHttpClient(
+        url,
+        auth_headers=_get_auth_headers(connection, session_token),
+        protocol_version=protocol_version,
+    )
+    await client.initialize()
+    await client.notify_initialized()
+    return await client.read_resource(uri=uri)
