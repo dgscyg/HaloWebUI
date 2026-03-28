@@ -22,17 +22,29 @@ ARG BUILD_HASH=dev-build
 # Override at your own risk - non-root configurations are untested
 ARG UID=0
 ARG GID=0
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
 
 ######## WebUI frontend ########
 FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS frontend-build
 ARG BUILD_HASH
 ARG ENABLE_PYODIDE=false
 ARG VITE_SOURCEMAP=false
+ARG NPM_REGISTRY
 
 WORKDIR /app
 
+# @huggingface/transformers pulls in onnxruntime-node, whose install script
+# tries to download optional CUDA binaries on linux/x64. The frontend build only
+# needs the web runtime, so always skip that optional CUDA download here.
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip \
+    NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+
 COPY package.json package-lock.json .npmrc ./
-RUN npm ci
+RUN npm ci --foreground-scripts
 
 COPY src ./src
 COPY static ./static
@@ -60,6 +72,10 @@ ARG USE_CUDA_VER
 ARG USE_EMBEDDING_MODEL
 ARG USE_RERANKING_MODEL
 ARG USE_TIKTOKEN_ENCODING_NAME
+ARG DEBIAN_MIRROR
+ARG DEBIAN_SECURITY_MIRROR
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
 
 ENV USE_CUDA_DOCKER=${USE_CUDA} \
     USE_CUDA_DOCKER_VER=${USE_CUDA_VER} \
@@ -73,13 +89,22 @@ ENV USE_CUDA_DOCKER=${USE_CUDA} \
     SENTENCE_TRANSFORMERS_HOME="/app/backend/data/cache/embedding/models" \
     TIKTOKEN_CACHE_DIR="/app/backend/data/cache/tiktoken" \
     HF_HOME="/app/backend/data/cache/embedding/models" \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
     PATH="/opt/venv/bin:${PATH}"
 
 WORKDIR /app/backend
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" /etc/apt/sources.list; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends gcc python3-dev; \
+    rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/venv
 
@@ -120,6 +145,10 @@ ARG USE_RERANKING_MODEL
 ARG USE_TIKTOKEN_ENCODING_NAME
 ARG UID
 ARG GID
+ARG DEBIAN_MIRROR
+ARG DEBIAN_SECURITY_MIRROR
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
 
 ENV ENV=prod \
     PORT=8080 \
@@ -144,6 +173,8 @@ ENV ENV=prod \
     TIKTOKEN_ENCODING_NAME="$USE_TIKTOKEN_ENCODING_NAME" \
     TIKTOKEN_CACHE_DIR="/app/backend/data/cache/tiktoken" \
     HF_HOME="/app/backend/data/cache/embedding/models" \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
     PATH="/opt/venv/bin:${PATH}" \
     HOME=/root
 
@@ -162,6 +193,12 @@ RUN set -eux; \
         local-audio) extra_apt_packages="ffmpeg libsm6 libxext6" ;; \
         docs-full|full) extra_apt_packages="pandoc ffmpeg libsm6 libxext6" ;; \
     esac; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" /etc/apt/sources.list; \
+    fi; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         curl \
