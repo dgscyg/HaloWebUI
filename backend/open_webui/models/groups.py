@@ -145,6 +145,23 @@ class GroupTable:
         except Exception:
             return None
 
+    def get_group_by_name(self, name: str) -> Optional[GroupModel]:
+        normalized_name = str(name or "").strip().casefold()
+        if not normalized_name:
+            return None
+
+        try:
+            with get_db() as db:
+                group = (
+                    db.query(Group)
+                    .filter(func.lower(func.trim(Group.name)) == normalized_name)
+                    .order_by(Group.updated_at.desc())
+                    .first()
+                )
+                return GroupModel.model_validate(group) if group else None
+        except Exception:
+            return None
+
     def get_group_user_ids_by_id(self, id: str) -> Optional[str]:
         group = self.get_group_by_id(id)
         if group:

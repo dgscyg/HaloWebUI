@@ -17,6 +17,7 @@
 | 实时通信 | Socket.IO | WebSocket 双向通信 |
 | 数据库 | SQLite / PostgreSQL | 默认 SQLite，支持 PostgreSQL |
 | 缓存 | Redis (可选) | 配置同步、速率限制 |
+| 容器构建 | Docker 多阶段构建 | `Dockerfile` 支持 `NPM_REGISTRY`、`DEBIAN_MIRROR`、`DEBIAN_SECURITY_MIRROR`、`PIP_INDEX_URL`、`PIP_TRUSTED_HOST` 覆盖镜像源 |
 
 ## 3. 核心模块
 
@@ -35,6 +36,7 @@
 | `/api/v1/files` | files.py | 文件上传、元数据管理 |
 | `/api/v1/knowledge` | knowledge.py | 知识库管理 |
 | `/api/v1/retrieval` | retrieval.py | RAG 文档检索 |
+| `/api/v1/utils` | utils.py | 代码格式化、Markdown 转 HTML、聊天 PDF 导出；代码格式化依赖运行时 `black` |
 | `/ollama` | ollama.py | Ollama API 兼容层 |
 | `/openai` | openai.py | OpenAI API 兼容层 |
 | `/gemini` | gemini.py | Google Gemini API |

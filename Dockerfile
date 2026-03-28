@@ -62,8 +62,13 @@ ENV APP_BUILD_HASH=${BUILD_HASH} \
 
 RUN npm run build
 
+FROM python:3.11-slim-bookworm AS python-base
+
+COPY scripts/replace-debian-mirrors.sh /usr/local/bin/replace-debian-mirrors
+RUN chmod +x /usr/local/bin/replace-debian-mirrors
+
 ######## WebUI backend builder ########
-FROM python:3.11-slim-bookworm AS backend-builder
+FROM python-base AS backend-builder
 
 ARG USE_CUDA
 ARG INSTALL_PROFILE
@@ -96,12 +101,7 @@ ENV USE_CUDA_DOCKER=${USE_CUDA} \
 WORKDIR /app/backend
 
 RUN set -eux; \
-    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
-    fi; \
-    if [ -f /etc/apt/sources.list ]; then \
-        sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" /etc/apt/sources.list; \
-    fi; \
+    replace-debian-mirrors "${DEBIAN_MIRROR}" "${DEBIAN_SECURITY_MIRROR}"; \
     apt-get update; \
     apt-get install -y --no-install-recommends gcc python3-dev; \
     rm -rf /var/lib/apt/lists/*
@@ -122,6 +122,8 @@ RUN set -eux; \
         fi; \
     fi; \
     pip install --no-cache-dir -r "${requirements_file}"; \
+    # `/api/v1/utils/code/format` uses black at runtime, but build profiles do not include dev-test deps.
+    pip install --no-cache-dir black==25.1.0; \
     if [ "$PRELOAD_LOCAL_MODELS" = "true" ]; then \
         if [ "$INSTALL_PROFILE" = "local-rag" ] || [ "$INSTALL_PROFILE" = "full" ]; then \
             python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"; \
@@ -133,7 +135,7 @@ RUN set -eux; \
     fi
 
 ######## WebUI backend runtime ########
-FROM python:3.11-slim-bookworm AS base
+FROM python-base AS base
 
 ARG USE_CUDA
 ARG USE_OLLAMA
@@ -193,12 +195,7 @@ RUN set -eux; \
         local-audio) extra_apt_packages="ffmpeg libsm6 libxext6" ;; \
         docs-full|full) extra_apt_packages="pandoc ffmpeg libsm6 libxext6" ;; \
     esac; \
-    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
-    fi; \
-    if [ -f /etc/apt/sources.list ]; then \
-        sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g; s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" /etc/apt/sources.list; \
-    fi; \
+    replace-debian-mirrors "${DEBIAN_MIRROR}" "${DEBIAN_SECURITY_MIRROR}"; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         curl \

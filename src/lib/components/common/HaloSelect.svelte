@@ -36,15 +36,20 @@
 	let searchValue = '';
 	let searchInputEl: HTMLInputElement | null = null;
 
+	const isElementNode = (node: unknown): node is Element =>
+		typeof Element !== 'undefined' && node instanceof Element;
+
 	const normalizeClassName = (rawClassName: string) =>
 		rawClassName.replace(CONTENT_WIDTH_CLASS_RE, ' ').replace(/\s+/g, ' ').trim();
 
 	const syncTriggerWidth = () => {
-		triggerWidth = triggerEl ? Math.round(triggerEl.getBoundingClientRect().width) : 0;
+		triggerWidth = isElementNode(triggerEl)
+			? Math.round(triggerEl.getBoundingClientRect().width)
+			: 0;
 	};
 
 	const observeTriggerEl = () => {
-		if (!triggerResizeObserver || !triggerEl) return;
+		if (!triggerResizeObserver || !isElementNode(triggerEl)) return;
 		triggerResizeObserver.disconnect();
 		triggerResizeObserver.observe(triggerEl);
 	};

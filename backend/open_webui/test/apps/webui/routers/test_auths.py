@@ -120,6 +120,10 @@ class TestAuths(AbstractPostgresTest):
         assert guest_user is not None
         assert guest_user.role == "user"
 
+        guest_group = auths_router.Groups.get_group_by_name("guest")
+        assert guest_group is not None
+        assert guest_user.id in guest_group.user_ids
+
     def test_guest_session_bootstrap_and_reload_preserve_guest_marker(self):
         self.fast_api_client.app.state.config.ENABLE_GUEST_ACCESS = True
 

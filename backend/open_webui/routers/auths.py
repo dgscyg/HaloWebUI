@@ -149,15 +149,7 @@ def _issue_session_response(request: Request, response: Response, user, guest: O
 
 
 def _get_group_by_name(group_name: str):
-    normalized_group_name = str(group_name or "").strip().casefold()
-    if not normalized_group_name:
-        return None
-
-    for group in Groups.get_groups():
-        if str(group.name or "").strip().casefold() == normalized_group_name:
-            return group
-
-    return None
+    return Groups.get_group_by_name(group_name)
 
 
 def _ensure_user_in_group(user_id: str, group_name: str, description: str = "") -> None:
