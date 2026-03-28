@@ -38,6 +38,10 @@ from open_webui.models.users import UserModel
 from open_webui.utils.plugin import load_tool_module_by_id
 from open_webui.env import AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA
 from open_webui.utils.mcp import execute_mcp_tool
+from open_webui.utils.user_tools import (
+    MCP_APPS_GLOBAL_ENABLE_KEY,
+    get_user_mcp_apps_config,
+)
 
 import copy
 
@@ -70,11 +74,11 @@ def _is_mcp_connection_enabled(connection: dict) -> bool:
     return True
 
 
-def _is_mcp_apps_enabled(connection: dict) -> bool:
+def _is_mcp_apps_enabled(connection: dict, *, global_enabled: bool = False) -> bool:
     apps_cfg = _as_dict(connection.get("mcp_apps"))
     return (
         _is_mcp_connection_enabled(connection)
-        and bool(apps_cfg.get("ENABLE_MCP_APPS"))
+        and bool(apps_cfg.get(MCP_APPS_GLOBAL_ENABLE_KEY, global_enabled))
         and bool(apps_cfg.get("enabled", True))
     )
 
@@ -119,6 +123,10 @@ def get_tools(
     request: Request, tool_ids: list[str], user: UserModel, extra_params: dict
 ) -> dict[str, dict]:
     tools_dict = {}
+    mcp_apps_config = get_user_mcp_apps_config(request, user)
+    mcp_apps_global_enabled = bool(
+        mcp_apps_config.get(MCP_APPS_GLOBAL_ENABLE_KEY, False)
+    )
 
     for tool_id in tool_ids:
         tool = Tools.get_tool_by_id(tool_id)
@@ -354,7 +362,10 @@ def get_tools(
                             "mcp": {
                                 "server_idx": server_idx,
                                 "tool_name": original_tool_name,
-                                "apps_enabled": _is_mcp_apps_enabled(mcp_server_connection),
+                                "apps_enabled": _is_mcp_apps_enabled(
+                                    mcp_server_connection,
+                                    global_enabled=mcp_apps_global_enabled,
+                                ),
                                 "ui_resource_uri": ui_resource_uri,
                                 "title": mcp_tool.get("title") or original_tool_name,
                             }

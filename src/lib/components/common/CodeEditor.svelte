@@ -71,6 +71,7 @@
 
 	export let boilerplate = '';
 	export let value = '';
+	export let useShikiTheme = true;
 
 	export let onSave = () => {};
 	export let onChange = () => {};
@@ -82,14 +83,46 @@
 		updateValue();
 	}
 
-	const queueEditorDispatch = (callback: () => void) => {
+	const isEditorUpdateInProgressError = (error: unknown) =>
+		error instanceof Error &&
+		error.message.includes('Calls to EditorView.update are not allowed while an update is in progress');
+
+	const queueEditorDispatch = (callback: () => void, attempt = 0) => {
 		window.setTimeout(() => {
 			if (!codeEditor) {
 				return;
 			}
 
-			callback();
+			try {
+				callback();
+			} catch (error) {
+				if (isEditorUpdateInProgressError(error) && attempt < 5) {
+					queueEditorDispatch(callback, attempt + 1);
+					return;
+				}
+
+				throw error;
+			}
 		}, 0);
+	};
+
+	const dispatchEditorChanges = (spec: any, attempt = 0) => {
+		if (!codeEditor) {
+			return;
+		}
+
+		try {
+			codeEditor.dispatch(spec);
+		} catch (error) {
+			if (isEditorUpdateInProgressError(error) && attempt < 5) {
+				queueEditorDispatch(() => {
+					dispatchEditorChanges(spec, attempt + 1);
+				});
+				return;
+			}
+
+			throw error;
+		}
 	};
 
 	const updateValue = () => {
@@ -111,14 +144,14 @@
 					const changes = findChanges(currentDoc, nextValue);
 					if (changes.length === 0) {
 						return;
-					}
+						}
 
-					suppressDocChangeCallback = true;
-					try {
-						codeEditor.dispatch({ changes });
-					} finally {
-						window.setTimeout(() => {
-							suppressDocChangeCallback = false;
+						suppressDocChangeCallback = true;
+						try {
+							dispatchEditorChanges({ changes });
+						} finally {
+							window.setTimeout(() => {
+								suppressDocChangeCallback = false;
 						}, 0);
 					}
 				});
@@ -217,7 +250,7 @@
 
 			if (res && res.code) {
 				const formattedCode = res.code;
-				codeEditor.dispatch({
+				dispatchEditorChanges({
 					changes: [{ from: 0, to: codeEditor.state.doc.length, insert: formattedCode }]
 				});
 
@@ -251,21 +284,34 @@
 		editorLanguage.of([])
 	];
 
+	const applyEditorTheme = async () => {
+		if (!codeEditor || typeof document === 'undefined') return;
+
+		const darkMode = document.documentElement.classList.contains('dark');
+		if (!useShikiTheme) {
+			await applyFallbackTheme(darkMode);
+			return;
+		}
+
+		await applyHighlighterTheme();
+	};
+
 	$: if (lang) {
 		setLanguage();
-		applyHighlighterTheme();
+		applyEditorTheme();
 	}
 
 	$: if (codeEditor) {
 		$settings?.highlighterTheme;
-		applyHighlighterTheme();
+		useShikiTheme;
+		applyEditorTheme();
 	}
 
 	const setLanguage = async () => {
 		const language = await getLang();
 		if (language && codeEditor) {
 			queueEditorDispatch(() => {
-				codeEditor?.dispatch({
+				dispatchEditorChanges({
 					effects: editorLanguage.reconfigure(language)
 				});
 			});
@@ -326,7 +372,7 @@
 
 		const chromeTheme = await getEditorChromeTheme(DEFAULT_HIGHLIGHTER_THEME, darkMode);
 		queueEditorDispatch(() => {
-			codeEditor?.dispatch({
+			dispatchEditorChanges({
 				effects: [
 					editorChromeTheme.reconfigure(buildEditorChromeExtension(chromeTheme, darkMode)),
 					editorSyntaxTheme.reconfigure(darkMode ? oneDark : githubLight)
@@ -355,13 +401,13 @@
 
 			if (!codeEditor || currentRequestId !== themeApplyRequestId) return;
 
-			queueEditorDispatch(() => {
-				if (!codeEditor || currentRequestId !== themeApplyRequestId) return;
+				queueEditorDispatch(() => {
+					if (!codeEditor || currentRequestId !== themeApplyRequestId) return;
 
-				codeEditor.dispatch({
-					effects: [
-						editorChromeTheme.reconfigure(buildEditorChromeExtension(chromeTheme, darkMode)),
-						editorSyntaxTheme.reconfigure(
+					dispatchEditorChanges({
+						effects: [
+							editorChromeTheme.reconfigure(buildEditorChromeExtension(chromeTheme, darkMode)),
+							editorSyntaxTheme.reconfigure(
 							shikiModule.default({
 								highlighter,
 								language: resolvedLanguage,
@@ -397,7 +443,7 @@
 			parent: document.getElementById(`code-textarea-${id}`)
 		});
 
-		void applyHighlighterTheme();
+		void applyEditorTheme();
 
 		// listen to html class changes this should fire only when dark mode is toggled
 		const observer = new MutationObserver((mutations) => {
@@ -407,7 +453,7 @@
 
 					if (_isDarkMode !== isDarkMode) {
 						isDarkMode = _isDarkMode;
-						void applyHighlighterTheme();
+						void applyEditorTheme();
 					}
 				}
 			});

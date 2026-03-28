@@ -681,6 +681,7 @@
 						value={code}
 						{id}
 						{lang}
+						useShikiTheme={false}
 						onSave={() => {
 							saveCode();
 						}}

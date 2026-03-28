@@ -277,6 +277,28 @@
 	const getMCPAppsServerCapability = (idx: number) =>
 		mcpAppsCapabilities.servers.find((server: any) => server.idx === idx) ?? null;
 
+	const getMCPAppsServerResources = (idx: number) => {
+		const resources = getMCPAppsServerCapability(idx)?.resources;
+		return Array.isArray(resources) ? resources : [];
+	};
+
+	const applyMCPAppsConfigState = (value: Record<string, any> | null | undefined) => {
+		const normalized = normalizeMCPAppsConfig(value);
+		mcpAppsConfig = normalized;
+		mcpAppsCapabilities = {
+			...mcpAppsCapabilities,
+			ENABLE_MCP_APPS: normalized.ENABLE_MCP_APPS,
+			servers: (mcpAppsCapabilities.servers ?? []).map((server: any) => ({
+				...server,
+				apps_enabled: Boolean(
+					server?.enabled &&
+					normalized.ENABLE_MCP_APPS &&
+					(normalized.MCP_SERVER_APPS[String(server?.idx)] ?? true)
+				)
+			}))
+		};
+	};
+
 	// ==================== OpenAPI Servers 配置 ====================
 	let openAPIServers: Array<{
 		url: string;
@@ -368,6 +390,17 @@
 		workspaceTools = res || [];
 	};
 
+	const refreshToolsStore = async () => {
+		try {
+			const nextTools = await getTools(localStorage.token);
+			if (nextTools) {
+				toolsStore.set(nextTools);
+			}
+		} catch (error) {
+			console.warn('Failed to refresh tools store', error);
+		}
+	};
+
 	const deleteWorkspaceTool = async (toolId: string) => {
 		if (!confirm($i18n.t('确定要删除该工具吗？'))) return;
 
@@ -379,7 +412,7 @@
 		if (res) {
 			toast.success($i18n.t('工作空间工具已删除'));
 			await loadWorkspaceTools();
-			toolsStore.set(await getTools(localStorage.token));
+			await refreshToolsStore();
 		}
 	};
 
@@ -431,7 +464,7 @@
 
 			toast.success($i18n.t('工作空间工具已导入'));
 			await loadWorkspaceTools();
-			toolsStore.set(await getTools(localStorage.token));
+			await refreshToolsStore();
 		} catch (e) {
 			toast.error($i18n.t('导入文件格式不正确'));
 		} finally {
@@ -467,7 +500,7 @@
 			})
 		]);
 
-		mcpAppsConfig = normalizeMCPAppsConfig(appsRes);
+		applyMCPAppsConfigState(appsRes);
 		mcpAppsCapabilities = normalizeMCPAppsCapabilities(capabilitiesRes);
 	};
 
@@ -487,7 +520,12 @@
 		await saveMCPServers();
 	};
 
-	const saveMCPServers = async ({ silent = false }: { silent?: boolean } = {}) => {
+	const saveMCPServers = async (
+		{
+			silent = false,
+			refreshMCPAppsState = true
+		}: { silent?: boolean; refreshMCPAppsState?: boolean } = {}
+	) => {
 		const res = await setMCPServerConnections(localStorage.token, {
 			MCP_SERVER_CONNECTIONS: mcpServers
 		}).catch(() => {
@@ -503,9 +541,11 @@
 					enable: c?.config?.enable ?? c?.enabled ?? true
 				}
 			}));
-			await loadMCPAppsState({ silent: true });
+			if (refreshMCPAppsState) {
+				await loadMCPAppsState({ silent: true });
+			}
 			if (!silent) toast.success($i18n.t('MCP 服务器已保存'));
-			toolsStore.set(await getTools(localStorage.token));
+			await refreshToolsStore();
 			return true;
 		}
 
@@ -519,8 +559,7 @@
 		});
 
 		if (res) {
-			mcpAppsConfig = normalizeMCPAppsConfig(res);
-			await loadMCPAppsState({ silent: true });
+			applyMCPAppsConfigState(res);
 			if (!silent) toast.success($i18n.t('MCP Apps 配置已保存'));
 			return true;
 		}
@@ -528,15 +567,14 @@
 		return false;
 	};
 
-	const updateMCPAppsGlobal = async (enabled: boolean) => {
+	const updateMCPAppsGlobal = (enabled: boolean) => {
 		mcpAppsConfig = {
 			...mcpAppsConfig,
 			ENABLE_MCP_APPS: enabled
 		};
-		await saveMCPApps();
 	};
 
-	const updateMCPServerAppToggle = async (index: number, enabled: boolean) => {
+	const updateMCPServerAppToggle = (index: number, enabled: boolean) => {
 		mcpAppsConfig = {
 			...mcpAppsConfig,
 			MCP_SERVER_APPS: {
@@ -544,7 +582,6 @@
 				[String(index)]: enabled
 			}
 		};
-		await saveMCPApps();
 	};
 
 	const saveMCPAppDisplayMode = async (
@@ -569,6 +606,10 @@
 		}
 
 		return false;
+	};
+
+	const updateMCPAppDisplayMode = (mode: 'inline' | 'sidebar') => {
+		mcpAppDisplayMode = mode;
 	};
 
 	// OpenAPI Servers 处理
@@ -602,7 +643,7 @@
 
 		if (res) {
 			if (!silent) toast.success($i18n.t('OpenAPI 服务器已保存'));
-			toolsStore.set(await getTools(localStorage.token));
+			await refreshToolsStore();
 			return true;
 		}
 
@@ -618,7 +659,7 @@
 			const okNative = canManageGlobalToolPolicies
 				? await saveNativeToolsConfig({ silent: true })
 				: true;
-			const okMCP = await saveMCPServers({ silent: true });
+			const okMCP = await saveMCPServers({ silent: true, refreshMCPAppsState: false });
 			const okMCPApps = await saveMCPApps({ silent: true });
 			const okMCPAppDisplayMode = await saveMCPAppDisplayMode(mcpAppDisplayMode, {
 				silent: true
@@ -1131,7 +1172,7 @@
 								<Switch
 									state={mcpAppsConfig.ENABLE_MCP_APPS}
 									on:change={(event) => {
-										void updateMCPAppsGlobal(Boolean(event.detail));
+										updateMCPAppsGlobal(Boolean(event.detail));
 									}}
 								/>
 							</div>
@@ -1152,8 +1193,7 @@
 									className="w-fit text-right"
 									on:change={(event) => {
 										const nextMode = normalizeMCPAppDisplayMode(event.detail?.value);
-										mcpAppDisplayMode = nextMode;
-										void saveMCPAppDisplayMode(nextMode);
+										updateMCPAppDisplayMode(nextMode);
 									}}
 								/>
 							</div>
@@ -1162,6 +1202,7 @@
 								<div class="mt-4 space-y-3">
 									{#each mcpServers as server, idx}
 										{@const capability = getMCPAppsServerCapability(idx)}
+										{@const resourcePreview = getMCPAppsServerResources(idx).slice(0, 3)}
 										<div class="rounded-xl border border-gray-200/70 bg-white/70 p-3 dark:border-gray-800/70 dark:bg-gray-900/40">
 											<div class="flex items-start justify-between gap-3">
 												<div class="min-w-0 flex-1">
@@ -1181,7 +1222,7 @@
 												<Switch
 													state={mcpAppsConfig.MCP_SERVER_APPS[String(idx)] ?? true}
 													on:change={(event) => {
-														void updateMCPServerAppToggle(idx, Boolean(event.detail));
+														updateMCPServerAppToggle(idx, Boolean(event.detail));
 													}}
 												/>
 											</div>
@@ -1207,25 +1248,23 @@
 												</div>
 											</div>
 
-											{#if capability?.resources?.length}
-												<div class="mt-3">
-													<div class="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-														{$i18n.t('可渲染资源')}
-													</div>
-													<div class="space-y-1.5">
-														{#each capability.resources.slice(0, 3) as resource}
-															<div class="rounded-lg border border-gray-200/70 px-3 py-2 text-xs dark:border-gray-800/70">
-																<div class="font-medium text-gray-700 dark:text-gray-200">
-																	{resource.title || resource.app_id}
-																</div>
-																<div class="mt-1 truncate text-gray-500 dark:text-gray-400">
-																	{resource.render_url}
-																</div>
-															</div>
-														{/each}
-													</div>
+											<div class:hidden={!resourcePreview.length} class="mt-3">
+												<div class="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+													{$i18n.t('可渲染资源')}
 												</div>
-											{/if}
+												<div class="space-y-1.5">
+													{#each resourcePreview as resource}
+														<div class="rounded-lg border border-gray-200/70 px-3 py-2 text-xs dark:border-gray-800/70">
+															<div class="font-medium text-gray-700 dark:text-gray-200">
+																{resource.title || resource.app_id}
+															</div>
+															<div class="mt-1 truncate text-gray-500 dark:text-gray-400">
+																{resource.render_url}
+															</div>
+														</div>
+													{/each}
+												</div>
+											</div>
 										</div>
 									{/each}
 								</div>

@@ -404,8 +404,11 @@ def test_set_mcp_apps_config_updates_apps_flag_without_mutating_enabled_semantic
     with patch(
         "open_webui.routers.configs.get_user_mcp_server_connections",
         return_value=existing_connections,
-    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter:
+    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter, patch(
+        "open_webui.routers.configs.set_user_mcp_apps_config"
+    ) as set_apps_cfg:
         setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+        set_apps_cfg.side_effect = lambda *_args, **_kwargs: None
         result = asyncio.run(
             set_mcp_apps_config(
                 request,
@@ -428,12 +431,12 @@ def test_set_mcp_apps_config_updates_apps_flag_without_mutating_enabled_semantic
         {
             "url": "http://one.example",
             "enabled": False,
-            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+            "mcp_apps": {"enabled": False},
         },
         {
             "url": "http://two.example",
             "config": {"enable": True},
-            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+            "mcp_apps": {"enabled": True},
         },
     ]
 
@@ -451,8 +454,11 @@ def test_set_mcp_apps_config_preserves_legacy_apps_enabled_round_trip_when_base_
     with patch(
         "open_webui.routers.configs.get_user_mcp_server_connections",
         return_value=existing_connections,
-    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter:
+    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter, patch(
+        "open_webui.routers.configs.set_user_mcp_apps_config"
+    ) as set_apps_cfg:
         setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+        set_apps_cfg.side_effect = lambda *_args, **_kwargs: None
         result = asyncio.run(
             set_mcp_apps_config(
                 request,
@@ -475,7 +481,7 @@ def test_set_mcp_apps_config_preserves_legacy_apps_enabled_round_trip_when_base_
             "url": "http://legacy.example",
             "enabled": False,
             "apps_enabled": True,
-            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+            "mcp_apps": {"enabled": True},
         }
     ]
 
@@ -495,8 +501,11 @@ def test_set_mcp_apps_config_preserves_mixed_server_apps_state_round_trip():
     with patch(
         "open_webui.routers.configs.get_user_mcp_server_connections",
         return_value=existing_connections,
-    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter:
+    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter, patch(
+        "open_webui.routers.configs.set_user_mcp_apps_config"
+    ) as set_apps_cfg:
         setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+        set_apps_cfg.side_effect = lambda *_args, **_kwargs: None
         result = asyncio.run(
             set_mcp_apps_config(
                 request,
@@ -520,17 +529,17 @@ def test_set_mcp_apps_config_preserves_mixed_server_apps_state_round_trip():
         {
             "url": "http://one.example",
             "enabled": True,
-            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+            "mcp_apps": {"enabled": True},
         },
         {
             "url": "http://two.example",
             "enabled": True,
-            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+            "mcp_apps": {"enabled": False},
         },
         {
             "url": "http://three.example",
             "enabled": False,
-            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+            "mcp_apps": {"enabled": True},
         },
     ]
 
@@ -549,6 +558,9 @@ def test_get_mcp_apps_config_reports_global_and_per_server_state():
     with patch(
         "open_webui.routers.configs.get_user_mcp_server_connections",
         return_value=connections,
+    ), patch(
+        "open_webui.routers.configs.get_user_mcp_apps_config",
+        return_value={"ENABLE_MCP_APPS": True},
     ):
         result = asyncio.run(get_mcp_apps_config(request, user))
 
@@ -620,7 +632,13 @@ def test_mcp_apps_route_sequence_persists_nested_apps_state_through_db_backed_re
         fake_update_user_settings_by_id,
     )
     request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(config=SimpleNamespace())),
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                config=SimpleNamespace(
+                    USER_PERMISSIONS={"features": {"direct_tool_servers": True}}
+                )
+            )
+        ),
         state=SimpleNamespace(token=SimpleNamespace(credentials="session-token")),
     )
     user = SimpleNamespace(id="user-1", role="user", settings=persisted_settings)
@@ -650,19 +668,55 @@ def test_mcp_apps_route_sequence_persists_nested_apps_state_through_db_backed_re
         {
             "url": "http://one.example",
             "enabled": True,
-            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+            "mcp_apps": {"enabled": True},
         },
         {
             "url": "http://two.example",
             "enabled": True,
-            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+            "mcp_apps": {"enabled": False},
         },
         {
             "url": "http://three.example",
             "enabled": False,
-            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+            "mcp_apps": {"enabled": True},
         },
     ]
+    assert persisted_snapshots[-1]["tools"]["mcp_apps_config"] == {
+        "ENABLE_MCP_APPS": True,
+    }
+
+
+def test_set_mcp_apps_config_persists_global_flag_without_any_connections():
+    from open_webui.routers.configs import MCPAppsConfigForm, set_mcp_apps_config
+
+    user = SimpleNamespace(id="user-1")
+    request = SimpleNamespace()
+
+    with patch(
+        "open_webui.routers.configs.get_user_mcp_server_connections",
+        return_value=[],
+    ), patch(
+        "open_webui.routers.configs.set_user_mcp_server_connections"
+    ) as set_connections, patch(
+        "open_webui.routers.configs.set_user_mcp_apps_config"
+    ) as set_apps_cfg:
+        set_apps_cfg.side_effect = lambda *_args, **_kwargs: None
+        result = asyncio.run(
+            set_mcp_apps_config(
+                request,
+                MCPAppsConfigForm(
+                    ENABLE_MCP_APPS=True,
+                    MCP_SERVER_APPS={},
+                ),
+                user,
+            )
+        )
+
+    assert result == {
+        "ENABLE_MCP_APPS": True,
+        "MCP_SERVER_APPS": {},
+    }
+    set_connections.assert_called_once_with(user, [])
 
 
 def test_verify_mcp_server_connection_uses_session_token_for_session_auth():
