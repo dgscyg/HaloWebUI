@@ -3,6 +3,10 @@
 	import { quintOut } from 'svelte/easing';
 
 	import { getBackendConfig, getTaskConfig, updateTaskConfig } from '$lib/apis';
+	import {
+		getPromptSuggestionsConfig,
+		setPromptSuggestionsConfig
+	} from '$lib/apis/configs';
 	import { config, models } from '$lib/stores';
 	import { createEventDispatcher, onDestroy, onMount, getContext, tick } from 'svelte';
 
@@ -58,6 +62,9 @@
 		TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE: '',
 		CODE_INTERPRETER_PROMPT_TEMPLATE: ''
 	};
+	let promptSuggestionsConfig = {
+		ENABLE_DEFAULT_PROMPT_SUGGESTIONS: true
+	};
 
 	let loading = true;
 	let saving = false;
@@ -67,7 +74,8 @@
 	const BASELINE_SYNC_WINDOW_MS = 400;
 
 	const buildSnapshot = () => ({
-		taskConfig: cloneSettingsSnapshot(taskConfig)
+		taskConfig: cloneSettingsSnapshot(taskConfig),
+		promptSuggestionsConfig: cloneSettingsSnapshot(promptSuggestionsConfig)
 	});
 
 	let snapshot: ReturnType<typeof buildSnapshot> | null = null;
@@ -75,6 +83,7 @@
 
 	$: {
 		taskConfig;
+		promptSuggestionsConfig;
 		snapshot = buildSnapshot();
 	}
 	$: tasksDirty = !!(
@@ -120,7 +129,12 @@
 	const updateInterfaceHandler = async () => {
 		saving = true;
 		try {
-			taskConfig = await updateTaskConfig(localStorage.token, taskConfig);
+			const [nextTaskConfig, nextPromptSuggestionsConfig] = await Promise.all([
+				updateTaskConfig(localStorage.token, taskConfig),
+				setPromptSuggestionsConfig(localStorage.token, promptSuggestionsConfig)
+			]);
+			taskConfig = nextTaskConfig;
+			promptSuggestionsConfig = nextPromptSuggestionsConfig;
 			await config.set(await getBackendConfig());
 			await tick();
 			startBaselineSync();
@@ -133,10 +147,16 @@
 	const resetTasksChanges = () => {
 		if (!initialSnapshot) return;
 		taskConfig = cloneSettingsSnapshot(initialSnapshot.taskConfig);
+		promptSuggestionsConfig = cloneSettingsSnapshot(initialSnapshot.promptSuggestionsConfig);
 	};
 
 	onMount(async () => {
-		taskConfig = await getTaskConfig(localStorage.token);
+		const [nextTaskConfig, nextPromptSuggestionsConfig] = await Promise.all([
+			getTaskConfig(localStorage.token),
+			getPromptSuggestionsConfig(localStorage.token)
+		]);
+		taskConfig = nextTaskConfig;
+		promptSuggestionsConfig = nextPromptSuggestionsConfig;
 		await tick();
 		startBaselineSync();
 		initialSnapshot = cloneSettingsSnapshot(buildSnapshot());
@@ -334,6 +354,20 @@
 										'Leave empty to use the default prompt, or enter a custom prompt'
 									)}
 								/>
+							</div>
+						</div>
+
+						<div class="glass-item p-4">
+							<div class="flex items-center justify-between">
+								<div class="text-sm font-medium">
+									{$i18n.t('Default Prompt Suggestions')}
+								</div>
+								<Switch
+									bind:state={promptSuggestionsConfig.ENABLE_DEFAULT_PROMPT_SUGGESTIONS}
+								/>
+							</div>
+							<div class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+								{$i18n.t('Prompt suggestions')}
 							</div>
 						</div>
 

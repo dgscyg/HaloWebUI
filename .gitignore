@@ -319,3 +319,6 @@ cypress/videos
 cypress/screenshots
 .vscode/settings.json
 nul
+
+# Temporary playwright/debug directories
+.tmp_pw/

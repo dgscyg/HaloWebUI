@@ -20,8 +20,11 @@
 	let resizeObserver: ResizeObserver | null = null;
 	let isOverflowing = false;
 
+	const isElementNode = (node: unknown): node is Element =>
+		typeof Element !== 'undefined' && node instanceof Element;
+
 	const measureOverflow = () => {
-		if (!textEl) {
+		if (!isElementNode(textEl)) {
 			isOverflowing = false;
 			return;
 		}
@@ -31,7 +34,7 @@
 	};
 
 	const observeTextEl = () => {
-		if (!resizeObserver || !textEl) return;
+		if (!resizeObserver || !isElementNode(textEl)) return;
 		resizeObserver.disconnect();
 		resizeObserver.observe(textEl);
 	};

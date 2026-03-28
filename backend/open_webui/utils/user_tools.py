@@ -35,6 +35,7 @@ TOOLS_KEY = "tools"
 NATIVE_TOOLS_KEY = "native_tools"
 TOOL_SERVER_CONNECTIONS_KEY = "tool_server_connections"
 MCP_SERVER_CONNECTIONS_KEY = "mcp_server_connections"
+MCP_APPS_CONFIG_KEY = "mcp_apps_config"
 MCP_APPS_KEY = "mcp_apps"
 MCP_APPS_GLOBAL_ENABLE_KEY = "ENABLE_MCP_APPS"
 MCP_APPS_SERVER_ENABLE_KEY = "enabled"
@@ -219,6 +220,32 @@ def set_user_mcp_server_connections(user: UserModel, connections: list[dict]) ->
     return _update_tools_settings(
         user.id, {MCP_SERVER_CONNECTIONS_KEY: normalize_mcp_server_connections(connections)}
     )
+
+
+def _legacy_mcp_apps_global_enabled(connections: list[dict]) -> bool:
+    for connection in connections:
+        apps_cfg = normalize_mcp_apps_config(_as_dict(connection).get(MCP_APPS_KEY))
+        if apps_cfg.get(MCP_APPS_GLOBAL_ENABLE_KEY):
+            return True
+    return False
+
+
+def get_user_mcp_apps_config(request, user: Optional[UserModel]) -> dict:
+    tools = _get_tools_settings(user)
+    if MCP_APPS_CONFIG_KEY in tools:
+        stored = normalize_mcp_apps_config(_as_dict(tools.get(MCP_APPS_CONFIG_KEY)))
+        if MCP_APPS_GLOBAL_ENABLE_KEY in stored:
+            return stored
+
+    connections = get_user_mcp_server_connections(request, user)
+    return {
+        MCP_APPS_GLOBAL_ENABLE_KEY: _legacy_mcp_apps_global_enabled(connections)
+    }
+
+
+def set_user_mcp_apps_config(user: UserModel, apps_config: dict) -> Optional[UserModel]:
+    normalized = normalize_mcp_apps_config(apps_config)
+    return _update_tools_settings(user.id, {MCP_APPS_CONFIG_KEY: normalized})
 
 
 def normalize_mcp_apps_config(value: Any) -> dict:

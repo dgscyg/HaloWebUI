@@ -28,10 +28,12 @@ from open_webui.utils.user_tools import (
     TOOL_CALLING_MODE_DEFAULT,
     TOOL_CALLING_MODE_KEY,
     get_user_mcp_server_connections,
+    get_user_mcp_apps_config,
     get_user_native_tools_config,
     get_user_tool_server_connections,
     normalize_max_tool_call_rounds,
     normalize_tool_calling_mode,
+    set_user_mcp_apps_config,
     set_user_mcp_server_connections,
     set_user_native_tools_config,
     set_user_tool_server_connections,
@@ -417,20 +419,22 @@ def _get_mcp_apps_form_state(connection: dict, *, default_global_enabled: bool) 
     return global_enabled, server_enabled
 
 
-def _serialize_mcp_apps_form_state(connections: list[dict]) -> dict[str, object]:
+def _serialize_mcp_apps_form_state(
+    connections: list[dict],
+    *,
+    global_enabled: bool,
+) -> dict[str, object]:
     server_apps = {}
-    enabled = False
 
     for idx, connection in enumerate(connections):
-        global_enabled, server_enabled = _get_mcp_apps_form_state(
+        _, server_enabled = _get_mcp_apps_form_state(
             connection,
-            default_global_enabled=False,
+            default_global_enabled=global_enabled,
         )
         server_apps[str(idx)] = server_enabled
-        enabled = enabled or global_enabled
 
     return {
-        MCP_APPS_GLOBAL_ENABLE_KEY: enabled,
+        MCP_APPS_GLOBAL_ENABLE_KEY: global_enabled,
         "MCP_SERVER_APPS": server_apps,
     }
 
@@ -461,7 +465,11 @@ def _pick_mcp_resource_content(resource_result: dict, resource_uri: str) -> dict
 @router.get("/mcp_servers/apps", response_model=MCPAppsConfigForm)
 async def get_mcp_apps_config(request: Request, user=Depends(get_verified_user)):
     connections = get_user_mcp_server_connections(request, user)
-    return _serialize_mcp_apps_form_state(connections)
+    apps_config = get_user_mcp_apps_config(request, user)
+    return _serialize_mcp_apps_form_state(
+        connections,
+        global_enabled=bool(apps_config.get(MCP_APPS_GLOBAL_ENABLE_KEY, False)),
+    )
 
 
 @router.post("/mcp_servers/apps", response_model=MCPAppsConfigForm)
@@ -472,11 +480,15 @@ async def set_mcp_apps_config(
 ):
     connections = get_user_mcp_server_connections(request, user)
     updated_connections = []
+    set_user_mcp_apps_config(
+        user,
+        {MCP_APPS_GLOBAL_ENABLE_KEY: form_data.ENABLE_MCP_APPS},
+    )
 
     for idx, connection in enumerate(connections):
         updated = dict(connection)
         apps_cfg = dict(updated.get(MCP_APPS_KEY) or {})
-        apps_cfg[MCP_APPS_GLOBAL_ENABLE_KEY] = form_data.ENABLE_MCP_APPS
+        apps_cfg.pop(MCP_APPS_GLOBAL_ENABLE_KEY, None)
         apps_cfg[MCP_APPS_SERVER_ENABLE_KEY] = bool(
             form_data.MCP_SERVER_APPS.get(
                 str(idx),
@@ -487,12 +499,17 @@ async def set_mcp_apps_config(
         updated_connections.append(updated)
 
     set_user_mcp_server_connections(user, updated_connections)
-    return _serialize_mcp_apps_form_state(updated_connections)
+    return _serialize_mcp_apps_form_state(
+        updated_connections,
+        global_enabled=form_data.ENABLE_MCP_APPS,
+    )
 
 
 @router.get("/mcp_servers/apps/capabilities", response_model=MCPAppsCapabilitiesResponse)
 async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_user)):
     connections = get_user_mcp_server_connections(request, user)
+    apps_config = get_user_mcp_apps_config(request, user)
+    global_enabled_default = bool(apps_config.get(MCP_APPS_GLOBAL_ENABLE_KEY, False))
     session_token = getattr(request.state.token, "credentials", None)
     servers_data = await get_mcp_servers_data(
         connections,
@@ -507,7 +524,7 @@ async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_
         base_enabled = _is_mcp_connection_enabled(connection)
         apps_global_enabled, server_apps_enabled = _get_mcp_apps_form_state(
             connection,
-            default_global_enabled=False,
+            default_global_enabled=global_enabled_default,
         )
         apps_enabled = bool(apps_global_enabled and server_apps_enabled and base_enabled)
         global_enabled = global_enabled or apps_global_enabled
@@ -596,6 +613,8 @@ async def get_mcp_app_resource(
     user=Depends(get_verified_user),
 ):
     connections = get_user_mcp_server_connections(request, user)
+    apps_config = get_user_mcp_apps_config(request, user)
+    global_enabled_default = bool(apps_config.get(MCP_APPS_GLOBAL_ENABLE_KEY, False))
     if server_idx < 0 or server_idx >= len(connections):
         raise HTTPException(status_code=404, detail="MCP app resource not found")
 
@@ -603,7 +622,7 @@ async def get_mcp_app_resource(
     base_enabled = _is_mcp_connection_enabled(connection)
     apps_global_enabled, server_apps_enabled = _get_mcp_apps_form_state(
         connection,
-        default_global_enabled=False,
+        default_global_enabled=global_enabled_default,
     )
     if not (base_enabled and apps_global_enabled and server_apps_enabled):
         raise HTTPException(status_code=403, detail="MCP apps are disabled for this server")
@@ -787,6 +806,33 @@ class PromptSuggestion(BaseModel):
 
 class SetDefaultSuggestionsForm(BaseModel):
     suggestions: list[PromptSuggestion]
+
+
+class PromptSuggestionsConfigForm(BaseModel):
+    ENABLE_DEFAULT_PROMPT_SUGGESTIONS: bool
+
+
+@router.get("/prompt_suggestions", response_model=PromptSuggestionsConfigForm)
+async def get_prompt_suggestions_config(
+    request: Request, user=Depends(get_admin_user)
+):
+    return {
+        "ENABLE_DEFAULT_PROMPT_SUGGESTIONS": request.app.state.config.ENABLE_DEFAULT_PROMPT_SUGGESTIONS,
+    }
+
+
+@router.post("/prompt_suggestions", response_model=PromptSuggestionsConfigForm)
+async def set_prompt_suggestions_config(
+    request: Request,
+    form_data: PromptSuggestionsConfigForm,
+    user=Depends(get_admin_user),
+):
+    request.app.state.config.ENABLE_DEFAULT_PROMPT_SUGGESTIONS = (
+        form_data.ENABLE_DEFAULT_PROMPT_SUGGESTIONS
+    )
+    return {
+        "ENABLE_DEFAULT_PROMPT_SUGGESTIONS": request.app.state.config.ENABLE_DEFAULT_PROMPT_SUGGESTIONS,
+    }
 
 
 @router.post("/suggestions", response_model=list[PromptSuggestion])

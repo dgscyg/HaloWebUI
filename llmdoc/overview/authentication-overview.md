@@ -13,7 +13,14 @@
 - 支持用户自主注册（可配置开关）
 - 首位注册用户自动成为管理员
 
-### 2.2 OAuth/OIDC 提供商
+### 2.2 访客访问 (Guest)
+
+- 通过 `ENABLE_GUEST_ACCESS` 控制是否允许游客进入 Web 界面
+- 通过 `GUEST_ACCESS_MODE` 控制登录页行为: `button` 显示“Continue As Guest”按钮，`auto` 直接进入游客会话
+- 游客会话创建随机 `@guest.local` 本地账号，JWT 载荷带 `guest=true`
+- 游客用户自动加入 `Guest` 用户组，便于统一做权限和资源范围管理
+
+### 2.3 OAuth/OIDC 提供商
 
 | 提供商 | 配置前缀 | 说明 |
 |--------|----------|------|
@@ -23,20 +30,20 @@
 | 飞书 | `FEISHU_*` | 企业内部应用集成 |
 | 通用 OIDC | `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | 兼容任意 OIDC 提供商 |
 
-### 2.3 LDAP 认证
+### 2.4 LDAP 认证
 
 - 支持 TLS 加密连接
 - 可配置用户属性映射 (邮箱、用户名)
 - 支持用户组同步 (`ENABLE_LDAP_GROUP_SYNC`)
 - 配置项: `LDAP_SERVER_HOST`, `LDAP_SEARCH_BASE`, `LDAP_APP_DN` 等
 
-### 2.4 可信头部认证
+### 2.5 可信头部认证
 
 - 通过 HTTP 头传递可信邮箱 (`WEBUI_AUTH_TRUSTED_EMAIL_HEADER`)
 - 适用于反向代理前置认证场景
 - 可配置用户名头部 (`WEBUI_AUTH_TRUSTED_NAME_HEADER`)
 
-### 2.5 API Key 认证
+### 2.6 API Key 认证
 
 - 格式: `sk-{uuid}` 前缀
 - 支持端点访问限制 (`ENABLE_API_KEY_ENDPOINT_RESTRICTIONS`)

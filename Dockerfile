@@ -22,17 +22,29 @@ ARG BUILD_HASH=dev-build
 # Override at your own risk - non-root configurations are untested
 ARG UID=0
 ARG GID=0
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
 
 ######## WebUI frontend ########
 FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS frontend-build
 ARG BUILD_HASH
 ARG ENABLE_PYODIDE=false
 ARG VITE_SOURCEMAP=false
+ARG NPM_REGISTRY
 
 WORKDIR /app
 
+# @huggingface/transformers pulls in onnxruntime-node, whose install script
+# tries to download optional CUDA binaries on linux/x64. The frontend build only
+# needs the web runtime, so always skip that optional CUDA download here.
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip \
+    NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+
 COPY package.json package-lock.json .npmrc ./
-RUN npm ci
+RUN npm ci --foreground-scripts
 
 COPY src ./src
 COPY static ./static
@@ -50,8 +62,13 @@ ENV APP_BUILD_HASH=${BUILD_HASH} \
 
 RUN npm run build
 
+FROM python:3.11-slim-bookworm AS python-base
+
+COPY scripts/replace-debian-mirrors.sh /usr/local/bin/replace-debian-mirrors
+RUN chmod +x /usr/local/bin/replace-debian-mirrors
+
 ######## WebUI backend builder ########
-FROM python:3.11-slim-bookworm AS backend-builder
+FROM python-base AS backend-builder
 
 ARG USE_CUDA
 ARG INSTALL_PROFILE
@@ -60,6 +77,10 @@ ARG USE_CUDA_VER
 ARG USE_EMBEDDING_MODEL
 ARG USE_RERANKING_MODEL
 ARG USE_TIKTOKEN_ENCODING_NAME
+ARG DEBIAN_MIRROR
+ARG DEBIAN_SECURITY_MIRROR
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
 
 ENV USE_CUDA_DOCKER=${USE_CUDA} \
     USE_CUDA_DOCKER_VER=${USE_CUDA_VER} \
@@ -73,13 +94,17 @@ ENV USE_CUDA_DOCKER=${USE_CUDA} \
     SENTENCE_TRANSFORMERS_HOME="/app/backend/data/cache/embedding/models" \
     TIKTOKEN_CACHE_DIR="/app/backend/data/cache/tiktoken" \
     HF_HOME="/app/backend/data/cache/embedding/models" \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
     PATH="/opt/venv/bin:${PATH}"
 
 WORKDIR /app/backend
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    replace-debian-mirrors "${DEBIAN_MIRROR}" "${DEBIAN_SECURITY_MIRROR}"; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends gcc python3-dev; \
+    rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/venv
 
@@ -97,6 +122,8 @@ RUN set -eux; \
         fi; \
     fi; \
     pip install --no-cache-dir -r "${requirements_file}"; \
+    # `/api/v1/utils/code/format` uses black at runtime, but build profiles do not include dev-test deps.
+    pip install --no-cache-dir black==25.1.0; \
     if [ "$PRELOAD_LOCAL_MODELS" = "true" ]; then \
         if [ "$INSTALL_PROFILE" = "local-rag" ] || [ "$INSTALL_PROFILE" = "full" ]; then \
             python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"; \
@@ -108,7 +135,7 @@ RUN set -eux; \
     fi
 
 ######## WebUI backend runtime ########
-FROM python:3.11-slim-bookworm AS base
+FROM python-base AS base
 
 ARG USE_CUDA
 ARG USE_OLLAMA
@@ -120,6 +147,10 @@ ARG USE_RERANKING_MODEL
 ARG USE_TIKTOKEN_ENCODING_NAME
 ARG UID
 ARG GID
+ARG DEBIAN_MIRROR
+ARG DEBIAN_SECURITY_MIRROR
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
 
 ENV ENV=prod \
     PORT=8080 \
@@ -144,6 +175,8 @@ ENV ENV=prod \
     TIKTOKEN_ENCODING_NAME="$USE_TIKTOKEN_ENCODING_NAME" \
     TIKTOKEN_CACHE_DIR="/app/backend/data/cache/tiktoken" \
     HF_HOME="/app/backend/data/cache/embedding/models" \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
     PATH="/opt/venv/bin:${PATH}" \
     HOME=/root
 
@@ -162,6 +195,7 @@ RUN set -eux; \
         local-audio) extra_apt_packages="ffmpeg libsm6 libxext6" ;; \
         docs-full|full) extra_apt_packages="pandoc ffmpeg libsm6 libxext6" ;; \
     esac; \
+    replace-debian-mirrors "${DEBIAN_MIRROR}" "${DEBIAN_SECURITY_MIRROR}"; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         curl \

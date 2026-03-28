@@ -94,6 +94,7 @@
 	}
 
 	$: models = selectedModels.map((id) => $_models.find((m) => m.id === id));
+	$: promptSuggestionsEnabled = $config?.features?.enable_prompt_suggestions ?? true;
 
 	onMount(() => {});
 </script>
@@ -223,18 +224,20 @@
 			</div>
 		</div>
 	</div>
-	<div class="mx-auto max-w-3xl font-primary" in:fade={{ duration: 200, delay: 200 }}>
-		<div class="mx-4">
-			<Suggestions
-				suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??
-					models[selectedModelIdx]?.info?.meta?.suggestion_prompts ??
-					$config?.default_prompt_suggestions ??
-					[]}
-				inputValue={prompt}
-				on:select={(e) => {
-					selectSuggestionPrompt(e.detail);
-				}}
-			/>
+	{#if promptSuggestionsEnabled}
+		<div class="mx-auto max-w-3xl font-primary" in:fade={{ duration: 200, delay: 200 }}>
+			<div class="mx-4">
+				<Suggestions
+					suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??
+						models[selectedModelIdx]?.info?.meta?.suggestion_prompts ??
+						$config?.default_prompt_suggestions ??
+						[]}
+					inputValue={prompt}
+					on:select={(e) => {
+						selectSuggestionPrompt(e.detail);
+					}}
+				/>
+			</div>
 		</div>
-	</div>
+	{/if}
 </div>

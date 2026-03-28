@@ -102,6 +102,37 @@
 		showRelevance = calculateShowRelevance(citations);
 		showPercentage = shouldShowPercentage(citations);
 	}
+
+	function normalizeCitationIndex(indexOrIdentifier: number | string | null | undefined): number | null {
+		if (typeof indexOrIdentifier === 'number' && Number.isInteger(indexOrIdentifier)) {
+			return indexOrIdentifier;
+		}
+
+		if (typeof indexOrIdentifier === 'string') {
+			const match = indexOrIdentifier.match(/^(\d+)/);
+			if (match) {
+				return Number.parseInt(match[1], 10);
+			}
+		}
+
+		return null;
+	}
+
+	export function openCitationByIndex(indexOrIdentifier: number | string | null | undefined): boolean {
+		const index = normalizeCitationIndex(indexOrIdentifier);
+		if (index === null || index < 1) {
+			return false;
+		}
+
+		const citation = citations[index - 1];
+		if (!citation) {
+			return false;
+		}
+
+		selectedCitation = citation;
+		showCitationModal = true;
+		return true;
+	}
 </script>
 
 <CitationsModal

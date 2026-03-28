@@ -10,6 +10,7 @@ describe('mcpAppPreview', () => {
 		const payload = getMCPAppPreviewPayload({
 			attributes: {
 				id: 'call_1',
+				name: 'mcp_0__lookup',
 				result:
 					'{"app_id":"resource-1","resource_id":"resource-1","render_url":"https://apps.example/render/1","metadata":{"tool_call_id":"call_1"}}'
 			}
@@ -29,6 +30,7 @@ describe('mcpAppPreview', () => {
 		const payload = getMCPAppPreviewPayload({
 			attributes: {
 				id: 'call_1',
+				name: 'mcp_0__lookup',
 				result:
 					'{&quot;app_id&quot;:&quot;resource-1&quot;,&quot;render_url&quot;:&quot;https://apps.example/render/1&quot;,&quot;metadata&quot;:{&quot;tool_call_id&quot;:&quot;call_1&quot;}}'
 			}
@@ -45,21 +47,21 @@ describe('mcpAppPreview', () => {
 	it('rebuilds previewable MCP app payloads from persisted message content', () => {
 		const payloads = getMCPAppPreviewPayloadsForMessageContent(`
 			<p>hello</p>
-			<details type="tool_calls" done="true" id="call_1" name="lookup"
+			<details type="tool_calls" done="true" id="call_1" name="mcp_0__lookup"
 				result="{&quot;app_id&quot;:&quot;resource-1&quot;,&quot;render_url&quot;:&quot;https://apps.example/render/1&quot;,&quot;metadata&quot;:{&quot;tool_call_id&quot;:&quot;call_1&quot;}}">
 				<summary>Tool Executed</summary>
 			</details>
 		`);
 
 		expect(payloads).toEqual([
-			expect.objectContaining({
-				toolCallId: 'call_1',
-				appId: 'resource-1',
-				resourceUri: 'resource-1',
-				renderUrl: 'https://apps.example/render/1',
-				toolName: 'lookup'
-			})
-		]);
+				expect.objectContaining({
+					toolCallId: 'call_1',
+					appId: 'resource-1',
+					resourceUri: 'resource-1',
+					renderUrl: 'https://apps.example/render/1',
+					toolName: 'mcp_0__lookup'
+				})
+			]);
 	});
 
 	it('prefers upstream mcp_app attributes and preserves raw tool result payloads', () => {
@@ -100,5 +102,18 @@ describe('mcpAppPreview', () => {
 		`);
 
 		expect(payloads).toEqual([]);
+	});
+
+	it('ignores regular tool results that only happen to contain a content field', () => {
+		const payload = getMCPAppPreviewPayload({
+			attributes: {
+				id: 'call_1',
+				name: 'fetch_url',
+				result:
+					'{"url":"https://example.com","content":"2026-03-27","title":"Example Domain"}'
+			}
+		});
+
+		expect(payload).toBeNull();
 	});
 });

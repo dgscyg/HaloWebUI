@@ -30,23 +30,31 @@
 	export let pane;
 
 	type ViewportMode = 'mobile' | 'tablet' | 'desktop';
+	type DesktopPaneMode = 'standard' | 'immersive';
 
-	const DESKTOP_BREAKPOINT = 1280;
+	const DESKTOP_BREAKPOINT = 1024;
 	const TABLET_BREAKPOINT = 768;
-	const DESKTOP_DEFAULT_WIDTH = 400;
 	const DESKTOP_MIN_WIDTH = 340;
-	const DESKTOP_MAX_WIDTH = 460;
-	const DESKTOP_MAX_RATIO = 0.36;
+	const DESKTOP_STANDARD_DEFAULT_WIDTH = 400;
+	const DESKTOP_STANDARD_MIN_MAIN_WIDTH = 680;
+	const DESKTOP_STANDARD_MAX_WIDTH = 720;
+	const DESKTOP_STANDARD_MAX_RATIO = 0.5;
+	const DESKTOP_IMMERSIVE_DEFAULT_WIDTH = 760;
+	const DESKTOP_IMMERSIVE_MIN_MAIN_WIDTH = 40;
 	const DESKTOP_SIZE_KEY = 'chatControlsDesktopSize';
 	const LEGACY_SIZE_KEY = 'chatControlsSize';
 
 	let viewportMode: ViewportMode = 'mobile';
+	let desktopPaneMode: DesktopPaneMode = 'standard';
 	let dragged = false;
 	let container: HTMLElement | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let desktopMinSize = 0;
 	let desktopDefaultSize = 0;
 	let desktopMaxSize = 0;
+	let desktopPaneRenderKey = 0;
+	let ignoreNextPaneCollapse = false;
+	let immersivePaneSize: number | null = null;
 	let drawerPlacement: 'bottom' | 'right' = 'bottom';
 	let drawerClassName = '';
 
@@ -64,16 +72,40 @@
 		return 'mobile';
 	};
 
-	const getDesktopMaxWidth = (width: number) =>
-		Math.max(DESKTOP_MIN_WIDTH, Math.min(DESKTOP_MAX_WIDTH, Math.floor(width * DESKTOP_MAX_RATIO)));
+	const getDesktopPaneMode = (): DesktopPaneMode =>
+		$showOverview || $showArtifacts ? 'immersive' : 'standard';
 
-	const updateDesktopPaneLimits = (width: number) => {
+	const getDesktopMaxWidth = (width: number, mode: DesktopPaneMode) => {
+		if (mode === 'immersive') {
+			// Overview/artifacts are canvas-like surfaces, so only keep a narrow chat strip visible.
+			return Math.max(DESKTOP_MIN_WIDTH, Math.floor(width - DESKTOP_IMMERSIVE_MIN_MAIN_WIDTH));
+		}
+
+		const maxWidthByRatio = Math.floor(width * DESKTOP_STANDARD_MAX_RATIO);
+		const maxWidthByMainPane = Math.floor(width - DESKTOP_STANDARD_MIN_MAIN_WIDTH);
+
+		return Math.max(
+			DESKTOP_MIN_WIDTH,
+			Math.min(DESKTOP_STANDARD_MAX_WIDTH, maxWidthByRatio, maxWidthByMainPane)
+		);
+	};
+
+	const getDesktopDefaultWidth = (maxWidth: number, mode: DesktopPaneMode) =>
+		clamp(
+			mode === 'immersive'
+				? DESKTOP_IMMERSIVE_DEFAULT_WIDTH
+				: DESKTOP_STANDARD_DEFAULT_WIDTH,
+			DESKTOP_MIN_WIDTH,
+			maxWidth
+		);
+
+	const updateDesktopPaneLimits = (width: number, mode: DesktopPaneMode = desktopPaneMode) => {
 		if (!width) {
 			return;
 		}
 
-		const maxWidth = getDesktopMaxWidth(width);
-		const defaultWidth = clamp(DESKTOP_DEFAULT_WIDTH, DESKTOP_MIN_WIDTH, maxWidth);
+		const maxWidth = getDesktopMaxWidth(width, mode);
+		const defaultWidth = getDesktopDefaultWidth(maxWidth, mode);
 
 		desktopMinSize = Math.floor((DESKTOP_MIN_WIDTH / width) * 100);
 		desktopDefaultSize = Math.round((defaultWidth / width) * 100);
@@ -95,6 +127,47 @@
 		localStorage.setItem(LEGACY_SIZE_KEY, normalized);
 	};
 
+	const getRememberedDesktopPaneSize = (mode: DesktopPaneMode) =>
+		mode === 'immersive' ? immersivePaneSize : getStoredDesktopPaneSize();
+
+	const rememberDesktopPaneSize = (mode: DesktopPaneMode, size: number) => {
+		if (mode === 'immersive') {
+			immersivePaneSize = size;
+			return;
+		}
+
+		persistDesktopPaneSize(size);
+	};
+
+	const getDesktopPaneTargetSize = (mode: DesktopPaneMode, fallbackSize: number | null = null) => {
+		const rememberedSize =
+			mode === 'immersive'
+				? immersivePaneSize ?? Math.max(fallbackSize ?? 0, desktopDefaultSize)
+				: getRememberedDesktopPaneSize(mode) ?? desktopDefaultSize;
+
+		return clamp(rememberedSize, desktopMinSize, desktopMaxSize);
+	};
+
+	const applyDesktopPaneMode = async (mode: DesktopPaneMode) => {
+		const modeChanged = mode !== desktopPaneMode;
+		desktopPaneMode = mode;
+
+		if (container) {
+			updateDesktopPaneLimits(container.clientWidth, mode);
+		}
+
+		if (mode === 'standard') {
+			immersivePaneSize = null;
+		}
+
+		if (modeChanged && viewportMode === 'desktop') {
+			ignoreNextPaneCollapse = true;
+			desktopPaneRenderKey += 1;
+			pane = null;
+			await tick();
+		}
+	};
+
 	const syncCallOverlay = async () => {
 		if ($showCallOverlay) {
 			showCallOverlay.set(false);
@@ -109,7 +182,7 @@
 		viewportMode = nextMode;
 
 		if (container) {
-			updateDesktopPaneLimits(container.clientWidth);
+			updateDesktopPaneLimits(container.clientWidth, getDesktopPaneMode());
 		}
 
 		if (!modeChanged) {
@@ -125,25 +198,30 @@
 
 		if ($showControls) {
 			await tick();
-			openPane();
+			await openPane();
 		}
 	};
 
-	export const openPane = () => {
-		if (viewportMode !== 'desktop' || !pane) {
+	export const openPane = async (mode: DesktopPaneMode = getDesktopPaneMode()) => {
+		if (viewportMode !== 'desktop') {
 			return;
 		}
 
-		const targetSize = clamp(
-			getStoredDesktopPaneSize() ?? desktopDefaultSize,
-			desktopMinSize,
-			desktopMaxSize
-		);
+		const currentSize = pane?.getSize() ?? null;
+		await applyDesktopPaneMode(mode);
+
+		if (!pane) {
+			return;
+		}
+
+		const targetSize = getDesktopPaneTargetSize(mode, currentSize);
 
 		if (targetSize > 0) {
 			pane.resize(targetSize);
-			persistDesktopPaneSize(targetSize);
+			rememberDesktopPaneSize(mode, targetSize);
 		}
+
+		ignoreNextPaneCollapse = false;
 	};
 
 	const onMouseDown = (event) => {
@@ -162,22 +240,42 @@
 		return clamp(size, desktopMinSize, desktopMaxSize);
 	};
 
+	const syncDesktopPaneMode = async (mode: DesktopPaneMode) => {
+		const currentSize = pane?.getSize() ?? null;
+		await applyDesktopPaneMode(mode);
+
+		if (viewportMode !== 'desktop' || !pane || !$showControls) {
+			return;
+		}
+
+		const nextSize = pane.getSize();
+		const targetSize = getDesktopPaneTargetSize(mode, currentSize);
+
+		if (targetSize > 0 && Math.abs(targetSize - nextSize) > 0.1) {
+			pane.resize(targetSize);
+		}
+
+		rememberDesktopPaneSize(mode, targetSize);
+		ignoreNextPaneCollapse = false;
+	};
+
 	onMount(async () => {
 		container = document.getElementById('chat-container');
+		desktopPaneMode = getDesktopPaneMode();
 
 		if (container) {
-			updateDesktopPaneLimits(container.clientWidth);
+			updateDesktopPaneLimits(container.clientWidth, desktopPaneMode);
 
 			resizeObserver = new ResizeObserver((entries) => {
 				for (const entry of entries) {
-					updateDesktopPaneLimits(entry.contentRect.width);
+					updateDesktopPaneLimits(entry.contentRect.width, desktopPaneMode);
 
 					if ($showControls && pane && pane.isExpanded()) {
 						const nextSize = clampDesktopPaneSize(pane.getSize());
 						if (Math.abs(nextSize - pane.getSize()) > 0.1) {
 							pane.resize(nextSize);
-							persistDesktopPaneSize(nextSize);
 						}
+						rememberDesktopPaneSize(desktopPaneMode, nextSize);
 					}
 				}
 			});
@@ -212,6 +310,13 @@
 
 	$: if (!chatId) {
 		closeHandler();
+	}
+
+	$: {
+		const nextDesktopPaneMode = getDesktopPaneMode();
+		if (nextDesktopPaneMode !== desktopPaneMode) {
+			void syncDesktopPaneMode(nextDesktopPaneMode);
+		}
 	}
 
 	$: drawerPlacement = viewportMode === 'tablet' ? 'right' : 'bottom';
@@ -282,85 +387,95 @@
 		<!-- if $showControls -->
 
 		{#if $showControls}
-			<PaneResizer class="relative flex w-2 items-center justify-center bg-background group">
+			<PaneResizer
+				class="relative flex w-4 cursor-col-resize items-center justify-center bg-background
+					hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150 group"
+			>
 				<div class="z-10 flex h-7 w-5 items-center justify-center rounded-xs">
 					<EllipsisVertical className="size-4 invisible group-hover:visible" />
 				</div>
 			</PaneResizer>
 		{/if}
 
-		<Pane
-			bind:pane
-			defaultSize={0}
-			minSize={desktopMinSize}
-			maxSize={desktopMaxSize}
-			onResize={(size) => {
-				if ($showControls && pane.isExpanded()) {
-					const nextSize = clampDesktopPaneSize(size);
-					if (Math.abs(nextSize - size) > 0.1) {
-						pane.resize(nextSize);
+		{#key desktopPaneRenderKey}
+			<Pane
+				bind:pane
+				defaultSize={0}
+				minSize={desktopMinSize}
+				maxSize={desktopMaxSize}
+				onResize={(size) => {
+					if ($showControls && pane.isExpanded()) {
+						const nextSize = clampDesktopPaneSize(size);
+						if (Math.abs(nextSize - size) > 0.1) {
+							pane.resize(nextSize);
+						}
+						rememberDesktopPaneSize(desktopPaneMode, nextSize);
 					}
-					persistDesktopPaneSize(nextSize);
-				}
-			}}
-			onCollapse={() => {
-				showControls.set(false);
-			}}
-			collapsible={true}
-			class=" z-10 "
-		>
-			{#if $showControls}
-				<div class="flex max-h-full min-h-full">
-					<div
-						class="w-full {($showOverview || $showArtifacts) && !$showCallOverlay
-							? ' '
-							: 'px-5 py-5 bg-white/90 dark:bg-gray-900/80 backdrop-blur-xl border border-gray-200/40 dark:border-gray-700/30 shadow-sm'} z-40 pointer-events-auto overflow-y-auto scrollbar-hidden"
-					>
-						{#if $showCallOverlay}
-							<div class="w-full h-full flex justify-center">
-								<CallOverlay
-									bind:files
-									{submitPrompt}
-									{stopResponse}
-									{modelId}
-									{chatId}
-									{eventTarget}
+				}}
+				onCollapse={() => {
+					if (ignoreNextPaneCollapse) {
+						ignoreNextPaneCollapse = false;
+						return;
+					}
+
+					showControls.set(false);
+				}}
+				collapsible={true}
+				class=" z-10 "
+			>
+				{#if $showControls}
+					<div class="flex max-h-full min-h-full">
+						<div
+							class="w-full {($showOverview || $showArtifacts) && !$showCallOverlay
+								? ' '
+								: 'px-5 py-5 bg-white/90 dark:bg-gray-900/80 backdrop-blur-xl border border-gray-200/40 dark:border-gray-700/30 shadow-sm'} z-40 pointer-events-auto overflow-y-auto scrollbar-hidden"
+						>
+							{#if $showCallOverlay}
+								<div class="w-full h-full flex justify-center">
+									<CallOverlay
+										bind:files
+										{submitPrompt}
+										{stopResponse}
+										{modelId}
+										{chatId}
+										{eventTarget}
+										on:close={() => {
+											showControls.set(false);
+										}}
+									/>
+								</div>
+							{:else if $showArtifacts}
+								<Artifacts {history} overlay={dragged} />
+							{:else if $showOverview}
+								<Overview
+									{history}
+									on:nodeclick={(e) => {
+										if (e.detail.node.data.message.favorite) {
+											history.messages[e.detail.node.data.message.id].favorite = true;
+										} else {
+											history.messages[e.detail.node.data.message.id].favorite = null;
+										}
+
+										showMessage(e.detail.node.data.message);
+									}}
 									on:close={() => {
 										showControls.set(false);
 									}}
 								/>
-							</div>
-						{:else if $showArtifacts}
-							<Artifacts {history} overlay={dragged} />
-						{:else if $showOverview}
-							<Overview
-								{history}
-								on:nodeclick={(e) => {
-									if (e.detail.node.data.message.favorite) {
-										history.messages[e.detail.node.data.message.id].favorite = true;
-									} else {
-										history.messages[e.detail.node.data.message.id].favorite = null;
-									}
-
-									showMessage(e.detail.node.data.message);
-								}}
-								on:close={() => {
-									showControls.set(false);
-								}}
-							/>
-						{:else}
-							<Controls
-								on:close={() => {
-									showControls.set(false);
-								}}
-								{models}
-								bind:chatFiles
-								bind:params
-							/>
-						{/if}
+							{:else}
+								<Controls
+									on:close={() => {
+										showControls.set(false);
+									}}
+									{models}
+									bind:chatFiles
+									bind:params
+								/>
+							{/if}
+						</div>
 					</div>
-				</div>
-			{/if}
-		</Pane>
+				{/if}
+			</Pane>
+		{/key}
 	{/if}
 </SvelteFlowProvider>

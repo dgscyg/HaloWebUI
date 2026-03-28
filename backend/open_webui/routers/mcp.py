@@ -21,7 +21,11 @@ from open_webui.routers.configs import (
 )
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.mcp import execute_mcp_tool, get_mcp_server_data, read_mcp_resource
-from open_webui.utils.user_tools import get_user_mcp_server_connections
+from open_webui.utils.user_tools import (
+    MCP_APPS_GLOBAL_ENABLE_KEY,
+    get_user_mcp_apps_config,
+    get_user_mcp_server_connections,
+)
 
 log = logging.getLogger(__name__)
 
@@ -166,10 +170,12 @@ def _get_mcp_connection(
     connection = connections[server_idx]
 
     if check_mcp_apps:
+        apps_config = get_user_mcp_apps_config(request, user)
+        global_enabled_default = bool(apps_config.get(MCP_APPS_GLOBAL_ENABLE_KEY, False))
         base_enabled = _is_mcp_connection_enabled(connection)
         apps_global_enabled, server_apps_enabled = _get_mcp_apps_form_state(
             connection,
-            default_global_enabled=False,
+            default_global_enabled=global_enabled_default,
         )
         if not (base_enabled and apps_global_enabled and server_apps_enabled):
             raise HTTPException(

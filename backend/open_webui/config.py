@@ -1432,6 +1432,12 @@ DEFAULT_PROMPT_SUGGESTIONS = PersistentConfig(
     ],
 )
 
+ENABLE_DEFAULT_PROMPT_SUGGESTIONS = PersistentConfig(
+    "ENABLE_DEFAULT_PROMPT_SUGGESTIONS",
+    "ui.prompt_suggestions.enable",
+    os.environ.get("ENABLE_DEFAULT_PROMPT_SUGGESTIONS", "True").lower() == "true",
+)
+
 MODEL_ORDER_LIST = PersistentConfig(
     "MODEL_ORDER_LIST",
     "ui.model_order_list",

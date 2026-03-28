@@ -41,6 +41,8 @@
 | `WEBUI_SECRET_KEY` | `t0p-s3cr3t` | JWT 签名密钥 (生产环境必须修改) |
 | `JWT_EXPIRES_IN` | `-1` | JWT 过期时间 (秒) |
 | `ENABLE_API_KEY` | `True` | 启用 API Key 认证 |
+| `ENABLE_GUEST_ACCESS` | `False` | 启用游客访问入口 |
+| `GUEST_ACCESS_MODE` | `button` | 游客入口模式，`button` 显示按钮，`auto` 自动进入游客会话 |
 | `WEBUI_ADMIN_EMAIL` | - | 自动创建管理员邮箱 |
 | `WEBUI_ADMIN_PASSWORD` | - | 自动创建管理员密码 |
 
