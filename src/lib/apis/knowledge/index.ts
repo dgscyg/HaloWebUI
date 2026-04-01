@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { parseBlobResponse, parseJsonResponse } from '../response';
 
 export const createNewKnowledge = async (
 	token: string,
@@ -21,10 +22,7 @@ export const createNewKnowledge = async (
 			access_control: accessControl
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -58,10 +56,7 @@ export const getKnowledgeBases = async (token: string = '', page: number | null 
 			}
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -89,10 +84,7 @@ export const getKnowledgeBaseList = async (token: string = '') => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -120,10 +112,7 @@ export const getKnowledgeById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -165,10 +154,7 @@ export const updateKnowledgeById = async (token: string, id: string, form: Knowl
 			access_control: form.access_control
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -200,10 +186,7 @@ export const addFileToKnowledgeById = async (token: string, id: string, fileId: 
 			file_id: fileId
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -235,10 +218,7 @@ export const updateFileFromKnowledgeById = async (token: string, id: string, fil
 			file_id: fileId
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -270,10 +250,7 @@ export const removeFileFromKnowledgeById = async (token: string, id: string, fil
 			file_id: fileId
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -302,10 +279,7 @@ export const resetKnowledgeById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -334,10 +308,7 @@ export const deleteKnowledgeById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -366,10 +337,7 @@ export const reindexKnowledgeFiles = async (token: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -391,12 +359,7 @@ export const exportKnowledgeById = async (token: string, id: string, name: strin
 		}
 	});
 
-	if (!res.ok) {
-		const err = await res.json();
-		throw err.detail;
-	}
-
-	const blob = await res.blob();
+	const blob = await parseBlobResponse(res);
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement('a');
 	a.href = url;

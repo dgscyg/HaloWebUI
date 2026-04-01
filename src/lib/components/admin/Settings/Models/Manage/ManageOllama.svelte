@@ -7,6 +7,7 @@
 	import { splitStream } from '$lib/utils';
 	import { localizeCommonError } from '$lib/utils/common-errors';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { parseResponsePayload } from '$lib/apis/response';
 
 	import {
 		createModel,
@@ -337,8 +338,8 @@
 				}
 			}
 		} else {
-			const error = await fileResponse?.json();
-			showError(error?.detail ?? error);
+			const error = fileResponse ? await parseResponsePayload(fileResponse) : null;
+			showError(error);
 		}
 
 		if (uploaded) {

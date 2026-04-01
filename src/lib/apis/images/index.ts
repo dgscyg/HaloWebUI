@@ -1,4 +1,5 @@
 import { IMAGES_API_BASE_URL } from '$lib/constants';
+import { parseJsonResponse } from '../response';
 
 export type ImageGenerationRequest = {
 	prompt: string;
@@ -54,10 +55,7 @@ export const getConfig = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -86,10 +84,7 @@ export const getImageUsageConfig = async (token: string = ''): Promise<ImageUsag
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -121,10 +116,7 @@ export const updateConfig = async (token: string = '', config: object) => {
 			...config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -153,10 +145,7 @@ export const verifyConfigUrl = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -185,10 +174,7 @@ export const getImageGenerationConfig = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -218,10 +204,7 @@ export const updateImageGenerationConfig = async (token: string = '', config: ob
 		},
 		body: JSON.stringify({ ...config })
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -270,10 +253,7 @@ export const getImageGenerationModels = async (
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -313,10 +293,7 @@ export const imageGenerations = async (
 		},
 		body: JSON.stringify(payload)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {

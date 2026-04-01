@@ -10,8 +10,10 @@
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import WorkspaceSubpageHeader from '$lib/components/workspace/shell/WorkspaceSubpageHeader.svelte';
+	import { localizeCommonError } from '$lib/utils/common-errors';
 
 	const i18n = getContext('i18n');
+	const formatError = (error) => localizeCommonError(error, (key, options) => $i18n.t(key, options));
 
 	let tool = null;
 
@@ -40,7 +42,7 @@
 			content: data.content,
 			access_control: data.access_control
 		}).catch((error) => {
-			toast.error(`${error}`);
+			toast.error(formatError(error));
 			return null;
 		});
 
@@ -61,7 +63,7 @@
 
 		if (id) {
 			tool = await getToolById(localStorage.token, id).catch((error) => {
-				toast.error(`${error}`);
+				toast.error(formatError(error));
 				goto('/workspace/tools');
 				return null;
 			});
@@ -88,7 +90,7 @@
 			accessControl={tool.access_control}
 			showBackButton={false}
 			onSave={(value) => {
-				saveHandler(value);
+				return saveHandler(value);
 			}}
 		/>
 	</div>

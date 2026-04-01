@@ -1,4 +1,5 @@
 import { GEMINI_API_BASE_URL } from '$lib/constants';
+import { parseJsonResponse } from '../response';
 
 export const getGeminiConfig = async (token: string = '') => {
 	let error = null;
@@ -11,10 +12,7 @@ export const getGeminiConfig = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error(err);
 			if ('detail' in err) {
@@ -53,10 +51,7 @@ export const updateGeminiConfig = async (token: string = '', config: GeminiConfi
 			...config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error(err);
 			if ('detail' in err) {
@@ -88,10 +83,7 @@ export const getGeminiModels = async (token: string, urlIdx?: number) => {
 			}
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = `Gemini: ${err?.detail ?? err?.error?.message ?? err?.message ?? 'Network Problem'}`;
 			return [];
@@ -128,10 +120,7 @@ export const verifyGeminiConnection = async (
 			config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = `Gemini: ${err?.detail ?? err?.error?.message ?? err?.message ?? 'Network Problem'}`;
 			return [];

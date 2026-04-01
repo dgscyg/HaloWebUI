@@ -1,5 +1,6 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { t } from 'i18next';
+import { parseJsonResponse } from '../response';
 
 type ChannelForm = {
 	name: string;
@@ -20,10 +21,7 @@ export const createNewChannel = async (token: string = '', channel: ChannelForm)
 		},
 		body: JSON.stringify({ ...channel })
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -51,10 +49,7 @@ export const getChannels = async (token: string = '') => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -82,10 +77,7 @@ export const getChannelById = async (token: string = '', channel_id: string) => 
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -118,10 +110,7 @@ export const updateChannelById = async (
 		},
 		body: JSON.stringify({ ...channel })
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -149,10 +138,7 @@ export const deleteChannelById = async (token: string = '', channel_id: string) 
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -188,10 +174,7 @@ export const getChannelMessages = async (
 			}
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -228,10 +211,7 @@ export const getChannelThreadMessages = async (
 			}
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -267,10 +247,7 @@ export const sendMessage = async (token: string = '', channel_id: string, messag
 		},
 		body: JSON.stringify({ ...message })
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -307,10 +284,7 @@ export const updateMessage = async (
 			body: JSON.stringify({ ...message })
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -347,10 +321,7 @@ export const addReaction = async (
 			body: JSON.stringify({ name })
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -387,10 +358,7 @@ export const removeReaction = async (
 			body: JSON.stringify({ name })
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -421,10 +389,7 @@ export const deleteMessage = async (token: string = '', channel_id: string, mess
 			}
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})

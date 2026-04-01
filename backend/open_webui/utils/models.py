@@ -414,6 +414,7 @@ async def get_all_models(request, user: UserModel = None):
         else:
             function_module, _, _ = load_function_module_by_id(function_id)
             request.app.state.FUNCTIONS[function_id] = function_module
+        return function_module
 
     for model in models:
         action_ids = [
@@ -424,14 +425,28 @@ async def get_all_models(request, user: UserModel = None):
 
         model["actions"] = []
         for action_id in action_ids:
-            action_function = Functions.get_function_by_id(action_id)
-            if action_function is None:
-                raise Exception(f"Action not found: {action_id}")
+            try:
+                action_function = Functions.get_function_by_id(action_id)
+                if action_function is None:
+                    log.warning(
+                        "Skipping missing action while building models list: %s",
+                        action_id,
+                    )
+                    continue
 
-            function_module = get_function_module_by_id(action_id)
-            model["actions"].extend(
-                get_action_items_from_module(action_function, function_module)
-            )
+                function_module = get_function_module_by_id(action_id)
+                model["actions"].extend(
+                    get_action_items_from_module(action_function, function_module)
+                )
+            except Exception as e:
+                log.warning(
+                    "Skipping action %s for model %s while building models list: %s: %s",
+                    action_id,
+                    model.get("id"),
+                    type(e).__name__,
+                    e,
+                )
+                continue
     log.debug(f"get_all_models() returned {len(models)} models")
 
     # Per-request model map (avoid leaking across users).

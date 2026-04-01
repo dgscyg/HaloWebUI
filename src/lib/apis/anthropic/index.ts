@@ -1,4 +1,5 @@
 import { ANTHROPIC_API_BASE_URL } from '$lib/constants';
+import { parseJsonResponse } from '../response';
 
 export const getAnthropicConfig = async (token: string = '') => {
 	let error = null;
@@ -11,10 +12,7 @@ export const getAnthropicConfig = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error(err);
 			if ('detail' in err) {
@@ -53,10 +51,7 @@ export const updateAnthropicConfig = async (token: string = '', config: Anthropi
 			...config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error(err);
 			if ('detail' in err) {
@@ -98,10 +93,7 @@ export const verifyAnthropicConnection = async (
 			config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = `Anthropic: ${err?.detail ?? err?.error?.message ?? err?.message ?? 'Network Problem'}`;
 			return [];

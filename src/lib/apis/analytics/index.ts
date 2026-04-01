@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { parseJsonResponse } from '../response';
 
 export const getModelUsageStats = async (token: string, days: number = 30) => {
 	let error = null;
@@ -9,10 +10,7 @@ export const getModelUsageStats = async (token: string, days: number = 30) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err?.detail ?? err;
 			return null;
@@ -31,10 +29,7 @@ export const getUserActivityStats = async (token: string, days: number = 30) => 
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;
@@ -55,10 +50,7 @@ export const getDailyStats = async (token: string, days: number = 30, model?: st
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;
@@ -85,10 +77,7 @@ export const cleanupAnalytics = async (
 		},
 		body: JSON.stringify({ models, days, dry_run })
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;

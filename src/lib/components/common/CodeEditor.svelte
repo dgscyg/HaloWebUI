@@ -66,8 +66,11 @@
 
 	import { formatPythonCode } from '$lib/apis/utils';
 	import { toast } from 'svelte-sonner';
+	import { localizeCommonError } from '$lib/utils/common-errors';
 
 	const i18n = getContext('i18n');
+	const formatError = (error: unknown) =>
+		localizeCommonError(error, (key, options) => i18n.t(key, options));
 
 	export let boilerplate = '';
 	export let value = '';
@@ -174,14 +177,35 @@
 		return await language?.load();
 	};
 
-	export const formatPythonCodeHandler = async () => {
+	const isOptionalFormatterDependencyError = (error: unknown) =>
+		typeof error === 'string' && error.includes('requires optional dependencies');
+
+	export const formatPythonCodeHandler = async ({ showError = true } = {}) => {
 		if (codeEditor) {
 			const res = await formatPythonCode(localStorage.token, _value).catch((error) => {
-				toast.error(`${error}`);
-				return null;
+				if (showError) {
+					toast.error(formatError(error));
+				}
+
+				return {
+					error,
+					optionalDependencyMissing: isOptionalFormatterDependencyError(error)
+				};
 			});
 
 			if (res && res.code) {
+				if (res.formatter_unavailable) {
+					if (showError && res.detail) {
+						toast.error(formatError(res.detail));
+					}
+
+					return {
+						formatted: false,
+						optionalDependencyMissing: true,
+						error: res.detail ?? null
+					};
+				}
+
 				const formattedCode = res.code;
 				codeEditor.dispatch({
 					changes: [{ from: 0, to: codeEditor.state.doc.length, insert: formattedCode }]
@@ -192,11 +216,15 @@
 				await tick();
 
 				toast.success($i18n.t('Code formatted successfully'));
-				return true;
+				return { formatted: true, optionalDependencyMissing: false, error: null };
 			}
-			return false;
+			return {
+				formatted: false,
+				optionalDependencyMissing: !!res?.optionalDependencyMissing,
+				error: res?.error ?? null
+			};
 		}
-		return false;
+		return { formatted: false, optionalDependencyMissing: false, error: null };
 	};
 
 	let extensions = [

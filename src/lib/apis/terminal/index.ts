@@ -1,12 +1,16 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import {
+	parseArrayBufferResponse,
+	parseBlobResponse,
+	parseJsonResponse
+} from '../response';
 
 export const getTerminalConfig = async (token: string) => {
 	const res = await fetch(`${WEBUI_API_BASE_URL}/terminal/config`, {
 		method: 'GET',
 		headers: { authorization: `Bearer ${token}` }
 	});
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };
 
 export const updateTerminalConfig = async (token: string, enabled: boolean) => {
@@ -14,8 +18,7 @@ export const updateTerminalConfig = async (token: string, enabled: boolean) => {
 		method: 'POST',
 		headers: { authorization: `Bearer ${token}` }
 	});
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };
 
 export const listDirectory = async (token: string, path: string = '') => {
@@ -24,8 +27,7 @@ export const listDirectory = async (token: string, path: string = '') => {
 		method: 'GET',
 		headers: { authorization: `Bearer ${token}` }
 	});
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };
 
 export const readFileContent = async (token: string, path: string) => {
@@ -36,8 +38,7 @@ export const readFileContent = async (token: string, path: string) => {
 			headers: { authorization: `Bearer ${token}` }
 		}
 	);
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };
 
 export const readFileBinary = async (token: string, path: string): Promise<ArrayBuffer> => {
@@ -48,11 +49,7 @@ export const readFileBinary = async (token: string, path: string): Promise<Array
 			headers: { authorization: `Bearer ${token}` }
 		}
 	);
-	if (!res.ok) {
-		const err = await res.json().catch(() => ({ detail: 'Failed to fetch binary file' }));
-		throw err.detail;
-	}
-	return res.arrayBuffer();
+	return parseArrayBufferResponse(res);
 };
 
 export const writeFileContent = async (token: string, path: string, content: string) => {
@@ -64,8 +61,7 @@ export const writeFileContent = async (token: string, path: string, content: str
 		},
 		body: JSON.stringify({ path, content })
 	});
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };
 
 export const createDirectory = async (token: string, path: string) => {
@@ -77,8 +73,7 @@ export const createDirectory = async (token: string, path: string) => {
 		},
 		body: JSON.stringify({ path })
 	});
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };
 
 export const deletePath = async (token: string, path: string) => {
@@ -86,8 +81,7 @@ export const deletePath = async (token: string, path: string) => {
 		method: 'DELETE',
 		headers: { authorization: `Bearer ${token}` }
 	});
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };
 
 export const renamePath = async (token: string, oldPath: string, newPath: string) => {
@@ -99,8 +93,7 @@ export const renamePath = async (token: string, oldPath: string, newPath: string
 		},
 		body: JSON.stringify({ old_path: oldPath, new_path: newPath })
 	});
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };
 
 export const uploadFile = async (token: string, path: string, file: File) => {
@@ -112,8 +105,7 @@ export const uploadFile = async (token: string, path: string, file: File) => {
 		headers: { authorization: `Bearer ${token}` },
 		body: formData
 	});
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };
 
 export const getSqliteTables = async (token: string, path: string) => {
@@ -124,8 +116,7 @@ export const getSqliteTables = async (token: string, path: string) => {
 			headers: { authorization: `Bearer ${token}` }
 		}
 	);
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };
 
 export const executeSqlQuery = async (
@@ -142,8 +133,7 @@ export const executeSqlQuery = async (
 		},
 		body: JSON.stringify({ path, query, limit })
 	});
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };
 
 /**
@@ -157,11 +147,7 @@ export const readFileRaw = async (token: string, path: string): Promise<Blob> =>
 			headers: { authorization: `Bearer ${token}` }
 		}
 	);
-	if (!res.ok) {
-		const err = await res.json().catch(() => ({ detail: 'Failed to fetch raw file' }));
-		throw err.detail;
-	}
-	return res.blob();
+	return parseBlobResponse(res);
 };
 
 export interface PortInfo {
@@ -176,6 +162,5 @@ export const listPorts = async (token: string): Promise<PortInfo[]> => {
 		method: 'GET',
 		headers: { authorization: `Bearer ${token}` }
 	});
-	if (!res.ok) throw (await res.json()).detail;
-	return res.json();
+	return parseJsonResponse(res);
 };

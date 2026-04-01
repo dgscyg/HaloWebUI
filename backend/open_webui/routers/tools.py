@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 import time
+import re
 
 from open_webui.models.tools import (
     ToolForm,
@@ -54,6 +55,7 @@ def enrich_schema_with_dynamic_options(module, schema: dict) -> dict:
 
 
 router = APIRouter()
+IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 ############################
 # GetTools
@@ -198,10 +200,10 @@ async def create_new_tools(
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
             )
 
-    if not form_data.id.isidentifier():
+    if not IDENTIFIER_RE.fullmatch(form_data.id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only alphanumeric characters and underscores are allowed in the id",
+            detail="The id must start with a letter or underscore, and may contain only letters, numbers, and underscores.",
         )
 
     form_data.id = form_data.id.lower()

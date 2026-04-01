@@ -54,6 +54,8 @@
 	let sortBy = 'updated'; // 'name' | 'updated'
 
 	let filteredItems = [];
+	$: isInitialLoading = $functions === null;
+	$: countLabel = isInitialLoading ? '...' : `${filteredItems.length}`;
 
 	const sortItems = (items: any[]) => {
 		return [...items].sort((a, b) => {
@@ -200,7 +202,7 @@
 			<div class="flex flex-col gap-3 lg:flex-row lg:items-center">
 				<div class="workspace-toolbar-summary">
 					<div class="workspace-count-pill">
-						{filteredItems.length} {$i18n.t('Functions')}
+						{countLabel} {$i18n.t('Functions')}
 					</div>
 					<div class="text-xs text-gray-500 dark:text-gray-400">
 						{$i18n.t('Build and maintain filters, pipelines, and automation functions for admin-controlled workflows.')}
@@ -237,7 +239,11 @@
 		</section>
 
 		<section class="workspace-section">
-			{#if filteredItems.length > 0}
+			{#if isInitialLoading}
+			<div class="workspace-empty-state">
+				<Spinner />
+			</div>
+			{:else if filteredItems.length > 0}
 			<div class="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
 		{#each filteredItems as func (func.id)}
 			<div
@@ -282,13 +288,18 @@
 
 								<div class="text-xs text-gray-500 shrink-0">
 									<Tooltip
-										content={func?.user?.email ?? $i18n.t('Deleted User')}
+										content={func?.user?.email ??
+											(func?.user_id === $user?.id ? $user?.email : $i18n.t('Deleted User'))}
 										className="flex shrink-0"
 										placement="top-start"
 									>
 										{$i18n.t('By {{name}}', {
 											name: capitalizeFirstLetter(
-												func?.user?.name ?? func?.user?.email ?? $i18n.t('Deleted User')
+												func?.user?.name ??
+													func?.user?.email ??
+													(func?.user_id === $user?.id
+														? $user?.name ?? $user?.email
+														: $i18n.t('Deleted User'))
 											)
 										})}
 									</Tooltip>

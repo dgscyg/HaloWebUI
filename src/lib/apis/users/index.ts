@@ -1,5 +1,6 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { getUserPosition } from '$lib/utils';
+import { parseBlobResponse, parseJsonResponse } from '../response';
 
 export const exportUsersCsv = async (token: string) => {
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/export/csv`, {
@@ -9,12 +10,7 @@ export const exportUsersCsv = async (token: string) => {
 		}
 	});
 
-	if (!res.ok) {
-		const err = await res.json();
-		throw err.detail;
-	}
-
-	const blob = await res.blob();
+	const blob = await parseBlobResponse(res);
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement('a');
 	a.href = url;
@@ -33,10 +29,7 @@ export const getUserGroups = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -60,10 +53,7 @@ export const getUserDefaultPermissions = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -90,10 +80,7 @@ export const updateUserDefaultPermissions = async (token: string, permissions: o
 			...permissions
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -121,10 +108,7 @@ export const updateUserRole = async (token: string, id: string, role: string) =>
 			role: role
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -148,10 +132,7 @@ export const getUsers = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -174,10 +155,7 @@ export const getUserSettings = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -204,10 +182,7 @@ export const updateUserSettings = async (token: string, settings: object) => {
 			...settings
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -231,10 +206,7 @@ export const getUserById = async (token: string, userId: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -257,10 +229,7 @@ export const getUserInfo = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -287,10 +256,7 @@ export const updateUserInfo = async (token: string, info: object) => {
 			...info
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -329,10 +295,7 @@ export const deleteUserById = async (token: string, userId: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -369,10 +332,7 @@ export const updateUserById = async (token: string, userId: string, user: UserUp
 			password: user.password !== '' ? user.password : undefined
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;

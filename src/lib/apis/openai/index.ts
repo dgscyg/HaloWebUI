@@ -1,4 +1,5 @@
 import { OPENAI_API_BASE_URL, WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+import { createResponseError, parseJsonResponse, parseResponsePayload } from '../response';
 
 const OPENAI_CHAT_COMPLETIONS_SUFFIX = '/chat/completions';
 
@@ -107,10 +108,7 @@ export const getOpenAIConfig = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -149,10 +147,7 @@ export const updateOpenAIConfig = async (token: string = '', config: OpenAIConfi
 			...config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -181,10 +176,7 @@ export const getOpenAIUrls = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -216,10 +208,7 @@ export const updateOpenAIUrls = async (token: string = '', urls: string[]) => {
 			urls: urls
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -248,10 +237,7 @@ export const getOpenAIKeys = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -283,10 +269,7 @@ export const updateOpenAIKeys = async (token: string = '', keys: string[]) => {
 			keys: keys
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -319,10 +302,7 @@ export const getOpenAIModelsDirect = async (
 			...(key && { authorization: `Bearer ${key}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = `OpenAI: ${err?.detail ?? err?.error?.message ?? err?.message ?? 'Network Problem'}`;
 			return [];
@@ -349,10 +329,7 @@ export const getOpenAIModels = async (token: string, urlIdx?: number) => {
 			}
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = `OpenAI: ${err?.error?.message ?? 'Network Problem'}`;
 			return [];
@@ -408,16 +385,7 @@ export const verifyOpenAIConnection = async (
 		})
 			.then(async (res) => {
 				if (!res.ok) {
-					let upstreamError: any = null;
-					try {
-						upstreamError = await res.json();
-					} catch {
-						try {
-							upstreamError = await res.text();
-						} catch {
-							upstreamError = null;
-						}
-					}
+					const upstreamError = await parseResponsePayload(res);
 
 					if (
 						isDashScopeCompatibleConnection(url) &&
@@ -426,9 +394,10 @@ export const verifyOpenAIConnection = async (
 						return buildDashScopeVerifyFallback(purpose);
 					}
 
-					throw upstreamError;
+					throw createResponseError(res, upstreamError);
 				}
-				return res.json();
+
+				return parseJsonResponse(res);
 			})
 			.catch((err) => {
 				error = `OpenAI: ${err?.detail ?? err?.error?.message ?? err?.message ?? 'Network Problem'}`;
@@ -453,10 +422,7 @@ export const verifyOpenAIConnection = async (
 				purpose
 			})
 		})
-			.then(async (res) => {
-				if (!res.ok) throw await res.json();
-				return res.json();
-			})
+			.then(parseJsonResponse)
 			.catch((err) => {
 				error = `OpenAI: ${err?.detail ?? err?.error?.message ?? err?.message ?? 'Network Problem'}`;
 				return [];
@@ -514,10 +480,7 @@ export const generateOpenAIChatCompletion = async (
 		},
 		body: JSON.stringify(body)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = `${err?.detail ?? err}`;
 			return null;
