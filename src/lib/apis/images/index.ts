@@ -5,6 +5,8 @@ export type ImageGenerationRequest = {
 	prompt: string;
 	model?: string;
 	size?: string;
+	image_size?: '512' | '1K' | '2K' | '4K' | string;
+	aspect_ratio?: string;
 	n?: number;
 	negative_prompt?: string;
 	credential_source?: 'auto' | 'personal' | 'shared';
@@ -39,6 +41,7 @@ export type ImageGenerationModel = {
 	supports_background?: boolean;
 	supports_batch?: boolean;
 	size_mode?: 'exact' | 'aspect_ratio' | 'unsupported' | string;
+	supports_image_size?: boolean;
 	text_output_supported?: boolean;
 	source?: 'settings' | 'personal' | 'shared' | string | null;
 	connection_index?: number | null;

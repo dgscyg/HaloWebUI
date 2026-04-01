@@ -77,6 +77,7 @@ async def get_function_models(request):
 
     for pipe in pipes:
         function_module = get_function_module_by_id(request, pipe.id)
+        has_user_valves = hasattr(function_module, "UserValves")
 
         # Check if function is a manifold
         if hasattr(function_module, "pipes"):
@@ -116,6 +117,7 @@ async def get_function_models(request):
                         "created": pipe.created_at,
                         "owned_by": "openai",
                         "pipe": pipe_flag,
+                        "has_user_valves": has_user_valves,
                     }
                 )
         else:
@@ -133,6 +135,7 @@ async def get_function_models(request):
                     "created": pipe.created_at,
                     "owned_by": "openai",
                     "pipe": pipe_flag,
+                    "has_user_valves": has_user_valves,
                 }
             )
 

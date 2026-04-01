@@ -43,6 +43,7 @@
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
+	import ImageContextPanel from './MessageInput/ImageContextPanel.svelte';
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 	import Commands from './MessageInput/Commands.svelte';
@@ -100,6 +101,11 @@
 	export let selectedToolIds = [];
 
 	export let imageGenerationEnabled = false;
+	export let imageGenerationOptions: {
+		image_size?: string | null;
+		aspect_ratio?: string | null;
+		n?: number | null;
+	} = {};
 	export let webSearchMode: WebSearchMode = 'off';
 	export let codeInterpreterEnabled = false;
 
@@ -111,6 +117,7 @@
 		files,
 		selectedToolIds,
 		imageGenerationEnabled,
+		imageGenerationOptions,
 		webSearchMode,
 		reasoningEffort,
 		maxThinkingTokens
@@ -129,6 +136,9 @@
 		.filter(Boolean);
 	$: hasResolvedSelectedModels =
 		selectedModelLookupIds.length === 0 || selectedModelObjects.length === selectedModelLookupIds.length;
+	$: primarySelectedModel =
+		atSelectedModel ??
+		(selectedModelObjects.length === 1 ? selectedModelObjects[0] : null);
 	$: webSearchModeOptions = buildWebSearchModeOptions(
 		(key, options) => $i18n.t(key, options),
 		$config,
@@ -320,7 +330,9 @@
 			errorHint: '',
 			diagnostic: null,
 			itemId: tempItemId,
-			...(fullContext ? { context: 'full' } : {})
+			...(fullContext
+				? { context: 'full', processing_mode: 'full_context' }
+				: {})
 		};
 
 		if (fileItem.size == 0) {
@@ -332,7 +344,9 @@
 
 		try {
 			// During the file upload, file content is automatically extracted.
-			const uploadedFile = await uploadFile(localStorage.token, file);
+			const uploadedFile = await uploadFile(localStorage.token, file, {
+				processingMode: fullContext ? 'full_context' : undefined
+			});
 
 			if (uploadedFile) {
 				console.log('File upload completed:', {
@@ -357,6 +371,12 @@
 				fileItem.id = uploadedFile.id;
 				fileItem.collection_name =
 					uploadedFile?.meta?.collection_name || uploadedFile?.collection_name;
+				fileItem.processing_mode = uploadedFile?.meta?.processing_mode;
+				if (uploadedFile?.meta?.processing_mode === 'full_context') {
+					fileItem.context = 'full';
+				} else if (uploadedFile?.meta?.processing_mode !== 'native_file') {
+					delete fileItem.context;
+				}
 				fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
 
 				files = files;
@@ -673,6 +693,15 @@
 								class="flex-1 flex flex-col relative w-full rounded-3xl border border-gray-200/50 dark:border-gray-700/20 hover:border-gray-300/60 dark:hover:border-gray-600/40 focus-within:border-primary-300/40 dark:focus-within:border-primary-500/25 shadow-sm dark:shadow-none focus-within:shadow-lg focus-within:shadow-primary-500/5 dark:focus-within:shadow-primary-400/[0.07] transition-all duration-300 px-1 pt-1 bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl dark:text-gray-100"
 								dir={$settings?.chatDirection ?? 'auto'}
 							>
+								<ImageContextPanel
+									currentModel={primarySelectedModel}
+									{imageGenerationEnabled}
+									bind:imageGenerationOptions
+									on:advanced={() => {
+										showControls.set(true);
+									}}
+								/>
+
 								{#if files.length > 0}
 									<div class="px-2.5 mt-0.5 mb-1.5 pt-1.5 flex items-end gap-2 overflow-x-auto scrollbar-none">
 										{#each files as file, fileIdx}

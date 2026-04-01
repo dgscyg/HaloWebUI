@@ -32,7 +32,7 @@ HALO_BACKUP_DIR = Path(
     )
 ).resolve()
 HALO_STATE_TABLE = "halowebui_migration_state"
-HALO_TARGET_HEAD = "2c3d4e5f6a7b"
+HALO_TARGET_HEAD = "3d4e5f6a7b8c"
 HALO_SOURCE_FAMILIES = {
     "c440947495f3": "owui_070_family",
     "a1b2c3d4e5f6": "owui_080_family",
@@ -662,6 +662,7 @@ def _ensure_user_legacy_auth_columns(conn: Connection, backend: str) -> None:
 
     _ensure_column(conn, "user", "api_key", "TEXT")
     _ensure_column(conn, "user", "oauth_sub", "TEXT")
+    _ensure_column(conn, "user", "note", "TEXT")
 
     latest_keys: dict[str, str] = {}
     if _table_exists(conn, "api_key"):

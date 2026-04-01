@@ -208,6 +208,15 @@
 			const uploadedFile = await uploadFile(localStorage.token, file);
 
 			if (uploadedFile) {
+				if (uploadedFile.error) {
+					toast.warning(
+						localizeFileUploadError(
+							uploadedFile.error,
+							$i18n.t.bind($i18n),
+							getUploadLocalizeOptions()
+						)
+					);
+				}
 				const added = await addFileHandler(uploadedFile, tempItemId);
 				if (!added) {
 					return;
@@ -413,6 +422,9 @@
 			);
 			if (updatedKnowledge) {
 				knowledge = mergeKnowledgeWithLocalFiles(updatedKnowledge, tempItemId);
+				if (updatedKnowledge?.warnings?.message) {
+					toast.warning($i18n.t(updatedKnowledge.warnings.message));
+				}
 				toast.success($i18n.t('File added successfully.'));
 				return true;
 			}

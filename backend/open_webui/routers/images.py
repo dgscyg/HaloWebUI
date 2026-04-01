@@ -98,6 +98,26 @@ IMAGE_SIZE_ASPECT_RATIO_OVERRIDES = {
     "1536x1024": "3:2",
 }
 
+GEMINI_IMAGE_SIZE_PIXELS = {
+    "512": "512x512",
+    "1K": "1024x1024",
+    "2K": "2048x2048",
+    "4K": "4096x4096",
+}
+GEMINI_IMAGE_SIZE_ORDER = ("512", "1K", "2K", "4K")
+GEMINI_IMAGE_ASPECT_RATIOS = (
+    "1:1",
+    "2:3",
+    "3:2",
+    "3:4",
+    "4:3",
+    "4:5",
+    "5:4",
+    "9:16",
+    "16:9",
+    "21:9",
+)
+
 def _can_use_image_generation(request: Request, user) -> bool:
     """Server-side permission gate for image generation (matches builtin_tools behavior)."""
     if getattr(user, "role", None) == "admin":
@@ -778,6 +798,7 @@ def _build_image_model_entry(
     supports_background: bool,
     supports_batch: bool,
     size_mode: str,
+    supports_image_size: bool = False,
     text_output_supported: bool,
     source: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
@@ -789,6 +810,7 @@ def _build_image_model_entry(
         "supports_background": bool(supports_background),
         "supports_batch": bool(supports_batch),
         "size_mode": size_mode,
+        "supports_image_size": bool(supports_image_size),
         "text_output_supported": bool(text_output_supported),
         "source": source.get("effective_source") if isinstance(source, dict) else None,
         "connection_index": source.get("connection_index") if isinstance(source, dict) else None,
@@ -891,6 +913,7 @@ def _classify_gemini_image_model(
     has_predict = any("predict" == method or method.endswith(":predict") for method in methods)
     has_generate_content = any("generatecontent" in method for method in methods)
     looks_like_imagen = "imagen" in base_name
+    supports_image_size = base_name.startswith("gemini-3")
 
     if negative_hint and not (positive_hint or has_predict or output_has_image):
         return None
@@ -906,6 +929,7 @@ def _classify_gemini_image_model(
             supports_background=False,
             supports_batch=True,
             size_mode="unsupported",
+            supports_image_size=False,
             text_output_supported=False,
             source=source,
         )
@@ -919,6 +943,7 @@ def _classify_gemini_image_model(
             supports_background=False,
             supports_batch=False,
             size_mode="aspect_ratio",
+            supports_image_size=supports_image_size,
             text_output_supported=True,
             source=source,
         )
@@ -1603,6 +1628,8 @@ class GenerateImageForm(BaseModel):
     model: Optional[str] = None
     prompt: str
     size: Optional[str] = None
+    image_size: Optional[str] = None
+    aspect_ratio: Optional[str] = None
     n: int = 1
     negative_prompt: Optional[str] = None
     credential_source: Optional[str] = None
@@ -1748,6 +1775,45 @@ def _size_to_aspect_ratio(size: Optional[str]) -> Optional[str]:
         return None
 
     return f"{width // divisor}:{height // divisor}"
+
+
+def _normalize_gemini_image_size(value: Optional[str]) -> Optional[str]:
+    normalized = str(value or "").strip().upper()
+    if not normalized:
+        return None
+    return normalized if normalized in GEMINI_IMAGE_SIZE_ORDER else None
+
+
+def _normalize_gemini_aspect_ratio(value: Optional[str]) -> Optional[str]:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    return normalized if normalized in GEMINI_IMAGE_ASPECT_RATIOS else None
+
+
+def _size_to_gemini_image_size(size: Optional[str]) -> Optional[str]:
+    raw_size = str(size or "").strip().lower()
+    if not raw_size:
+        return None
+
+    for gemini_size, pixel_size in GEMINI_IMAGE_SIZE_PIXELS.items():
+        if raw_size == pixel_size.lower():
+            return gemini_size
+
+    if not re.match(r"^\d+x\d+$", raw_size):
+        return None
+
+    width, height = tuple(map(int, raw_size.split("x")))
+    if width != height:
+        return None
+
+    square_map = {
+        512: "512",
+        1024: "1K",
+        2048: "2K",
+        4096: "4K",
+    }
+    return square_map.get(width)
 
 
 def _looks_like_base64_image(value: str) -> bool:
@@ -2232,6 +2298,8 @@ async def _generate_via_gemini_generate_content(
     *,
     model_id: str,
     prompt: str,
+    image_size: Optional[str],
+    aspect_ratio: Optional[str],
     source: dict[str, Any],
 ) -> list[dict[str, str]]:
     base_url = source.get("base_url") or ""
@@ -2244,6 +2312,15 @@ async def _generate_via_gemini_generate_content(
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
     }
+    image_config: dict[str, Any] = {}
+    normalized_aspect_ratio = _normalize_gemini_aspect_ratio(aspect_ratio)
+    if normalized_aspect_ratio:
+        image_config["aspectRatio"] = normalized_aspect_ratio
+    normalized_image_size = _normalize_gemini_image_size(image_size)
+    if normalized_image_size:
+        image_config["imageSize"] = normalized_image_size
+    if image_config:
+        payload["generationConfig"]["imageConfig"] = image_config
 
     try:
         response, _used_url = await asyncio.to_thread(
@@ -2309,6 +2386,12 @@ async def image_generations(
                 status_code=400,
                 detail=ERROR_MESSAGES.INCORRECT_FORMAT("  (e.g., 512x512)."),
             )
+    requested_aspect_ratio = _normalize_gemini_aspect_ratio(form_data.aspect_ratio)
+    requested_image_size = _normalize_gemini_image_size(form_data.image_size)
+    if not requested_aspect_ratio:
+        requested_aspect_ratio = _size_to_aspect_ratio(effective_size)
+    if not requested_image_size:
+        requested_image_size = _size_to_gemini_image_size(effective_size)
 
     width, height = tuple(map(int, effective_size.split("x")))
     selected_model = str(
@@ -2487,6 +2570,16 @@ async def image_generations(
                     user,
                     model_id=selected_model,
                     prompt=form_data.prompt,
+                    image_size=(
+                        requested_image_size
+                        if (selected_model_meta or {}).get("supports_image_size")
+                        else None
+                    ),
+                    aspect_ratio=(
+                        requested_aspect_ratio
+                        if (selected_model_meta or {}).get("size_mode") == "aspect_ratio"
+                        else None
+                    ),
                     source=source,
                 )
 

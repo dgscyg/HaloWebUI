@@ -7,7 +7,7 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { config, user, models as _models, temporaryChatEnabled, settings } from '$lib/stores';
+	import { config, user, models as _models, temporaryChatEnabled, settings, type Model } from '$lib/stores';
 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -38,6 +38,7 @@
 
 	export let selectedToolIds = [];
 	export let imageGenerationEnabled = false;
+	export let imageGenerationOptions = {};
 	export let codeInterpreterEnabled = false;
 	export let webSearchMode: WebSearchMode = 'off';
 
@@ -203,6 +204,7 @@
 					bind:autoScroll
 					bind:selectedToolIds
 					bind:imageGenerationEnabled
+					bind:imageGenerationOptions
 					bind:codeInterpreterEnabled
 					bind:webSearchMode
 					bind:atSelectedModel

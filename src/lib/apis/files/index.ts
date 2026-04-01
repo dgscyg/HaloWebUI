@@ -1,12 +1,20 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { parseBlobResponse, parseJsonResponse } from '../response';
 
-export const uploadFile = async (token: string, file: File) => {
+export const uploadFile = async (
+	token: string,
+	file: File,
+	options: { processingMode?: string } = {}
+) => {
 	const data = new FormData();
 	data.append('file', file);
 	let error = null;
+	const query = new URLSearchParams();
+	if (options.processingMode) {
+		query.set('processing_mode', options.processingMode);
+	}
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${query.toString() ? `?${query}` : ''}`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',

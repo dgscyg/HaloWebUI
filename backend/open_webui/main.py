@@ -246,7 +246,10 @@ from open_webui.config import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
     CHUNK_MIN_SIZE,
+    FILE_PROCESSING_DEFAULT_MODE,
     CONTENT_EXTRACTION_ENGINE,
+    DOCUMENT_PROVIDER,
+    DOCUMENT_PROVIDER_CONFIGS,
     TIKA_SERVER_URL,
     DOCLING_SERVER_URL,
     DOCUMENT_INTELLIGENCE_ENDPOINT,
@@ -802,7 +805,10 @@ app.state.config.ENABLE_RAG_HYBRID_SEARCH = ENABLE_RAG_HYBRID_SEARCH
 app.state.config.RAG_HYBRID_SEARCH_BM25_WEIGHT = RAG_HYBRID_SEARCH_BM25_WEIGHT
 app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION = ENABLE_WEB_LOADER_SSL_VERIFICATION
 
+app.state.config.FILE_PROCESSING_DEFAULT_MODE = FILE_PROCESSING_DEFAULT_MODE
 app.state.config.CONTENT_EXTRACTION_ENGINE = CONTENT_EXTRACTION_ENGINE
+app.state.config.DOCUMENT_PROVIDER = DOCUMENT_PROVIDER
+app.state.config.DOCUMENT_PROVIDER_CONFIGS = DOCUMENT_PROVIDER_CONFIGS
 app.state.config.TIKA_SERVER_URL = TIKA_SERVER_URL
 app.state.config.DOCLING_SERVER_URL = DOCLING_SERVER_URL
 app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT = DOCUMENT_INTELLIGENCE_ENDPOINT
@@ -1481,7 +1487,7 @@ async def chat_completion(
                             "type": "info",
                             "content": (
                                 "Native file inputs are unavailable for this request. "
-                                "Retrying with local document parsing."
+                                "Retrying with full document context."
                             ),
                         },
                     }
@@ -1645,7 +1651,7 @@ async def list_tasks_by_chat_id_endpoint(chat_id: str, user=Depends(get_verified
     if chat is None or chat.user_id != user.id:
         return {"task_ids": []}
 
-    task_ids = list_task_ids_by_chat_id(chat_id)
+    task_ids = list_task_ids_by_chat_id(chat_id, blocks_completion_only=True)
 
     print(f"Task IDs for chat {chat_id}: {task_ids}")
     return {"task_ids": task_ids}

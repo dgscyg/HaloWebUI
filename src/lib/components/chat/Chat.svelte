@@ -63,6 +63,7 @@
 		normalizeWebSearchMode,
 		type WebSearchMode
 	} from '$lib/utils/web-search-mode';
+	import { getFunctionPipeRootId } from '$lib/utils/image-generation';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
 	import {
@@ -169,6 +170,11 @@
 
 	let selectedToolIds = [];
 	let imageGenerationEnabled = false;
+	let imageGenerationOptions: {
+		image_size?: string | null;
+		aspect_ratio?: string | null;
+		n?: number | null;
+	} = {};
 	let webSearchMode: WebSearchMode = 'off';
 	let codeInterpreterEnabled = false;
 
@@ -359,6 +365,12 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
 						? imageGenerationEnabled
 						: false,
+				image_generation_options:
+					imageGenerationEnabled &&
+					$config?.features?.enable_image_generation &&
+					($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
+						? getImageGenerationOptionsPayload()
+						: undefined,
 				code_interpreter:
 					$config?.features?.enable_code_interpreter &&
 					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
@@ -397,6 +409,38 @@
 	const getPreferredDefaultWebSearchMode = (): WebSearchMode =>
 		getPreferredWebSearchMode($settings, $config, 'off');
 
+	const getImageGenerationOptionsPayload = () => {
+		const raw = imageGenerationOptions ?? {};
+		const payload = Object.fromEntries(
+			Object.entries(raw).filter(([, value]) => value !== undefined && value !== null && value !== '')
+		);
+		return Object.keys(payload).length > 0 ? payload : undefined;
+	};
+
+	$: currentValvesContext = (() => {
+		const activeModelId =
+			atSelectedModel?.id ??
+			(selectedModelIds.length === 1 && selectedModelIds[0] ? selectedModelIds[0] : null);
+		if (activeModelId) {
+			const model = getModelById(activeModelId);
+			if (model?.pipe) {
+				return {
+					tab: 'functions' as const,
+					id: getFunctionPipeRootId(activeModelId)
+				};
+			}
+		}
+
+		if (selectedToolIds.length > 0) {
+			return {
+				tab: 'tools' as const,
+				id: selectedToolIds[0]
+			};
+		}
+
+		return null;
+	})();
+
 	const resolveStoredWebSearchMode = (
 		value: { webSearchMode?: unknown; webSearchEnabled?: unknown } | null | undefined,
 		fallback: WebSearchMode = getPreferredDefaultWebSearchMode()
@@ -425,7 +469,8 @@
 			return {
 				webSearchMode: input.webSearchMode,
 				reasoningEffort: input.reasoningEffort,
-				maxThinkingTokens: input.maxThinkingTokens
+				maxThinkingTokens: input.maxThinkingTokens,
+				imageGenerationOptions: input.imageGenerationOptions
 			};
 		} catch {
 			return null;
@@ -451,6 +496,9 @@
 				if (state.imageGenerationEnabled !== undefined) {
 					imageGenerationEnabled = Boolean(state.imageGenerationEnabled);
 				}
+				if (state.imageGenerationOptions !== undefined) {
+					imageGenerationOptions = state.imageGenerationOptions ?? {};
+				}
 				if (state.codeInterpreterEnabled !== undefined) {
 					codeInterpreterEnabled = Boolean(state.codeInterpreterEnabled);
 				}
@@ -470,6 +518,7 @@
 						getPreferredDefaultWebSearchMode()
 					),
 					imageGenerationEnabled,
+					imageGenerationOptions,
 					codeInterpreterEnabled,
 					reasoningEffort,
 					maxThinkingTokens
@@ -530,6 +579,7 @@
 			selectedToolIds = [];
 			webSearchMode = getPreferredDefaultWebSearchMode();
 			imageGenerationEnabled = false;
+			imageGenerationOptions = {};
 			reasoningEffort = null;
 			maxThinkingTokens = null;
 
@@ -546,6 +596,7 @@
 						files = input.files;
 						selectedToolIds = input.selectedToolIds;
 						imageGenerationEnabled = input.imageGenerationEnabled;
+						imageGenerationOptions = input.imageGenerationOptions ?? {};
 					} catch (e) {}
 				}
 
@@ -845,12 +896,14 @@
 				files = input.files;
 				selectedToolIds = input.selectedToolIds;
 				imageGenerationEnabled = input.imageGenerationEnabled;
+				imageGenerationOptions = input.imageGenerationOptions ?? {};
 			} catch (e) {
 				prompt = '';
 				files = [];
 				selectedToolIds = [];
 				webSearchMode = getPreferredDefaultWebSearchMode();
 				imageGenerationEnabled = false;
+				imageGenerationOptions = {};
 			}
 		}
 		restoreChatSessionState(chatIdProp);
@@ -1058,6 +1111,10 @@
 			fileItem.id = uploadedFile.id;
 			fileItem.size = file.size;
 			fileItem.collection_name = uploadedFile?.meta?.collection_name;
+			fileItem.processing_mode = uploadedFile?.meta?.processing_mode;
+			if (uploadedFile?.meta?.processing_mode === 'full_context') {
+				fileItem.context = 'full';
+			}
 			fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
 
 			files = files;
@@ -1261,6 +1318,7 @@
 			files = [];
 			selectedToolIds = [];
 			imageGenerationEnabled = false;
+			imageGenerationOptions = {};
 			codeInterpreterEnabled = false;
 		}
 
@@ -2567,6 +2625,12 @@
 						($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
 							? imageGenerationEnabled
 							: false,
+					image_generation_options:
+						imageGenerationEnabled &&
+						$config?.features?.enable_image_generation &&
+						($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
+							? getImageGenerationOptionsPayload()
+							: undefined,
 					code_interpreter:
 						$config?.features?.enable_code_interpreter &&
 						($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
@@ -3314,6 +3378,7 @@
 								bind:autoScroll
 								bind:selectedToolIds
 								bind:imageGenerationEnabled
+								bind:imageGenerationOptions
 								bind:codeInterpreterEnabled
 								bind:webSearchMode
 								bind:atSelectedModel
@@ -3343,6 +3408,7 @@
 										{ webSearchMode: input.webSearchMode },
 										getPreferredDefaultWebSearchMode()
 									);
+									imageGenerationOptions = input.imageGenerationOptions ?? {};
 									reasoningEffort = input.reasoningEffort ?? null;
 									maxThinkingTokens = input.maxThinkingTokens ?? null;
 									persistChatSessionState();
@@ -3384,7 +3450,7 @@
 						</div>
 					{:else}
 						<div class="overflow-auto w-full h-full flex items-center">
-							<Placeholder
+								<Placeholder
 								{history}
 								{selectedModels}
 								bind:files
@@ -3392,6 +3458,7 @@
 								bind:autoScroll
 								bind:selectedToolIds
 								bind:imageGenerationEnabled
+								bind:imageGenerationOptions
 								bind:codeInterpreterEnabled
 								bind:webSearchMode
 								bind:atSelectedModel
@@ -3446,6 +3513,7 @@
 				{stopResponse}
 				{showMessage}
 				{eventTarget}
+				{currentValvesContext}
 			/>
 		</PaneGroup>
 	{:else if loading}

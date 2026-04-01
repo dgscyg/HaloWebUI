@@ -154,7 +154,8 @@
 			const query = search.toLowerCase();
 			const name = (user?.name ?? '').toLowerCase();
 			const email = (user?.email ?? '').toLowerCase();
-			return name.includes(query) || email.includes(query);
+			const note = (user?.note ?? '').toLowerCase();
+			return name.includes(query) || email.includes(query) || note.includes(query);
 		})
 		.sort((a, b) => {
 			const aValue = getSortValue(a, sortKey);
@@ -430,7 +431,16 @@
 									<div class="flex min-w-[14rem] items-center gap-3">
 										<LetterAvatar name={user.name} size="size-11" className="rounded-2xl" textClass="text-base" />
 										<div class="min-w-0">
-											<div class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</div>
+											<div class="flex items-center gap-1.5">
+												<span class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</span>
+												{#if user.note}
+													<Tooltip content={user.note}>
+														<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5 shrink-0 text-amber-400 dark:text-amber-500">
+															<path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.378 2H4.5Zm2.25 8.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Zm0 3a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z" clip-rule="evenodd" />
+														</svg>
+													</Tooltip>
+												{/if}
+											</div>
 											<div class="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">
 												{user.email}
 											</div>
@@ -619,7 +629,16 @@
 									<div class="flex min-w-0 items-center gap-3">
 										<LetterAvatar name={user.name} size="size-10" className="rounded-2xl" textClass="text-sm" />
 										<div class="min-w-0">
-											<div class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</div>
+											<div class="flex items-center gap-1.5">
+												<span class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</span>
+												{#if user.note}
+													<Tooltip content={user.note}>
+														<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5 shrink-0 text-amber-400 dark:text-amber-500">
+															<path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.378 2H4.5Zm2.25 8.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Zm0 3a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z" clip-rule="evenodd" />
+														</svg>
+													</Tooltip>
+												{/if}
+											</div>
 											<div class="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">
 												{user.email}
 											</div>
@@ -752,9 +771,18 @@
 						<div class="flex min-w-0 items-center gap-3">
 							<LetterAvatar name={user.name} size="size-12" className="rounded-2xl" textClass="text-lg" />
 							<div class="min-w-0">
-								<div class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</div>
-								<div class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{user.email}</div>
-							</div>
+									<div class="flex items-center gap-1.5">
+										<span class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</span>
+										{#if user.note}
+											<Tooltip content={user.note}>
+												<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5 shrink-0 text-amber-400 dark:text-amber-500">
+													<path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.378 2H4.5Zm2.25 8.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Zm0 3a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z" clip-rule="evenodd" />
+												</svg>
+											</Tooltip>
+										{/if}
+									</div>
+									<div class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{user.email}</div>
+								</div>
 						</div>
 
 						<button

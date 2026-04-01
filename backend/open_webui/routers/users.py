@@ -380,13 +380,16 @@ async def update_user_by_id(
             Auths.update_user_password_by_id(user_id, hashed)
 
         Auths.update_email_by_id(user_id, form_data.email.lower())
+        update_data = {
+            "name": form_data.name,
+            "email": form_data.email.lower(),
+            "profile_image_url": form_data.profile_image_url,
+        }
+        if form_data.note is not None:
+            update_data["note"] = form_data.note
         updated_user = Users.update_user_by_id(
             user_id,
-            {
-                "name": form_data.name,
-                "email": form_data.email.lower(),
-                "profile_image_url": form_data.profile_image_url,
-            },
+            update_data,
         )
 
         if updated_user:

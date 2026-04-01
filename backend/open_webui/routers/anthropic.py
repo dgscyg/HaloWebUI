@@ -52,6 +52,7 @@ from open_webui.utils.user_connections import (
     set_user_connection_provider_config,
 )
 from open_webui.storage.provider import Storage
+from open_webui.retrieval.document_processing import FILE_PROCESSING_MODE_NATIVE_FILE
 from open_webui.utils.access_control import has_access
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.payload import (
@@ -1432,6 +1433,8 @@ async def _build_attachment_blocks(
         if not isinstance(f, dict):
             continue
         if f.get("type") != "file":
+            continue
+        if str(f.get("processing_mode") or "").strip().lower() != FILE_PROCESSING_MODE_NATIVE_FILE:
             continue
 
         fid = f.get("id") or (f.get("file") or {}).get("id")

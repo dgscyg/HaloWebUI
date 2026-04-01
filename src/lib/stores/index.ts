@@ -100,7 +100,7 @@ export const currentChatPage = writable(1);
 export const isLastActiveTab = writable(true);
 export const playingNotificationSound = writable(false);
 
-export type Model = OpenAIModel | OllamaModel;
+export type Model = ProviderModel | OllamaModel;
 
 export type NativeWebSearchSupport = {
 	status: 'supported' | 'unknown' | 'unsupported';
@@ -118,13 +118,17 @@ type BaseModel = {
 	id: string;
 	name: string;
 	info?: ModelConfig;
-	owned_by: 'ollama' | 'openai' | 'google' | 'anthropic';
+	owned_by: 'ollama' | 'openai' | 'google' | 'gemini' | 'anthropic' | 'claude';
 	native_web_search_supported?: boolean;
 	native_web_search_support?: NativeWebSearchSupport;
+	pipe?: {
+		type?: string;
+	};
+	has_user_valves?: boolean;
 };
 
-export interface OpenAIModel extends BaseModel {
-	owned_by: 'openai';
+export interface ProviderModel extends BaseModel {
+	owned_by: 'openai' | 'google' | 'gemini' | 'anthropic' | 'claude';
 	external: boolean;
 	source?: string;
 }

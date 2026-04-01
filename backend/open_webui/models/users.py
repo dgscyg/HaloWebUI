@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import Optional
 
@@ -10,6 +11,8 @@ from open_webui.models.groups import Groups
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, String, Text
+
+log = logging.getLogger(__name__)
 
 ####################
 # User DB Schema
@@ -34,6 +37,7 @@ class User(Base):
     info = Column(JSONField, nullable=True)
 
     oauth_sub = Column(Text, unique=True)
+    note = Column(Text, nullable=True)
 
 
 class UserSettings(BaseModel):
@@ -58,6 +62,7 @@ class UserModel(BaseModel):
     info: Optional[dict] = None
 
     oauth_sub: Optional[str] = None
+    note: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -92,6 +97,7 @@ class UserUpdateForm(BaseModel):
     email: str
     profile_image_url: str
     password: Optional[str] = None
+    note: Optional[str] = None
 
 
 class UsersTable:
@@ -280,6 +286,7 @@ class UsersTable:
                 return UserModel.model_validate(user)
                 # return UserModel(**user.dict())
         except Exception:
+            log.exception("Failed to update user by id: %s", id)
             return None
 
     def update_user_settings_by_id(self, id: str, updated: dict) -> Optional[UserModel]:

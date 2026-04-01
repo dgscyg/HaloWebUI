@@ -1,11 +1,12 @@
 # tasks.py
 import asyncio
-from typing import Dict
+from typing import Any, Dict
 from uuid import uuid4
 
 # A dictionary to keep track of active tasks
 tasks: Dict[str, asyncio.Task] = {}
 chat_tasks = {}
+task_metadata: Dict[str, dict[str, Any]] = {}
 
 
 def cleanup_task(task_id: str, id=None):
@@ -13,6 +14,7 @@ def cleanup_task(task_id: str, id=None):
     Remove a completed or canceled task from the global `tasks` dictionary.
     """
     tasks.pop(task_id, None)  # Remove the task if it exists
+    task_metadata.pop(task_id, None)
 
     # If an ID is provided, remove the task from the chat_tasks dictionary
     if id and task_id in chat_tasks.get(id, []):
@@ -21,7 +23,7 @@ def cleanup_task(task_id: str, id=None):
             chat_tasks.pop(id, None)
 
 
-def create_task(coroutine, id=None):
+def create_task(coroutine, id=None, *, blocks_completion: bool = True):
     """
     Create a new asyncio task and add it to the global task dictionary.
     """
@@ -31,6 +33,10 @@ def create_task(coroutine, id=None):
     # Add a done callback for cleanup
     task.add_done_callback(lambda t: cleanup_task(task_id, id))
     tasks[task_id] = task
+    task_metadata[task_id] = {
+        "chat_id": id,
+        "blocks_completion": blocks_completion,
+    }
 
     # If an ID is provided, associate the task with that ID
     if chat_tasks.get(id):
@@ -39,6 +45,25 @@ def create_task(coroutine, id=None):
         chat_tasks[id] = [task_id]
 
     return task_id, task
+
+
+def set_current_task_blocks_completion(blocks_completion: bool) -> bool:
+    """
+    Update the current asyncio task metadata so chat UIs can distinguish
+    between "assistant is still generating" and "assistant finished, but
+    background post-processing is still running".
+    """
+    current_task = asyncio.current_task()
+    if current_task is None:
+        return False
+
+    for task_id, task in tasks.items():
+        if task is current_task:
+            metadata = task_metadata.setdefault(task_id, {})
+            metadata["blocks_completion"] = blocks_completion
+            return True
+
+    return False
 
 
 def get_task(task_id: str):
@@ -55,11 +80,19 @@ def list_tasks():
     return list(tasks.keys())
 
 
-def list_task_ids_by_chat_id(id):
+def list_task_ids_by_chat_id(id, *, blocks_completion_only: bool = False):
     """
     List all tasks associated with a specific ID.
     """
-    return chat_tasks.get(id, [])
+    task_ids = list(chat_tasks.get(id, []))
+    if not blocks_completion_only:
+        return task_ids
+
+    return [
+        task_id
+        for task_id in task_ids
+        if task_metadata.get(task_id, {}).get("blocks_completion", True)
+    ]
 
 
 async def stop_task(task_id: str):

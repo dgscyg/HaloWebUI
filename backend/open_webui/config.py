@@ -33,6 +33,14 @@ from open_webui.env import (
 )
 from open_webui.internal.db import Base, get_db
 from open_webui.utils.redis import get_redis_connection
+from open_webui.retrieval.document_processing import (
+    FILE_PROCESSING_MODE_FULL_CONTEXT,
+    FILE_PROCESSING_MODE_RETRIEVAL,
+    build_default_document_provider_configs,
+    derive_document_provider_from_legacy_engine,
+    normalize_document_provider,
+    normalize_file_processing_mode,
+)
 
 
 class EndpointFilter(logging.Filter):
@@ -68,6 +76,59 @@ LITE_PRESET_DEFAULTS = {
 
 def preset_env(name: str, default: str) -> str:
     return os.getenv(name, LITE_PRESET_DEFAULTS.get(LITE_PRESET, {}).get(name, default))
+
+
+def _get_default_file_processing_mode() -> str:
+    configured = normalize_file_processing_mode(
+        os.getenv("FILE_PROCESSING_DEFAULT_MODE")
+        or get_config_value("rag.file_processing_default_mode"),
+        "",
+    )
+    if configured in {
+        FILE_PROCESSING_MODE_RETRIEVAL,
+        FILE_PROCESSING_MODE_FULL_CONTEXT,
+    }:
+        return configured
+
+    bypass_flag = get_config_value("rag.bypass_embedding_and_retrieval")
+    if bypass_flag is None:
+        bypass_flag = os.environ.get("BYPASS_EMBEDDING_AND_RETRIEVAL", "False").lower() == "true"
+
+    return (
+        FILE_PROCESSING_MODE_FULL_CONTEXT
+        if bool(bypass_flag)
+        else FILE_PROCESSING_MODE_RETRIEVAL
+    )
+
+
+def _get_default_document_provider() -> str:
+    configured = normalize_document_provider(
+        os.getenv("DOCUMENT_PROVIDER")
+        or get_config_value("rag.document_provider"),
+        "",
+    )
+    if configured:
+        return configured
+
+    legacy_engine = get_config_value("rag.CONTENT_EXTRACTION_ENGINE") or preset_env(
+        "CONTENT_EXTRACTION_ENGINE", ""
+    )
+    return derive_document_provider_from_legacy_engine(legacy_engine)
+
+
+def _get_default_document_provider_configs() -> dict:
+    configured = get_config_value("rag.document_provider_configs")
+    if isinstance(configured, dict):
+        defaults = build_default_document_provider_configs()
+        for provider_name, provider_config in configured.items():
+            normalized = normalize_document_provider(provider_name, provider_name)
+            if normalized not in defaults:
+                defaults[normalized] = {}
+            if isinstance(provider_config, dict):
+                defaults[normalized].update(provider_config)
+        return defaults
+
+    return build_default_document_provider_configs()
 
 ####################################
 # Config helpers
@@ -2251,6 +2312,24 @@ ONEDRIVE_CLIENT_ID = PersistentConfig(
 )
 
 # RAG Content Extraction
+FILE_PROCESSING_DEFAULT_MODE = PersistentConfig(
+    "FILE_PROCESSING_DEFAULT_MODE",
+    "rag.file_processing_default_mode",
+    _get_default_file_processing_mode(),
+)
+
+DOCUMENT_PROVIDER = PersistentConfig(
+    "DOCUMENT_PROVIDER",
+    "rag.document_provider",
+    _get_default_document_provider(),
+)
+
+DOCUMENT_PROVIDER_CONFIGS = PersistentConfig(
+    "DOCUMENT_PROVIDER_CONFIGS",
+    "rag.document_provider_configs",
+    _get_default_document_provider_configs(),
+)
+
 CONTENT_EXTRACTION_ENGINE = PersistentConfig(
     "CONTENT_EXTRACTION_ENGINE",
     "rag.CONTENT_EXTRACTION_ENGINE",

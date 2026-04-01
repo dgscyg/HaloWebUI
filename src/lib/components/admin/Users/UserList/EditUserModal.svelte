@@ -2,7 +2,7 @@
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
 	import { createEventDispatcher } from 'svelte';
-	import { onMount, getContext } from 'svelte';
+	import { getContext } from 'svelte';
 
 	import { updateUserById } from '$lib/apis/users';
 	import { WEBUI_BASE_URL } from '$lib/constants';
@@ -20,11 +20,22 @@
 	export let sessionUser;
 
 	let _user = {
+		id: '',
 		profile_image_url: '',
 		name: '',
 		email: '',
-		password: ''
+		password: '',
+		note: ''
 	};
+
+	const createEditableUser = (user: any) => ({
+		id: user?.id ?? '',
+		profile_image_url: user?.profile_image_url ?? '',
+		name: user?.name ?? '',
+		email: user?.email ?? '',
+		password: '',
+		note: user?.note ?? ''
+	});
 
 	const hasCustomAvatar = (url: string) =>
 		url &&
@@ -54,12 +65,9 @@
 		}
 	};
 
-	onMount(() => {
-		if (selectedUser) {
-			_user = selectedUser;
-			_user.password = '';
-		}
-	});
+	$: if (show && selectedUser) {
+		_user = createEditableUser(selectedUser);
+	}
 </script>
 
 <Modal size="sm" bind:show>
@@ -140,6 +148,16 @@
 						bind:value={_user.password}
 						autocomplete="new-password"
 						placeholder={$i18n.t('Leave empty to keep current')}
+					/>
+				</div>
+
+				<div class="glass-item p-4">
+					<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">{$i18n.t('Admin Note')}</div>
+					<textarea
+						class="w-full py-2 px-3 text-sm dark:text-gray-300 glass-input resize-y"
+						bind:value={_user.note}
+						rows="3"
+						placeholder={$i18n.t('Internal note visible only to admins')}
 					/>
 				</div>
 			</div>
