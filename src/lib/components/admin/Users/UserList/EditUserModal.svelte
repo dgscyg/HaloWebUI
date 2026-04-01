@@ -2,7 +2,7 @@
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
 	import { createEventDispatcher } from 'svelte';
-	import { getContext } from 'svelte';
+	import { getContext, onMount } from 'svelte';
 
 	import { updateUserById } from '$lib/apis/users';
 	import { WEBUI_BASE_URL } from '$lib/constants';
@@ -65,9 +65,11 @@
 		}
 	};
 
-	$: if (show && selectedUser) {
-		_user = createEditableUser(selectedUser);
-	}
+	onMount(() => {
+		if (selectedUser) {
+			_user = createEditableUser(selectedUser);
+		}
+	});
 </script>
 
 <Modal size="sm" bind:show>

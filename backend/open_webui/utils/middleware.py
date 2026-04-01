@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 from fastapi import Request, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from starlette.responses import Response, StreamingResponse
 
 
@@ -1257,11 +1258,15 @@ async def _ensure_requested_chat_file_modes(
             default_mode=default_mode,
         )
 
-        if desired_mode == FILE_PROCESSING_MODE_NATIVE_FILE and file_id not in native_ids:
-            desired_mode = FILE_PROCESSING_MODE_FULL_CONTEXT
-            file_item["processing_mode"] = FILE_PROCESSING_MODE_FULL_CONTEXT
-            file_item["context"] = "full"
-            fallback_messages.append(file_obj.filename)
+        if desired_mode == FILE_PROCESSING_MODE_NATIVE_FILE:
+            if file_id not in native_ids:
+                desired_mode = FILE_PROCESSING_MODE_FULL_CONTEXT
+                file_item["processing_mode"] = FILE_PROCESSING_MODE_FULL_CONTEXT
+                file_item["context"] = "full"
+                fallback_messages.append(file_obj.filename)
+            else:
+                file_item["processing_mode"] = FILE_PROCESSING_MODE_NATIVE_FILE
+                file_item.pop("context", None)
         elif desired_mode == FILE_PROCESSING_MODE_FULL_CONTEXT:
             file_item["processing_mode"] = FILE_PROCESSING_MODE_FULL_CONTEXT
             file_item["context"] = "full"
@@ -1283,10 +1288,11 @@ async def _ensure_requested_chat_file_modes(
             needs_processing = True
 
         if needs_processing:
-            process_file(
+            await run_in_threadpool(
+                process_file,
                 request,
                 ProcessFileForm(file_id=file_id, processing_mode=desired_mode),
-                user=user,
+                user,
             )
             refreshed = Files.get_file_by_id(file_id)
             if refreshed:

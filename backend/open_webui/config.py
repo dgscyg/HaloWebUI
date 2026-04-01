@@ -33,7 +33,7 @@ from open_webui.env import (
 )
 from open_webui.internal.db import Base, get_db
 from open_webui.utils.redis import get_redis_connection
-from open_webui.retrieval.document_processing import (
+from open_webui.retrieval.document_processing_shared import (
     FILE_PROCESSING_MODE_FULL_CONTEXT,
     FILE_PROCESSING_MODE_RETRIEVAL,
     build_default_document_provider_configs,

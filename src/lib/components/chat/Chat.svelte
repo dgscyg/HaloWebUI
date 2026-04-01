@@ -459,6 +459,18 @@
 	const getChatSessionStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
 		`chat-session-state-${id && id !== '' ? id : 'new'}`;
 
+	const safeParseStoredJson = <T>(rawValue: string | null | undefined, fallback: T): T => {
+		if (!rawValue) {
+			return fallback;
+		}
+
+		try {
+			return JSON.parse(rawValue) as T;
+		} catch {
+			return fallback;
+		}
+	};
+
 	const readLegacyInputSettings = (id: string | null | undefined = $chatId || chatIdProp) => {
 		try {
 			const input = JSON.parse(localStorage.getItem(`chat-input-${id ?? ''}`) || 'null');
@@ -572,7 +584,6 @@
 	$: if (chatIdProp) {
 		(async () => {
 			loading = true;
-			console.log(chatIdProp);
 
 			prompt = '';
 			files = [];
@@ -618,7 +629,6 @@
 			return;
 		}
 		sessionStorage.selectedModels = JSON.stringify(selectedModels);
-		console.log('saveSessionSelectedModels', selectedModels, sessionStorage.selectedModels);
 	};
 
 	// When models finish loading after page refresh, restore selection from sessionStorage
@@ -871,19 +881,18 @@
 	};
 
 	onMount(async () => {
-		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
 		window.addEventListener('chat:set-input', onSetInputHandler as EventListener);
 		$socket?.on('chat-events', chatEventHandler);
 
-		if (!$chatId) {
+		if (!chatIdProp && !$chatId) {
 			chatIdUnsubscriber = chatId.subscribe(async (value) => {
 				if (!value) {
 					await tick(); // Wait for DOM updates
 					await initNewChat();
 				}
 			});
-		} else {
+		} else if (chatIdProp) {
 			if ($temporaryChatEnabled) {
 				await goto('/');
 			}
@@ -1244,7 +1253,13 @@
 			}
 		} else if (!fresh) {
 			if (sessionStorage.selectedModels) {
-				selectedModels = JSON.parse(sessionStorage.selectedModels);
+				const storedSelectedModels = safeParseStoredJson<string[] | null>(
+					sessionStorage.selectedModels,
+					null
+				);
+				if (Array.isArray(storedSelectedModels)) {
+					selectedModels = storedSelectedModels;
+				}
 			} else {
 				if ($settings?.models) {
 					selectedModels = $settings?.models;
@@ -1395,7 +1410,7 @@
 			settings.set(userSettings.ui);
 			temporaryChatState = syncTemporaryChatState(userSettings.ui);
 		} else {
-			const localSettings = JSON.parse(localStorage.getItem('settings') ?? '{}');
+			const localSettings = safeParseStoredJson(localStorage.getItem('settings'), {});
 			settings.set(localSettings);
 			temporaryChatState = syncTemporaryChatState(localSettings);
 		}
@@ -1463,8 +1478,6 @@
 			const chatContent = chat.chat;
 
 			if (chatContent) {
-				console.log(chatContent);
-
 				selectedModels =
 					(chatContent?.models ?? undefined) !== undefined
 						? chatContent.models
@@ -1483,7 +1496,7 @@
 				if (userSettings) {
 					await settings.set(userSettings.ui);
 				} else {
-					await settings.set(JSON.parse(localStorage.getItem('settings') ?? '{}'));
+					await settings.set(safeParseStoredJson(localStorage.getItem('settings'), {}));
 				}
 
 				params = chatContent?.params ?? {};
@@ -3408,7 +3421,6 @@
 										{ webSearchMode: input.webSearchMode },
 										getPreferredDefaultWebSearchMode()
 									);
-									imageGenerationOptions = input.imageGenerationOptions ?? {};
 									reasoningEffort = input.reasoningEffort ?? null;
 									maxThinkingTokens = input.maxThinkingTokens ?? null;
 									persistChatSessionState();

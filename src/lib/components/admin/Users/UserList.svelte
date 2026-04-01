@@ -184,7 +184,7 @@
 	}}
 />
 
-{#key selectedUser}
+{#key `${selectedUser?.id ?? ''}:${showEditUserModal}`}
 	<EditUserModal
 		bind:show={showEditUserModal}
 		{selectedUser}

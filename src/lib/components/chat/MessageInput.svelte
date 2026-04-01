@@ -517,7 +517,6 @@
 	});
 
 	onDestroy(() => {
-		console.log('destroy');
 		window.removeEventListener('keydown', handleKeyDown);
 
 		const dropzoneElement = document.getElementById('chat-container');

@@ -1123,6 +1123,110 @@ def _resolve_requested_document_provider(
     )
 
 
+def _get_cached_file_collection_docs(file) -> list[Document]:
+    result = VECTOR_DB_CLIENT.query(
+        collection_name=f"file-{file.id}", filter={"file_id": file.id}
+    )
+    if result is not None and len(result.ids[0]) > 0:
+        return [
+            Document(
+                page_content=result.documents[0][idx],
+                metadata=result.metadatas[0][idx],
+            )
+            for idx, _ in enumerate(result.ids[0])
+        ]
+    return []
+
+
+def _prepare_documents_for_processing(
+    request: Request,
+    file,
+    *,
+    processing_mode: str,
+    requested_provider: str,
+    content: Optional[str] = None,
+    allow_cached_collection_docs: bool = False,
+) -> tuple[list[Document], str, str, Optional[str], list[str], str]:
+    resolved_provider = requested_provider
+    processing_notice = None
+    processing_fallbacks: list[str] = []
+    current_mode = get_file_effective_processing_mode(file)
+    current_provider = normalize_document_provider(
+        (file.meta or {}).get("processing_provider") or requested_provider,
+        requested_provider,
+    )
+
+    if content is not None:
+        effective_mode = (
+            FILE_PROCESSING_MODE_FULL_CONTEXT
+            if processing_mode == FILE_PROCESSING_MODE_NATIVE_FILE
+            else processing_mode
+        )
+        return (
+            _build_docs_from_text(file, content),
+            content,
+            requested_provider,
+            None,
+            [],
+            effective_mode,
+        )
+
+    if allow_cached_collection_docs:
+        cached_docs = _get_cached_file_collection_docs(file)
+        if cached_docs and current_mode == FILE_PROCESSING_MODE_RETRIEVAL and current_provider == requested_provider:
+            return (
+                cached_docs,
+                " ".join(doc.page_content for doc in cached_docs),
+                current_provider,
+                (file.meta or {}).get("processing_notice"),
+                list((file.meta or {}).get("processing_fallbacks") or []),
+                processing_mode,
+            )
+
+    can_reuse_cached_text = (
+        (file.data or {}).get("content")
+        and current_mode != FILE_PROCESSING_MODE_NATIVE_FILE
+        and current_provider == requested_provider
+    )
+    if can_reuse_cached_text:
+        text_content = (file.data or {}).get("content", "")
+        return (
+            _build_docs_from_text(file, text_content),
+            text_content,
+            current_provider,
+            (file.meta or {}).get("processing_notice"),
+            list((file.meta or {}).get("processing_fallbacks") or []),
+            processing_mode,
+        )
+
+    if file.path and should_extract_for_mode(processing_mode):
+        extraction = extract_documents_for_file(
+            request,
+            file,
+            provider=requested_provider,
+            allow_local_fallback=True,
+        )
+        docs = extraction.docs
+        return (
+            docs,
+            " ".join(doc.page_content for doc in docs),
+            extraction.provider,
+            extraction.notice,
+            extraction.fallbacks,
+            processing_mode,
+        )
+
+    text_content = (file.data or {}).get("content", "") or ""
+    return (
+        _build_docs_from_text(file, text_content),
+        text_content,
+        current_provider,
+        (file.meta or {}).get("processing_notice"),
+        list((file.meta or {}).get("processing_fallbacks") or []),
+        processing_mode,
+    )
+
+
 @router.post("/process/file")
 def process_file(
     request: Request,
@@ -1162,41 +1266,35 @@ def process_file(
                 # Audio file upload pipeline
                 pass
 
-            if processing_mode == FILE_PROCESSING_MODE_NATIVE_FILE:
-                processing_mode = FILE_PROCESSING_MODE_FULL_CONTEXT
-            docs = _build_docs_from_text(file, form_data.content)
-            text_content = form_data.content
-        elif form_data.collection_name:
-            # Check if the file has already been processed and save the content
-            # Usage: /knowledge/{id}/file/add, /knowledge/{id}/file/update
-
-            result = VECTOR_DB_CLIENT.query(
-                collection_name=f"file-{file.id}", filter={"file_id": file.id}
+            (
+                docs,
+                text_content,
+                resolved_provider,
+                processing_notice,
+                processing_fallbacks,
+                processing_mode,
+            ) = _prepare_documents_for_processing(
+                request,
+                file,
+                processing_mode=processing_mode,
+                requested_provider=requested_provider,
+                content=form_data.content,
             )
-
-            if result is not None and len(result.ids[0]) > 0:
-                docs = [
-                    Document(
-                        page_content=result.documents[0][idx],
-                        metadata=result.metadatas[0][idx],
-                    )
-                    for idx, id in enumerate(result.ids[0])
-                ]
-            else:
-                docs = [
-                    Document(
-                        page_content=file.data.get("content", ""),
-                        metadata={
-                            **file.meta,
-                            "name": file.filename,
-                            "created_by": file.user_id,
-                            "file_id": file.id,
-                            "source": file.filename,
-                        },
-                    )
-                ]
-
-            text_content = file.data.get("content", "")
+        elif form_data.collection_name:
+            (
+                docs,
+                text_content,
+                resolved_provider,
+                processing_notice,
+                processing_fallbacks,
+                processing_mode,
+            ) = _prepare_documents_for_processing(
+                request,
+                file,
+                processing_mode=processing_mode,
+                requested_provider=requested_provider,
+                allow_cached_collection_docs=True,
+            )
         else:
             if processing_mode == FILE_PROCESSING_MODE_NATIVE_FILE:
                 _clear_standalone_file_collection(file.id)
@@ -1224,30 +1322,19 @@ def process_file(
                     "notice": None,
                 }
 
-            current_mode = get_file_effective_processing_mode(file)
-            if (file.data or {}).get("content") and current_mode != FILE_PROCESSING_MODE_NATIVE_FILE:
-                text_content = (file.data or {}).get("content", "")
-                docs = _build_docs_from_text(file, text_content)
-                resolved_provider = (
-                    (file.meta or {}).get("processing_provider") or requested_provider
-                )
-                processing_notice = (file.meta or {}).get("processing_notice")
-                processing_fallbacks = list((file.meta or {}).get("processing_fallbacks") or [])
-            elif file.path:
-                extraction = extract_documents_for_file(
-                    request,
-                    file,
-                    provider=requested_provider,
-                    allow_local_fallback=True,
-                )
-                docs = extraction.docs
-                resolved_provider = extraction.provider
-                processing_notice = extraction.notice
-                processing_fallbacks = extraction.fallbacks
-                text_content = " ".join(doc.page_content for doc in docs)
-            else:
-                text_content = file.data.get("content", "")
-                docs = _build_docs_from_text(file, text_content)
+            (
+                docs,
+                text_content,
+                resolved_provider,
+                processing_notice,
+                processing_fallbacks,
+                processing_mode,
+            ) = _prepare_documents_for_processing(
+                request,
+                file,
+                processing_mode=processing_mode,
+                requested_provider=requested_provider,
+            )
 
         text_content = text_content or ""
         log.debug(f"text_content: {text_content}")
@@ -2123,22 +2210,79 @@ def process_files_batch(
     """
     results: List[BatchProcessFilesResult] = []
     errors: List[BatchProcessFilesResult] = []
+    all_docs: List[Document] = []
+    collection_name = form_data.collection_name
     for file in form_data.files:
         try:
-            process_file(
-                request=request,
-                form_data=ProcessFileForm(
-                    file_id=file.id,
-                    collection_name=form_data.collection_name,
-                    processing_mode=FILE_PROCESSING_MODE_RETRIEVAL,
+            (
+                docs,
+                text_content,
+                resolved_provider,
+                processing_notice,
+                processing_fallbacks,
+                _resolved_mode,
+            ) = _prepare_documents_for_processing(
+                request,
+                file,
+                processing_mode=FILE_PROCESSING_MODE_RETRIEVAL,
+                requested_provider=normalize_document_provider(
+                    request.app.state.config.DOCUMENT_PROVIDER,
+                    DOCUMENT_PROVIDER_LOCAL_DEFAULT,
                 ),
-                user=user,
+                allow_cached_collection_docs=True,
             )
-            results.append(BatchProcessFilesResult(file_id=file.id, status="completed"))
+            file_hash = calculate_sha256_string(text_content or "")
+            Files.update_file_hash_by_id(file.id, file_hash)
+            Files.update_file_data_by_id(file.id, {"content": text_content or ""})
+            Files.update_file_metadata_by_id(
+                file.id,
+                {
+                    "processing_mode": FILE_PROCESSING_MODE_RETRIEVAL,
+                    "resolved_processing_mode": FILE_PROCESSING_MODE_RETRIEVAL,
+                    "processing_provider": resolved_provider,
+                    "requested_document_provider": normalize_document_provider(
+                        request.app.state.config.DOCUMENT_PROVIDER,
+                        DOCUMENT_PROVIDER_LOCAL_DEFAULT,
+                    ),
+                    "processing_notice": processing_notice,
+                    "processing_fallbacks": processing_fallbacks,
+                },
+            )
+            all_docs.extend(docs)
+            results.append(BatchProcessFilesResult(file_id=file.id, status="prepared"))
         except Exception as e:
             log.error(f"process_files_batch: Error processing file {file.id}: {str(e)}")
             errors.append(
                 BatchProcessFilesResult(file_id=file.id, status="failed", error=str(e))
             )
+
+    if all_docs:
+        try:
+            save_docs_to_vector_db(
+                request=request,
+                docs=all_docs,
+                collection_name=collection_name,
+                add=True,
+                user=user,
+            )
+            for result in results:
+                Files.update_file_metadata_by_id(
+                    result.file_id,
+                    {
+                        "collection_name": collection_name,
+                        "processing_mode": FILE_PROCESSING_MODE_RETRIEVAL,
+                        "resolved_processing_mode": FILE_PROCESSING_MODE_RETRIEVAL,
+                    },
+                )
+                result.status = "completed"
+        except Exception as e:
+            log.error(
+                f"process_files_batch: Error saving documents to vector DB: {str(e)}"
+            )
+            for result in results:
+                result.status = "failed"
+                errors.append(
+                    BatchProcessFilesResult(file_id=result.file_id, error=str(e))
+                )
 
     return BatchProcessFilesResponse(results=results, errors=errors)

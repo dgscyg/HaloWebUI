@@ -266,8 +266,6 @@
 			return;
 		}
 
-		console.log(packages);
-
 		const { default: PyodideWorker } = await import('$lib/workers/pyodide.worker?worker');
 		pyodideWorker = new PyodideWorker();
 
@@ -286,10 +284,7 @@
 		}, 60000);
 
 		pyodideWorker.onmessage = (event) => {
-			console.log('pyodideWorker.onmessage', event);
 			const { id, ...data } = event.data;
-
-			console.log(id, data);
 
 			if (data['stdout']) {
 				stdout = data['stdout'];
@@ -355,8 +350,7 @@
 			executing = false;
 		};
 
-		pyodideWorker.onerror = (event) => {
-			console.log('pyodideWorker.onerror', event);
+		pyodideWorker.onerror = () => {
 			executing = false;
 		};
 	};
@@ -371,11 +365,11 @@
 				isDark: document.documentElement.classList.contains('dark'),
 				themeId: mermaidThemeId
 			});
-		} catch (error) {
-			console.log('Error:', error);
-			mermaidHtml = null;
-		}
-	};
+			} catch (error) {
+				console.error('Error:', error);
+				mermaidHtml = null;
+			}
+		};
 
 	const render = async () => {
 		if (lang === 'mermaid' && (token?.raw ?? '').slice(-4).includes('```')) {
@@ -429,8 +423,6 @@
 	};
 
 	onMount(async () => {
-		console.log('codeblock', lang, code);
-
 		if (lang) {
 			onCode({ lang, code });
 		}
