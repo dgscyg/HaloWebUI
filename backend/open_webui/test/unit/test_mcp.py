@@ -290,7 +290,7 @@ def test_get_user_mcp_connections_normalize_apps_metadata():
             "url": "http://legacy.example",
             "enabled": False,
             "apps_enabled": "true",
-            "mcp_apps": {"ENABLE_MCP_APPS": True},
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
         }
     ]
 
@@ -310,7 +310,24 @@ def test_normalize_mcp_server_connection_preserves_legacy_apps_enabled_independe
         "url": "http://legacy.example",
         "enabled": False,
         "apps_enabled": True,
-        "mcp_apps": {"ENABLE_MCP_APPS": True},
+        "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+    }
+
+
+def test_normalize_mcp_server_connection_materializes_default_server_apps_state_for_new_connections():
+    from open_webui.utils.user_tools import normalize_mcp_server_connection
+
+    connection = normalize_mcp_server_connection(
+        {
+            "url": "http://new.example",
+            "config": {"enable": True},
+        }
+    )
+
+    assert connection == {
+        "url": "http://new.example",
+        "config": {"enable": True},
+        "mcp_apps": {"enabled": True},
     }
 
 

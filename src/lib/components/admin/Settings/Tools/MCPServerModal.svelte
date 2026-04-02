@@ -204,6 +204,10 @@
 		}
 
 		loading = true;
+		const nextMCPApps =
+			connection?.mcp_apps && typeof connection.mcp_apps === 'object'
+				? { enabled: true, ...connection.mcp_apps }
+				: { enabled: true };
 
 		const next: any = {
 			url: url.trim().replace(/\/$/, ''),
@@ -212,6 +216,7 @@
 			auth_type,
 			key: auth_type === 'bearer' || auth_type === 'oauth21' ? key : undefined,
 			config: { enable },
+			mcp_apps: nextMCPApps,
 			server_info: verifyResult?.server_info || undefined,
 			tool_count: verifyResult?.tool_count ?? undefined
 		};

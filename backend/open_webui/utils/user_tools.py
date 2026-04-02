@@ -295,6 +295,10 @@ def normalize_mcp_server_connection(connection: Any) -> dict:
         )
         normalized[MCP_APPS_KEY] = mcp_apps
 
+    if MCP_APPS_SERVER_ENABLE_KEY not in mcp_apps:
+        mcp_apps[MCP_APPS_SERVER_ENABLE_KEY] = True
+        normalized[MCP_APPS_KEY] = mcp_apps
+
     return normalized
 
 
