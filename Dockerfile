@@ -199,6 +199,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         curl \
+        postgresql-client \
         ${extra_apt_packages}; \
     if [ "$USE_OLLAMA" = "true" ]; then \
         curl -fsSL https://ollama.com/install.sh | sh; \

@@ -56,7 +56,7 @@
 
 	const tabMeta: Record<string, { label: string; description: string; badgeColor: string; iconColor: string }> = {
 		native:    { label: '内置功能',       description: '管理工具调用模式、内置搜索、知识库、图像生成等原生工具开关。', badgeColor: 'bg-emerald-50 dark:bg-emerald-950/30', iconColor: 'text-emerald-500 dark:text-emerald-400' },
-		mcp:       { label: 'MCP 服务器',     description: '通过 MCP 协议连接外部工具服务器，支持 Streamable HTTP 传输。', badgeColor: 'bg-violet-50 dark:bg-violet-950/30',  iconColor: 'text-violet-500 dark:text-violet-400' },
+		mcp:       { label: 'MCP 服务器',     description: '通过 MCP 协议连接外部工具服务器，支持 HTTP 与 stdio 传输。', badgeColor: 'bg-violet-50 dark:bg-violet-950/30',  iconColor: 'text-violet-500 dark:text-violet-400' },
 		workspace: { label: '工作空间工具',   description: '管理自定义 Python 工具，支持导入、导出和阀门配置。',           badgeColor: 'bg-blue-50 dark:bg-blue-950/30',    iconColor: 'text-blue-500 dark:text-blue-400' },
 		openapi:   { label: 'OpenAPI 服务器', description: '连接兼容 OpenAPI 规范的工具服务器，适用于企业级集成。',       badgeColor: 'bg-orange-50 dark:bg-orange-950/30', iconColor: 'text-orange-500 dark:text-orange-400' }
 	};
@@ -231,20 +231,42 @@
 		$settings?.mcpAppDisplayMode
 	);
 
-	const getServerDisplayName = (server: any): string => {
-		if (server.name) return server.name;
-		if (server.server_info?.name) return server.server_info.name;
+	const normalizeMCPServer = (server: any) => ({
+		transport_type: server?.transport_type ?? 'http',
+		url: server?.url ?? '',
+		command: server?.command ?? '',
+		args: Array.isArray(server?.args) ? [...server.args] : [],
+		env: server?.env ?? {},
+		name: server?.name,
+		description: server?.description,
+		auth_type: server?.auth_type ?? 'none',
+		key: server?.key,
+		config: {
+			...(server?.config ?? {}),
+			enable: server?.config?.enable ?? server?.enabled ?? true
+		},
+		server_info: server?.server_info ?? undefined,
+		tool_count: server?.tool_count ?? undefined,
+		verified_at: server?.verified_at ?? undefined
+	});
+
+const getServerDisplayName = (server: any): string => {
+	if (server.name) return server.name;
+	if (server.server_info?.name) return server.server_info.name;
+	if ((server.transport_type ?? 'http') === 'stdio') {
+		return server.command || 'stdio MCP Server';
+		}
 		try {
 			return new URL(server.url).hostname;
 		} catch {
-			return server.url;
-		}
-	};
+		return server.url;
+	}
+};
 
-	const normalizeMCPAppsConfig = (value: Record<string, any> | null | undefined) => ({
-		...cloneSettingsSnapshot(defaultMCPAppsConfig),
-		...(value ?? {}),
-		ENABLE_MCP_APPS: Boolean(value?.ENABLE_MCP_APPS),
+const normalizeMCPAppsConfig = (value: Record<string, any> | null | undefined) => ({
+	...cloneSettingsSnapshot(defaultMCPAppsConfig),
+	...(value ?? {}),
+	ENABLE_MCP_APPS: Boolean(value?.ENABLE_MCP_APPS),
 		MCP_SERVER_APPS:
 			value?.MCP_SERVER_APPS && typeof value.MCP_SERVER_APPS === 'object'
 				? Object.fromEntries(
@@ -285,10 +307,10 @@
 	const applyMCPAppsConfigState = (value: Record<string, any> | null | undefined) => {
 		const normalized = normalizeMCPAppsConfig(value);
 		mcpAppsConfig = normalized;
-		mcpAppsCapabilities = {
-			...mcpAppsCapabilities,
-			ENABLE_MCP_APPS: normalized.ENABLE_MCP_APPS,
-			servers: (mcpAppsCapabilities.servers ?? []).map((server: any) => ({
+	mcpAppsCapabilities = {
+		...mcpAppsCapabilities,
+		ENABLE_MCP_APPS: normalized.ENABLE_MCP_APPS,
+		servers: (mcpAppsCapabilities.servers ?? []).map((server: any) => ({
 				...server,
 				apps_enabled: Boolean(
 					server?.enabled &&
@@ -297,7 +319,20 @@
 				)
 			}))
 		};
-	};
+};
+
+const getMCPTransportLabel = (server: any): string =>
+	(server.transport_type ?? 'http') === 'stdio' ? 'stdio' : 'HTTP';
+
+const getMCPPrimaryValue = (server: any): string =>
+	(server.transport_type ?? 'http') === 'stdio' ? server.command || '' : server.url || '';
+
+const formatVerifiedAt = (value?: string): string => {
+	if (!value) return '';
+	const parsed = new Date(value);
+	if (Number.isNaN(parsed.getTime())) return value;
+	return parsed.toLocaleString();
+};
 
 	// ==================== OpenAPI Servers 配置 ====================
 	let openAPIServers: Array<{
@@ -319,7 +354,7 @@
 		if (section === 'native') {
 			nativeToolsConfig = normalizeNativeToolsConfig(initialSnapshot.native);
 		} else if (section === 'mcp') {
-			mcpServers = cloneSettingsSnapshot(initialSnapshot.mcp.servers);
+			mcpServers = cloneSettingsSnapshot(initialSnapshot.mcp.servers).map(normalizeMCPServer);
 			mcpAppsConfig = cloneSettingsSnapshot(initialSnapshot.mcp.apps);
 			mcpAppDisplayMode = normalizeMCPAppDisplayMode(initialSnapshot.mcp.displayMode);
 		} else if (section === 'openapi') {
@@ -479,13 +514,7 @@
 			return null;
 		});
 
-		mcpServers = (res?.MCP_SERVER_CONNECTIONS || []).map((c: any) => ({
-			...c,
-			config: {
-				...(c?.config ?? {}),
-				enable: c?.config?.enable ?? c?.enabled ?? true
-			}
-		}));
+		mcpServers = (res?.MCP_SERVER_CONNECTIONS || []).map(normalizeMCPServer);
 	};
 
 	const loadMCPAppsState = async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -505,19 +534,33 @@
 	};
 
 	const addMCPServer = async (server: any) => {
-		mcpServers = [...mcpServers, server];
-		await saveMCPServers();
+		const previous = cloneSettingsSnapshot(mcpServers);
+		mcpServers = [...mcpServers, normalizeMCPServer(server)];
+		const ok = await saveMCPServers();
+		if (!ok) {
+			mcpServers = previous;
+			throw new Error('保存 MCP 服务器失败');
+		}
 	};
 
 	const updateMCPServer = async (index: number, server: any) => {
-		mcpServers[index] = server;
+		const previous = cloneSettingsSnapshot(mcpServers);
+		mcpServers[index] = normalizeMCPServer(server);
 		mcpServers = mcpServers;
-		await saveMCPServers();
+		const ok = await saveMCPServers();
+		if (!ok) {
+			mcpServers = previous;
+			throw new Error('保存 MCP 服务器失败');
+		}
 	};
 
 	const deleteMCPServer = async (index: number) => {
+		const previous = cloneSettingsSnapshot(mcpServers);
 		mcpServers = mcpServers.filter((_: any, i: number) => i !== index);
-		await saveMCPServers();
+		const ok = await saveMCPServers();
+		if (!ok) {
+			mcpServers = previous;
+		}
 	};
 
 	const saveMCPServers = async (
@@ -534,13 +577,7 @@
 		});
 
 		if (res) {
-			mcpServers = (res?.MCP_SERVER_CONNECTIONS || []).map((c: any) => ({
-				...c,
-				config: {
-					...(c?.config ?? {}),
-					enable: c?.config?.enable ?? c?.enabled ?? true
-				}
-			}));
+			mcpServers = (res?.MCP_SERVER_CONNECTIONS || []).map(normalizeMCPServer);
 			if (refreshMCPAppsState) {
 				await loadMCPAppsState({ silent: true });
 			}
@@ -722,6 +759,7 @@
 
 <MCPServerModal
 	bind:show={showMCPModal}
+	isAdmin={$user?.role === 'admin'}
 	connection={editingMCPServerIndex !== null ? mcpServers[editingMCPServerIndex] : null}
 	onSubmit={async (connection) => {
 		if (editingMCPServerIndex !== null) {
@@ -1151,7 +1189,7 @@
 									</div>
 									<div class="text-xs leading-relaxed text-blue-600 dark:text-blue-400 mt-0.5">
 										{$i18n.t(
-											'MCP（模型上下文协议）是一个用于 LLM 与外部工具通信的开放标准。仅支持 Streamable HTTP 传输方式。'
+											'MCP（模型上下文协议）是一个用于 LLM 与外部工具通信的开放标准。当前支持 HTTP 与 stdio 两种传输方式。'
 										)}
 									</div>
 								</div>
@@ -1306,7 +1344,7 @@
 												<div class="flex items-center gap-2">
 													<span
 														class="w-2 h-2 rounded-full shrink-0 {server.config?.enable
-															? server.server_info
+															? server.verified_at
 																? 'bg-green-500'
 																: 'bg-gray-400'
 															: 'bg-gray-300 dark:bg-gray-600'}"
@@ -1323,14 +1361,33 @@
 														</span>
 													{/if}
 													<span
-														class="px-1.5 py-0.5 text-xs rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 shrink-0"
+														class="px-1.5 py-0.5 text-xs rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 shrink-0"
 													>
-														{server.auth_type || 'none'}
+														{getMCPTransportLabel(server)}
+													</span>
+													{#if server.transport_type !== 'stdio'}
+														<span
+															class="px-1.5 py-0.5 text-xs rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 shrink-0"
+														>
+															{server.auth_type || 'none'}
+														</span>
+													{/if}
+													<span
+														class="px-1.5 py-0.5 text-xs rounded bg-gray-100 dark:bg-gray-800/70 text-gray-600 dark:text-gray-300 shrink-0"
+													>
+														{server.verified_at
+															? $i18n.t('已验证')
+															: $i18n.t('未验证')}
 													</span>
 												</div>
 												<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate ml-4">
-													{server.url}
+													{getMCPPrimaryValue(server)}
 												</div>
+												{#if server.verified_at}
+													<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5 ml-4">
+														{$i18n.t('上次验证于')} {formatVerifiedAt(server.verified_at)}
+													</div>
+												{/if}
 											</div>
 											<div class="flex items-center gap-2 ml-3">
 												<Switch

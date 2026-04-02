@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { parseJsonResponse } from '../response';
 
 export const getModels = async (token: string = '') => {
 	let error = null;
@@ -11,10 +12,7 @@ export const getModels = async (token: string = '') => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -42,10 +40,7 @@ export const getBaseModels = async (token: string = '') => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -74,10 +69,7 @@ export const createNewModel = async (token: string, model: object) => {
 		},
 		body: JSON.stringify(model)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -105,10 +97,7 @@ export const getModelById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -140,10 +129,7 @@ export const toggleModelById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -176,10 +162,7 @@ export const updateModelById = async (token: string, id: string, model: object) 
 		},
 		body: JSON.stringify(model)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -211,10 +194,7 @@ export const deleteModelById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -243,10 +223,7 @@ export const deleteAllModels = async (token: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -291,10 +268,7 @@ export const bulkUpsertBaseModels = async (
 		},
 		body: JSON.stringify({ items, patch })
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err;
 			console.log(err);

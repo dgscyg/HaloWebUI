@@ -14,6 +14,10 @@ from langchain_core.documents import Document
 
 from open_webui.config import VECTOR_DB
 from open_webui.retrieval.vector.connector import VECTOR_DB_CLIENT
+from open_webui.retrieval.document_processing import (
+    FILE_PROCESSING_MODE_FULL_CONTEXT,
+    normalize_file_processing_mode,
+)
 
 from open_webui.models.users import UserModel
 from open_webui.models.files import Files
@@ -454,16 +458,27 @@ def get_sources_from_files(
     for file in files:
 
         context = None
+        nested_file = file.get("file") if isinstance(file.get("file"), dict) else {}
+        requested_mode = normalize_file_processing_mode(
+            file.get("processing_mode")
+            or nested_file.get("meta", {}).get("processing_mode")
+            or (
+                FILE_PROCESSING_MODE_FULL_CONTEXT
+                if file.get("context") == "full"
+                else None
+            ),
+            "",
+        )
         if file.get("docs"):
             # BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL
             context = {
                 "documents": [[doc.get("content") for doc in file.get("docs")]],
                 "metadatas": [[doc.get("metadata") for doc in file.get("docs")]],
             }
-        elif file.get("context") == "full":
+        elif requested_mode == FILE_PROCESSING_MODE_FULL_CONTEXT:
             # Manual Full Mode Toggle
             context = {
-                "documents": [[file.get("file").get("data", {}).get("content")]],
+                "documents": [[nested_file.get("data", {}).get("content")]],
                 "metadatas": [[{"file_id": file.get("id"), "name": file.get("name")}]],
             }
         elif (
@@ -509,11 +524,11 @@ def get_sources_from_files(
                             ]
                         ],
                     }
-            elif file.get("file").get("data"):
+            elif nested_file.get("data"):
                 context = {
-                    "documents": [[file.get("file").get("data", {}).get("content")]],
+                    "documents": [[nested_file.get("data", {}).get("content")]],
                     "metadatas": [
-                        [file.get("file").get("data", {}).get("metadata", {})]
+                        [nested_file.get("data", {}).get("metadata", {})]
                     ],
                 }
         else:

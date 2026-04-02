@@ -26,6 +26,7 @@
 	export let showMessage: Function;
 	export let files;
 	export let modelId;
+	export let currentValvesContext = null;
 
 	export let pane;
 
@@ -376,6 +377,7 @@
 								showControls.set(false);
 							}}
 							{models}
+							{currentValvesContext}
 							bind:chatFiles
 							bind:params
 						/>
@@ -468,6 +470,7 @@
 										showControls.set(false);
 									}}
 									{models}
+									{currentValvesContext}
 									bind:chatFiles
 									bind:params
 								/>

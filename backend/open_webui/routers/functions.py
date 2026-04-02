@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -7,6 +8,7 @@ from open_webui.models.functions import (
     FunctionForm,
     FunctionModel,
     FunctionResponse,
+    FunctionUserResponse,
     Functions,
 )
 from open_webui.utils.plugin import load_function_module_by_id, replace_imports
@@ -23,6 +25,7 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
 router = APIRouter()
+IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _invalidate_model_list_cache(request: Request) -> None:
@@ -38,9 +41,9 @@ def _invalidate_model_list_cache(request: Request) -> None:
 ############################
 
 
-@router.get("/", response_model=list[FunctionResponse])
+@router.get("/", response_model=list[FunctionUserResponse])
 async def get_functions(user=Depends(get_verified_user)):
-    return Functions.get_functions()
+    return Functions.get_function_responses()
 
 
 ############################
@@ -62,10 +65,10 @@ async def get_functions(user=Depends(get_admin_user)):
 async def create_new_function(
     request: Request, form_data: FunctionForm, user=Depends(get_admin_user)
 ):
-    if not form_data.id.isidentifier():
+    if not IDENTIFIER_RE.fullmatch(form_data.id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only alphanumeric characters and underscores are allowed in the id",
+            detail="The id must start with a letter or underscore, and may contain only letters, numbers, and underscores.",
         )
 
     form_data.id = form_data.id.lower()

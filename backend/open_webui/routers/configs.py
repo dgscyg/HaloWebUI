@@ -1,10 +1,11 @@
 import asyncio
 import base64
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from typing import Optional
+from typing import Dict, List, Literal, Optional
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.config import get_config, save_config
@@ -283,7 +284,11 @@ async def set_native_tools_config(
 
 
 class MCPServerConnection(BaseModel):
-    url: str
+    transport_type: Literal["http", "stdio"] = "http"
+    url: Optional[str] = None
+    command: Optional[str] = None
+    args: List[str] = Field(default_factory=list)
+    env: Dict[str, str] = Field(default_factory=dict)
     name: Optional[str] = None
     description: Optional[str] = None
     auth_type: Optional[str] = None
@@ -292,8 +297,65 @@ class MCPServerConnection(BaseModel):
     server_info: Optional[dict] = None
     tool_count: Optional[int] = None
     mcp_apps: Optional[dict] = Field(default=None, alias=MCP_APPS_KEY)
+    verified_at: Optional[str] = None
 
     model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="after")
+    def validate_transport_fields(self):
+        self.transport_type = (self.transport_type or "http").lower()
+        self.url = (self.url or "").strip() or None
+        self.command = (self.command or "").strip() or None
+        self.args = [str(item) for item in (self.args or [])]
+        self.env = {str(key): str(value) for key, value in (self.env or {}).items()}
+
+        if self.transport_type == "http":
+            if not self.url:
+                raise ValueError("url is required when transport_type is http")
+        elif self.transport_type == "stdio":
+            if not self.command:
+                raise ValueError("command is required when transport_type is stdio")
+
+        return self
+
+
+def _normalize_mcp_server_connection(connection: MCPServerConnection) -> dict:
+    normalized = connection.model_dump(by_alias=True, exclude_none=True)
+    normalized["transport_type"] = connection.transport_type
+    normalized["config"] = connection.config or {}
+
+    if connection.name is None:
+        normalized.pop("name", None)
+    if connection.description is None:
+        normalized.pop("description", None)
+    if connection.server_info is None:
+        normalized.pop("server_info", None)
+    if connection.tool_count is None:
+        normalized.pop("tool_count", None)
+    if connection.verified_at is None:
+        normalized.pop("verified_at", None)
+
+    if connection.transport_type == "stdio":
+        normalized.pop("url", None)
+        normalized.pop("auth_type", None)
+        normalized.pop("key", None)
+        normalized["command"] = connection.command
+        normalized["args"] = [str(item) for item in (connection.args or [])]
+        normalized["env"] = {
+            str(key): str(value) for key, value in (connection.env or {}).items()
+        }
+    else:
+        normalized.pop("command", None)
+        normalized.pop("args", None)
+        normalized.pop("env", None)
+        normalized["url"] = (connection.url or "").rstrip("/")
+        normalized["auth_type"] = connection.auth_type
+        if connection.key:
+            normalized["key"] = connection.key
+        else:
+            normalized.pop("key", None)
+
+    return {key: value for key, value in normalized.items() if value is not None}
 
 
 class MCPAppsConfigForm(BaseModel):
@@ -347,8 +409,17 @@ async def get_mcp_servers_config(request: Request, user=Depends(get_verified_use
 async def set_mcp_servers_config(
     request: Request, form_data: MCPServersConfigForm, user=Depends(get_verified_user)
 ):
+    if (
+        getattr(user, "role", None) != "admin"
+        and any(
+            connection.transport_type == "stdio"
+            for connection in form_data.MCP_SERVER_CONNECTIONS
+        )
+    ):
+        raise HTTPException(status_code=403, detail="stdio MCP servers are admin-only")
+
     connections = [
-        connection.model_dump(by_alias=True, exclude_none=True)
+        _normalize_mcp_server_connection(connection)
         for connection in form_data.MCP_SERVER_CONNECTIONS
     ]
 
@@ -364,11 +435,18 @@ async def verify_mcp_server_connection(
     request: Request, form_data: MCPServerConnection, user=Depends(get_verified_user)
 ):
     """
-    Verify the connection to an MCP server (Streamable HTTP).
+    Verify the connection to an MCP server.
     """
     try:
+        if form_data.transport_type == "stdio" and getattr(user, "role", None) != "admin":
+            raise HTTPException(status_code=403, detail="stdio MCP servers are admin-only")
+
+        normalized_connection = _normalize_mcp_server_connection(form_data)
         token = None
-        if (form_data.auth_type or "none").lower() == "session":
+        if (
+            form_data.transport_type == "http"
+            and (form_data.auth_type or "none").lower() == "session"
+        ):
             token = getattr(getattr(request.state, "token", None), "credentials", None)
             if not token:
                 raise HTTPException(
@@ -377,14 +455,19 @@ async def verify_mcp_server_connection(
                 )
 
         data = await get_mcp_server_data(
-            form_data.model_dump(by_alias=True, exclude_none=True),
+            normalized_connection,
             session_token=token,
+            use_temp_stdio_client=form_data.transport_type == "stdio",
         )
 
         tools = data.get("tools", []) or []
         return {
             "server_info": data.get("server_info", {}) or {},
             "tool_count": len(tools),
+            "verified_at": datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
             "tools": [
                 {
                     "name": t.get("name"),
@@ -771,9 +854,8 @@ async def set_code_execution_config(
     }
 
 
-############################
-# SetDefaultModels
-############################
+# Compatibility-only model UI config.
+# DEFAULT_MODELS is deprecated and intentionally ignored; only MODEL_ORDER_LIST is mutable.
 class ModelsConfigForm(BaseModel):
     DEFAULT_MODELS: Optional[str]
     MODEL_ORDER_LIST: Optional[list[str]]
@@ -782,8 +864,8 @@ class ModelsConfigForm(BaseModel):
 @router.get("/models", response_model=ModelsConfigForm)
 async def get_models_config(request: Request, user=Depends(get_admin_user)):
     return {
-        "DEFAULT_MODELS": request.app.state.config.DEFAULT_MODELS,
-        "MODEL_ORDER_LIST": request.app.state.config.MODEL_ORDER_LIST,
+        "DEFAULT_MODELS": "",
+        "MODEL_ORDER_LIST": request.app.state.config.MODEL_ORDER_LIST or [],
     }
 
 
@@ -791,11 +873,11 @@ async def get_models_config(request: Request, user=Depends(get_admin_user)):
 async def set_models_config(
     request: Request, form_data: ModelsConfigForm, user=Depends(get_admin_user)
 ):
-    request.app.state.config.DEFAULT_MODELS = form_data.DEFAULT_MODELS
-    request.app.state.config.MODEL_ORDER_LIST = form_data.MODEL_ORDER_LIST
+    request.app.state.config.DEFAULT_MODELS = ""
+    request.app.state.config.MODEL_ORDER_LIST = form_data.MODEL_ORDER_LIST or []
     return {
-        "DEFAULT_MODELS": request.app.state.config.DEFAULT_MODELS,
-        "MODEL_ORDER_LIST": request.app.state.config.MODEL_ORDER_LIST,
+        "DEFAULT_MODELS": "",
+        "MODEL_ORDER_LIST": request.app.state.config.MODEL_ORDER_LIST or [],
     }
 
 

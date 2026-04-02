@@ -1,4 +1,5 @@
 import { OLLAMA_API_BASE_URL } from '$lib/constants';
+import { ensureOkResponse, parseJsonResponse } from '../response';
 
 export const verifyOllamaConnection = async (
 	token: string = '',
@@ -27,10 +28,7 @@ export const verifyOllamaConnection = async (
 			key: keyValue
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = `Ollama: ${err?.error?.message ?? 'Network Problem'}`;
 			return [];
@@ -54,10 +52,7 @@ export const getOllamaConfig = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -95,10 +90,7 @@ export const updateOllamaConfig = async (token: string = '', config: OllamaConfi
 			...config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -127,10 +119,7 @@ export const getOllamaUrls = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -162,10 +151,7 @@ export const updateOllamaUrls = async (token: string = '', urls: string[]) => {
 			urls: urls
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -194,10 +180,7 @@ export const getOllamaVersion = async (token: string, urlIdx?: number) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -226,10 +209,7 @@ export const getOllamaModels = async (token: string = '', urlIdx: null | number 
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -411,10 +391,7 @@ export const deleteModel = async (token: string, tagName: string, urlIdx: string
 			})
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			console.log(json);
 			return true;
@@ -453,16 +430,7 @@ export const pullModel = async (token: string, tagName: string, urlIdx: number |
 			name: tagName
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) {
-				const payload = await res.json().catch(() => ({
-					detail: `${res.status} ${res.statusText}`
-				}));
-				throw payload;
-			}
-
-			return res;
-		})
+		.then(ensureOkResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err?.detail ?? err?.message ?? `${err}`;

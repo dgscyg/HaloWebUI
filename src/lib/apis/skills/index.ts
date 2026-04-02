@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { parseJsonResponse } from '../response';
 
 export type SkillSourceType = 'manual' | 'url' | 'github' | 'zip';
 export type SkillCatalogKind =
@@ -69,10 +70,7 @@ const requestJson = async <T>(
 			...(init.headers ?? {})
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err?.detail ?? err?.message ?? err;
 			console.log(err);

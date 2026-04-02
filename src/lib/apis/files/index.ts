@@ -1,11 +1,20 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { parseBlobResponse, parseJsonResponse } from '../response';
 
-export const uploadFile = async (token: string, file: File) => {
+export const uploadFile = async (
+	token: string,
+	file: File,
+	options: { processingMode?: string } = {}
+) => {
 	const data = new FormData();
 	data.append('file', file);
 	let error = null;
+	const query = new URLSearchParams();
+	if (options.processingMode) {
+		query.set('processing_mode', options.processingMode);
+	}
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${query.toString() ? `?${query}` : ''}`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -13,10 +22,7 @@ export const uploadFile = async (token: string, file: File) => {
 		},
 		body: data
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -40,10 +46,7 @@ export const uploadDir = async (token: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;
@@ -67,10 +70,7 @@ export const getFiles = async (token: string = '') => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -98,10 +98,7 @@ export const getFileById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -132,10 +129,7 @@ export const updateFileDataContentById = async (token: string, id: string, conte
 			content: content
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -162,10 +156,7 @@ export const getFileContentById = async (id: string) => {
 		},
 		credentials: 'include'
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return await res.blob();
-		})
+		.then(parseBlobResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -191,10 +182,7 @@ export const deleteFileById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -222,10 +210,7 @@ export const deleteAllFiles = async (token: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})

@@ -201,17 +201,30 @@ def set_user_tool_server_connections(user: UserModel, connections: list[dict]) -
 
 def get_user_mcp_server_connections(request, user: Optional[UserModel]) -> list[dict]:
     tools = _get_tools_settings(user)
+    role = getattr(user, "role", None) if user else None
+
+    def _filter_stdio(connections: list[dict]) -> list[dict]:
+        if role == "admin":
+            return connections
+        return [
+            connection
+            for connection in connections
+            if str(connection.get("transport_type") or "http").lower() != "stdio"
+        ]
+
     if MCP_SERVER_CONNECTIONS_KEY in tools:
-        return normalize_mcp_server_connections(_as_list(tools.get(MCP_SERVER_CONNECTIONS_KEY)))
+        return _filter_stdio(
+            normalize_mcp_server_connections(_as_list(tools.get(MCP_SERVER_CONNECTIONS_KEY)))
+        )
 
     # Admin migration fallback (read-only)
-    if user and getattr(user, "role", None) == "admin":
+    if user and role == "admin":
         cfg = getattr(getattr(request, "app", None), "state", None)
         cfg = getattr(cfg, "config", None)
         legacy = getattr(cfg, "MCP_SERVER_CONNECTIONS", None) if cfg is not None else None
         legacy = legacy if isinstance(legacy, list) else []
         if legacy:
-            return normalize_mcp_server_connections(deepcopy(legacy))
+            return _filter_stdio(normalize_mcp_server_connections(deepcopy(legacy)))
 
     return []
 

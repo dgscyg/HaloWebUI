@@ -1,4 +1,5 @@
 -r base.txt
+black==25.1.0
 -r vector-extra.txt
 -r rag-local.txt
 -r rerank-local.txt

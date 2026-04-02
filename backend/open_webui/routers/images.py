@@ -47,6 +47,7 @@ COMFYUI_WORKFLOW_NODE_MAPPING_INVALID = (
 )
 
 IMAGE_MODEL_DISCOVERY_CACHE_TTL_SECONDS = 60.0
+IMAGE_MODEL_DISCOVERY_CACHE_MAX_ENTRIES = 64
 IMAGE_MODEL_DISCOVERY_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 OPENAI_IMAGE_FAMILY_PREFIXES = ("dall-e", "dalle", "gpt-image")
@@ -66,6 +67,11 @@ OPENAI_CHAT_IMAGE_HINTS = (
     "cogview",
     "playground",
     "nano-banana",
+    "qwen-image",
+    "glm-image",
+    "hunyuan-image",
+    "seedream",
+    "agnes-image",
 )
 NEGATIVE_IMAGE_HINTS = (
     "embedding",
@@ -90,6 +96,9 @@ NEGATIVE_IMAGE_HINTS = (
     "upscale",
 )
 NEGATIVE_TOKEN_RE = re.compile(r"(^|[\/._:-])(vision|vl|asr)([\/._:-]|$)", re.IGNORECASE)
+VERSION_LIKE_BASE_URL_RE = re.compile(
+    r"/(?:compatible-mode/)?v\d+(?:[a-z]+\d*)?$", re.IGNORECASE
+)
 
 IMAGE_SIZE_ASPECT_RATIO_OVERRIDES = {
     "512x512": "1:1",
@@ -97,6 +106,49 @@ IMAGE_SIZE_ASPECT_RATIO_OVERRIDES = {
     "1024x1536": "2:3",
     "1536x1024": "3:2",
 }
+
+GEMINI_IMAGE_SIZE_PIXELS = {
+    "512": "512x512",
+    "1K": "1024x1024",
+    "2K": "2048x2048",
+    "4K": "4096x4096",
+}
+GEMINI_IMAGE_SIZE_ORDER = ("512", "1K", "2K", "4K")
+GEMINI_IMAGE_ASPECT_RATIOS = (
+    "1:1",
+    "2:3",
+    "3:2",
+    "3:4",
+    "4:3",
+    "4:5",
+    "5:4",
+    "9:16",
+    "16:9",
+    "21:9",
+)
+
+def _evict_stale_image_models_cache(now: float) -> None:
+    stale_keys = [
+        cache_key
+        for cache_key, (cached_at, _models) in IMAGE_MODEL_DISCOVERY_CACHE.items()
+        if now - cached_at > IMAGE_MODEL_DISCOVERY_CACHE_TTL_SECONDS
+    ]
+    for cache_key in stale_keys:
+        IMAGE_MODEL_DISCOVERY_CACHE.pop(cache_key, None)
+
+    overflow = len(IMAGE_MODEL_DISCOVERY_CACHE) - IMAGE_MODEL_DISCOVERY_CACHE_MAX_ENTRIES
+    if overflow <= 0:
+        return
+
+    oldest_keys = [
+        cache_key
+        for cache_key, _ in sorted(
+            IMAGE_MODEL_DISCOVERY_CACHE.items(), key=lambda item: item[1][0]
+        )[:overflow]
+    ]
+    for cache_key in oldest_keys:
+        IMAGE_MODEL_DISCOVERY_CACHE.pop(cache_key, None)
+
 
 def _can_use_image_generation(request: Request, user) -> bool:
     """Server-side permission gate for image generation (matches builtin_tools behavior)."""
@@ -368,6 +420,77 @@ def _normalize_base_url(url: Optional[str]) -> str:
     return str(url or "").strip().rstrip("/")
 
 
+def _normalize_image_provider_base_url(
+    url: Optional[str],
+    default_version_path: str,
+    *,
+    force_mode: bool = False,
+) -> tuple[str, bool]:
+    raw = str(url or "").strip()
+    explicit_force_mode = raw.endswith("#")
+    if explicit_force_mode:
+        raw = raw[:-1]
+
+    normalized = raw.rstrip("/")
+    effective_force_mode = bool(force_mode or explicit_force_mode)
+
+    if not normalized:
+        return "", effective_force_mode
+
+    if effective_force_mode:
+        return normalized, True
+
+    for suffix in (
+        "/chat/completions",
+        "/models",
+        "/completions",
+        "/images/generations",
+        "/images/edits",
+    ):
+        if normalized.lower().endswith(suffix):
+            normalized = normalized[: -len(suffix)].rstrip("/")
+            break
+
+    if not normalized:
+        return "", False
+
+    if normalized.lower().endswith(default_version_path.lower()):
+        return normalized, False
+
+    if VERSION_LIKE_BASE_URL_RE.search(normalized):
+        return normalized, False
+
+    return f"{normalized}{default_version_path}", False
+
+
+def _sync_image_provider_config_state(request: Request) -> None:
+    cfg = request.app.state.config
+
+    openai_base_url = str(getattr(cfg, "IMAGES_OPENAI_API_BASE_URL", "") or "")
+    openai_force_mode = bool(getattr(cfg, "IMAGES_OPENAI_API_FORCE_MODE", False))
+    normalized_openai_base_url, normalized_openai_force_mode = _normalize_image_provider_base_url(
+        openai_base_url,
+        "/v1",
+        force_mode=openai_force_mode,
+    )
+    if normalized_openai_base_url != openai_base_url:
+        request.app.state.config.IMAGES_OPENAI_API_BASE_URL = normalized_openai_base_url
+    if normalized_openai_force_mode != openai_force_mode:
+        request.app.state.config.IMAGES_OPENAI_API_FORCE_MODE = normalized_openai_force_mode
+
+    gemini_base_url = str(getattr(cfg, "IMAGES_GEMINI_API_BASE_URL", "") or "")
+    gemini_force_mode = bool(getattr(cfg, "IMAGES_GEMINI_API_FORCE_MODE", False))
+    normalized_gemini_base_url, normalized_gemini_force_mode = _normalize_image_provider_base_url(
+        gemini_base_url,
+        "/v1beta",
+        force_mode=gemini_force_mode,
+    )
+    if normalized_gemini_base_url != gemini_base_url:
+        request.app.state.config.IMAGES_GEMINI_API_BASE_URL = normalized_gemini_base_url
+    if normalized_gemini_force_mode != gemini_force_mode:
+        request.app.state.config.IMAGES_GEMINI_API_FORCE_MODE = normalized_gemini_force_mode
+
+
 def _normalize_context(value: Optional[str]) -> str:
     normalized = str(value or "runtime").strip().lower()
     return normalized if normalized in {"runtime", "settings"} else "runtime"
@@ -434,8 +557,11 @@ def _collect_modality_tokens(value: Any) -> set[str]:
                 "output",
                 "modalities",
                 "input_modalities",
+                "inputModalities",
                 "output_modalities",
+                "outputModalities",
                 "supportedGenerationMethods",
+                "supported_generation_methods",
             ):
                 if key in node:
                     _walk(node.get(key))
@@ -460,9 +586,15 @@ def _extract_modalities(model: dict) -> tuple[set[str], set[str]]:
             continue
         if "input_modalities" in container:
             input_modalities.update(_collect_modality_tokens(container.get("input_modalities")))
+        if "inputModalities" in container:
+            input_modalities.update(_collect_modality_tokens(container.get("inputModalities")))
         if "output_modalities" in container:
             output_modalities.update(
                 _collect_modality_tokens(container.get("output_modalities"))
+            )
+        if "outputModalities" in container:
+            output_modalities.update(
+                _collect_modality_tokens(container.get("outputModalities"))
             )
 
     modalities = model.get("modalities")
@@ -534,6 +666,22 @@ def _matches_image_positive_hint(text: str) -> bool:
     if base_name.startswith(OPENAI_IMAGE_FAMILY_PREFIXES):
         return True
 
+    if any(
+        phrase in normalized
+        for phrase in (
+            "image generation",
+            "image creator",
+            "image creation",
+            "text-to-image",
+            "image-to-image",
+            "图像生成",
+            "图像创作",
+            "文生图",
+            "图生图",
+        )
+    ):
+        return True
+
     return any(hint in normalized for hint in OPENAI_CHAT_IMAGE_HINTS)
 
 
@@ -599,16 +747,31 @@ def _resolve_image_provider_source(
     connection_index: Optional[int] = None,
     strict: bool = False,
 ) -> Optional[dict[str, Any]]:
+    _sync_image_provider_config_state(request)
+
     context = _normalize_context(context)
     credential_source = _normalize_credential_source(credential_source)
     cfg = request.app.state.config
+    image_api_config: dict[str, Any] = {}
 
     if provider == "openai":
-        shared_base_url = _normalize_base_url(getattr(cfg, "IMAGES_OPENAI_API_BASE_URL", ""))
+        shared_base_url, persisted_force_mode = _normalize_image_provider_base_url(
+            getattr(cfg, "IMAGES_OPENAI_API_BASE_URL", ""),
+            "/v1",
+            force_mode=bool(getattr(cfg, "IMAGES_OPENAI_API_FORCE_MODE", False)),
+        )
         shared_key = str(getattr(cfg, "IMAGES_OPENAI_API_KEY", "") or "").strip()
+        if persisted_force_mode:
+            image_api_config["force_mode"] = True
     elif provider == "gemini":
-        shared_base_url = _normalize_base_url(getattr(cfg, "IMAGES_GEMINI_API_BASE_URL", ""))
+        shared_base_url, persisted_force_mode = _normalize_image_provider_base_url(
+            getattr(cfg, "IMAGES_GEMINI_API_BASE_URL", ""),
+            "/v1beta",
+            force_mode=bool(getattr(cfg, "IMAGES_GEMINI_API_FORCE_MODE", False)),
+        )
         shared_key = str(getattr(cfg, "IMAGES_GEMINI_API_KEY", "") or "").strip()
+        if persisted_force_mode:
+            image_api_config["force_mode"] = True
     else:
         return None
 
@@ -621,15 +784,20 @@ def _resolve_image_provider_source(
             return None
 
         resolved_key = shared_key
+        resolved_api_config = dict(image_api_config)
         if for_settings and not resolved_key and shared_global_key:
             resolved_key = shared_global_key
+            if isinstance(shared_api_config, dict):
+                resolved_api_config = {**shared_api_config, **resolved_api_config}
+        elif not for_settings and isinstance(shared_api_config, dict):
+            resolved_api_config = {**shared_api_config, **resolved_api_config}
 
         return {
             "provider": provider,
             "effective_source": "shared" if not for_settings else "settings",
             "base_url": shared_base_url,
             "key": resolved_key,
-            "api_config": shared_api_config,
+            "api_config": resolved_api_config,
             "connection_index": shared_global_index,
             "cache_scope": f"{provider}:{context}:shared",
         }
@@ -750,15 +918,14 @@ def _build_image_model_cache_key(engine: str, source: Optional[dict[str, Any]]) 
 
 
 def _get_cached_image_models(cache_key: str) -> Optional[list[dict[str, Any]]]:
+    now = time.monotonic()
+    _evict_stale_image_models_cache(now)
+
     cached = IMAGE_MODEL_DISCOVERY_CACHE.get(cache_key)
     if not cached:
         return None
 
-    cached_at, models = cached
-    now = time.monotonic()
-    if now - cached_at > IMAGE_MODEL_DISCOVERY_CACHE_TTL_SECONDS:
-        IMAGE_MODEL_DISCOVERY_CACHE.pop(cache_key, None)
-        return None
+    _cached_at, models = cached
 
     return list(models)
 
@@ -766,6 +933,7 @@ def _get_cached_image_models(cache_key: str) -> Optional[list[dict[str, Any]]]:
 def _set_cached_image_models(cache_key: str, models: list[dict[str, Any]]) -> list[dict[str, Any]]:
     now = time.monotonic()
     IMAGE_MODEL_DISCOVERY_CACHE[cache_key] = (now, list(models))
+    _evict_stale_image_models_cache(now)
     return models
 
 
@@ -778,6 +946,7 @@ def _build_image_model_entry(
     supports_background: bool,
     supports_batch: bool,
     size_mode: str,
+    supports_image_size: bool = False,
     text_output_supported: bool,
     source: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
@@ -789,6 +958,7 @@ def _build_image_model_entry(
         "supports_background": bool(supports_background),
         "supports_batch": bool(supports_batch),
         "size_mode": size_mode,
+        "supports_image_size": bool(supports_image_size),
         "text_output_supported": bool(text_output_supported),
         "source": source.get("effective_source") if isinstance(source, dict) else None,
         "connection_index": source.get("connection_index") if isinstance(source, dict) else None,
@@ -881,6 +1051,7 @@ def _classify_gemini_image_model(
     _input_modalities, output_modalities = _extract_modalities(model)
     methods = _extract_supported_generation_methods(model)
     output_has_image = _has_image_modality(output_modalities)
+    output_has_text = _has_text_modality(output_modalities)
 
     negative_hint = _matches_image_negative_hint(base_name) or _matches_image_negative_hint(
         text_blob
@@ -891,6 +1062,7 @@ def _classify_gemini_image_model(
     has_predict = any("predict" == method or method.endswith(":predict") for method in methods)
     has_generate_content = any("generatecontent" in method for method in methods)
     looks_like_imagen = "imagen" in base_name
+    supports_image_size = base_name.startswith("gemini-3")
 
     if negative_hint and not (positive_hint or has_predict or output_has_image):
         return None
@@ -906,7 +1078,22 @@ def _classify_gemini_image_model(
             supports_background=False,
             supports_batch=True,
             size_mode="unsupported",
+            supports_image_size=False,
             text_output_supported=False,
+            source=source,
+        )
+
+    if output_has_image:
+        return _build_image_model_entry(
+            model_id=model_id,
+            name=str(model.get("displayName") or model.get("display_name") or model_id).strip(),
+            generation_mode="gemini_generate_content_image",
+            detection_method="metadata",
+            supports_background=False,
+            supports_batch=False,
+            size_mode="aspect_ratio",
+            supports_image_size=supports_image_size,
+            text_output_supported=output_has_text,
             source=source,
         )
 
@@ -919,6 +1106,7 @@ def _classify_gemini_image_model(
             supports_background=False,
             supports_batch=False,
             size_mode="aspect_ratio",
+            supports_image_size=supports_image_size,
             text_output_supported=True,
             source=source,
         )
@@ -1228,6 +1416,9 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
         ),
         "openai": {
             "OPENAI_API_BASE_URL": request.app.state.config.IMAGES_OPENAI_API_BASE_URL,
+            "OPENAI_API_FORCE_MODE": getattr(
+                request.app.state.config, "IMAGES_OPENAI_API_FORCE_MODE", False
+            ),
             "OPENAI_API_KEY": request.app.state.config.IMAGES_OPENAI_API_KEY,
         },
         "automatic1111": {
@@ -1245,6 +1436,9 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
         },
         "gemini": {
             "GEMINI_API_BASE_URL": request.app.state.config.IMAGES_GEMINI_API_BASE_URL,
+            "GEMINI_API_FORCE_MODE": getattr(
+                request.app.state.config, "IMAGES_GEMINI_API_FORCE_MODE", False
+            ),
             "GEMINI_API_KEY": request.app.state.config.IMAGES_GEMINI_API_KEY,
         },
     }
@@ -1252,6 +1446,7 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
 
 class OpenAIConfigForm(BaseModel):
     OPENAI_API_BASE_URL: str
+    OPENAI_API_FORCE_MODE: bool = False
     OPENAI_API_KEY: str
 
 
@@ -1272,6 +1467,7 @@ class ComfyUIConfigForm(BaseModel):
 
 class GeminiConfigForm(BaseModel):
     GEMINI_API_BASE_URL: str
+    GEMINI_API_FORCE_MODE: bool = False
     GEMINI_API_KEY: str
 
 
@@ -1290,6 +1486,17 @@ class ConfigForm(BaseModel):
 async def update_config(
     request: Request, form_data: ConfigForm, user=Depends(get_admin_user)
 ):
+    openai_base_url, openai_force_mode = _normalize_image_provider_base_url(
+        form_data.openai.OPENAI_API_BASE_URL,
+        "/v1",
+        force_mode=form_data.openai.OPENAI_API_FORCE_MODE,
+    )
+    gemini_base_url, gemini_force_mode = _normalize_image_provider_base_url(
+        form_data.gemini.GEMINI_API_BASE_URL,
+        "/v1beta",
+        force_mode=form_data.gemini.GEMINI_API_FORCE_MODE,
+    )
+
     request.app.state.config.IMAGE_GENERATION_ENGINE = form_data.engine
     request.app.state.config.ENABLE_IMAGE_GENERATION = form_data.enabled
     request.app.state.config.ENABLE_IMAGE_GENERATION_SHARED_KEY = (
@@ -1300,14 +1507,12 @@ async def update_config(
         form_data.prompt_generation
     )
 
-    request.app.state.config.IMAGES_OPENAI_API_BASE_URL = (
-        form_data.openai.OPENAI_API_BASE_URL
-    )
+    request.app.state.config.IMAGES_OPENAI_API_BASE_URL = openai_base_url
+    request.app.state.config.IMAGES_OPENAI_API_FORCE_MODE = openai_force_mode
     request.app.state.config.IMAGES_OPENAI_API_KEY = form_data.openai.OPENAI_API_KEY
 
-    request.app.state.config.IMAGES_GEMINI_API_BASE_URL = (
-        form_data.gemini.GEMINI_API_BASE_URL
-    )
+    request.app.state.config.IMAGES_GEMINI_API_BASE_URL = gemini_base_url
+    request.app.state.config.IMAGES_GEMINI_API_FORCE_MODE = gemini_force_mode
     request.app.state.config.IMAGES_GEMINI_API_KEY = form_data.gemini.GEMINI_API_KEY
 
     request.app.state.config.AUTOMATIC1111_BASE_URL = (
@@ -1350,6 +1555,9 @@ async def update_config(
         "shared_key_enabled": request.app.state.config.ENABLE_IMAGE_GENERATION_SHARED_KEY,
         "openai": {
             "OPENAI_API_BASE_URL": request.app.state.config.IMAGES_OPENAI_API_BASE_URL,
+            "OPENAI_API_FORCE_MODE": getattr(
+                request.app.state.config, "IMAGES_OPENAI_API_FORCE_MODE", False
+            ),
             "OPENAI_API_KEY": request.app.state.config.IMAGES_OPENAI_API_KEY,
         },
         "automatic1111": {
@@ -1367,6 +1575,9 @@ async def update_config(
         },
         "gemini": {
             "GEMINI_API_BASE_URL": request.app.state.config.IMAGES_GEMINI_API_BASE_URL,
+            "GEMINI_API_FORCE_MODE": getattr(
+                request.app.state.config, "IMAGES_GEMINI_API_FORCE_MODE", False
+            ),
             "GEMINI_API_KEY": request.app.state.config.IMAGES_GEMINI_API_KEY,
         },
     }
@@ -1603,6 +1814,8 @@ class GenerateImageForm(BaseModel):
     model: Optional[str] = None
     prompt: str
     size: Optional[str] = None
+    image_size: Optional[str] = None
+    aspect_ratio: Optional[str] = None
     n: int = 1
     negative_prompt: Optional[str] = None
     credential_source: Optional[str] = None
@@ -1748,6 +1961,45 @@ def _size_to_aspect_ratio(size: Optional[str]) -> Optional[str]:
         return None
 
     return f"{width // divisor}:{height // divisor}"
+
+
+def _normalize_gemini_image_size(value: Optional[str]) -> Optional[str]:
+    normalized = str(value or "").strip().upper()
+    if not normalized:
+        return None
+    return normalized if normalized in GEMINI_IMAGE_SIZE_ORDER else None
+
+
+def _normalize_gemini_aspect_ratio(value: Optional[str]) -> Optional[str]:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    return normalized if normalized in GEMINI_IMAGE_ASPECT_RATIOS else None
+
+
+def _size_to_gemini_image_size(size: Optional[str]) -> Optional[str]:
+    raw_size = str(size or "").strip().lower()
+    if not raw_size:
+        return None
+
+    for gemini_size, pixel_size in GEMINI_IMAGE_SIZE_PIXELS.items():
+        if raw_size == pixel_size.lower():
+            return gemini_size
+
+    if not re.match(r"^\d+x\d+$", raw_size):
+        return None
+
+    width, height = tuple(map(int, raw_size.split("x")))
+    if width != height:
+        return None
+
+    square_map = {
+        512: "512",
+        1024: "1K",
+        2048: "2K",
+        4096: "4K",
+    }
+    return square_map.get(width)
 
 
 def _looks_like_base64_image(value: str) -> bool:
@@ -2232,6 +2484,8 @@ async def _generate_via_gemini_generate_content(
     *,
     model_id: str,
     prompt: str,
+    image_size: Optional[str],
+    aspect_ratio: Optional[str],
     source: dict[str, Any],
 ) -> list[dict[str, str]]:
     base_url = source.get("base_url") or ""
@@ -2244,6 +2498,15 @@ async def _generate_via_gemini_generate_content(
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
     }
+    image_config: dict[str, Any] = {}
+    normalized_aspect_ratio = _normalize_gemini_aspect_ratio(aspect_ratio)
+    if normalized_aspect_ratio:
+        image_config["aspectRatio"] = normalized_aspect_ratio
+    normalized_image_size = _normalize_gemini_image_size(image_size)
+    if normalized_image_size:
+        image_config["imageSize"] = normalized_image_size
+    if image_config:
+        payload["generationConfig"]["imageConfig"] = image_config
 
     try:
         response, _used_url = await asyncio.to_thread(
@@ -2309,6 +2572,12 @@ async def image_generations(
                 status_code=400,
                 detail=ERROR_MESSAGES.INCORRECT_FORMAT("  (e.g., 512x512)."),
             )
+    requested_aspect_ratio = _normalize_gemini_aspect_ratio(form_data.aspect_ratio)
+    requested_image_size = _normalize_gemini_image_size(form_data.image_size)
+    if not requested_aspect_ratio:
+        requested_aspect_ratio = _size_to_aspect_ratio(effective_size)
+    if not requested_image_size:
+        requested_image_size = _size_to_gemini_image_size(effective_size)
 
     width, height = tuple(map(int, effective_size.split("x")))
     selected_model = str(
@@ -2487,6 +2756,16 @@ async def image_generations(
                     user,
                     model_id=selected_model,
                     prompt=form_data.prompt,
+                    image_size=(
+                        requested_image_size
+                        if (selected_model_meta or {}).get("supports_image_size")
+                        else None
+                    ),
+                    aspect_ratio=(
+                        requested_aspect_ratio
+                        if (selected_model_meta or {}).get("size_mode") == "aspect_ratio"
+                        else None
+                    ),
                     source=source,
                 )
 

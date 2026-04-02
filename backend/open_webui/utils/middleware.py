@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 from fastapi import Request, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from starlette.responses import Response, StreamingResponse
 
 
@@ -40,7 +41,12 @@ from open_webui.routers.tasks import (
     generate_chat_tags,
     generate_follow_ups,
 )
-from open_webui.routers.retrieval import process_web_search, SearchForm
+from open_webui.routers.retrieval import (
+    ProcessFileForm,
+    SearchForm,
+    process_file,
+    process_web_search,
+)
 from open_webui.routers.images import image_generations, GenerateImageForm
 from open_webui.routers.openai import (
     _connection_supports_native_file_inputs,
@@ -66,6 +72,14 @@ from open_webui.models.models import Models
 
 from open_webui.retrieval.utils import get_sources_from_files
 from open_webui.retrieval.runtime import ensure_reranking_runtime
+from open_webui.retrieval.document_processing import (
+    FILE_PROCESSING_MODE_FULL_CONTEXT,
+    FILE_PROCESSING_MODE_NATIVE_FILE,
+    FILE_PROCESSING_MODE_RETRIEVAL,
+    get_file_effective_processing_mode,
+    get_requested_processing_mode_for_file_item,
+    normalize_file_processing_mode,
+)
 
 
 from open_webui.utils.chat import generate_chat_completion
@@ -88,6 +102,7 @@ from open_webui.utils.misc import (
 from open_webui.utils.tools import get_tools, get_tool_servers_data
 from open_webui.utils.mcp import (
     build_mcp_app_resource_proxy_path,
+    extract_selected_mcp_indices,
     get_mcp_servers_data,
 )
 from open_webui.utils.builtin_tools import get_builtin_tools
@@ -107,7 +122,7 @@ from open_webui.utils.filter import (
 )
 from open_webui.utils.code_interpreter import execute_code_jupyter
 
-from open_webui.tasks import create_task
+from open_webui.tasks import create_task, set_current_task_blocks_completion
 
 from open_webui.config import (
     CACHE_DIR,
@@ -140,6 +155,22 @@ def strip_reasoning_details(content: str) -> str:
     if not content or not isinstance(content, str):
         return content or ""
     return _REASONING_DETAILS_RE.sub("", content).strip()
+
+
+def _summarize_form_data_for_debug(form_data: Any) -> dict[str, Any]:
+    if not isinstance(form_data, dict):
+        return {"type": type(form_data).__name__}
+
+    messages = form_data.get("messages")
+    files = form_data.get("files")
+    features = form_data.get("features")
+
+    return {
+        "model": form_data.get("model"),
+        "message_count": len(messages) if isinstance(messages, list) else 0,
+        "file_count": len(files) if isinstance(files, list) else 0,
+        "feature_keys": sorted(features.keys()) if isinstance(features, dict) else [],
+    }
 
 
 def _truncate_text(value: Any, max_chars: int) -> str:
@@ -918,6 +949,17 @@ _NATIVE_FILE_INPUT_RETRY_PATTERNS = (
     "user_data",
 )
 
+_ANTHROPIC_NATIVE_DOCUMENT_MIME_TYPES = {
+    "application/pdf",
+    "text/plain",
+}
+_ANTHROPIC_NATIVE_IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+}
+
 
 def _get_builtin_web_tools_to_suppress(effective_mode: Any) -> set[str]:
     mode = _normalize_web_search_mode(effective_mode, WEB_SEARCH_MODE_OFF)
@@ -1256,6 +1298,8 @@ def _extract_files_from_messages(messages: list[dict]) -> list[dict]:
                         "filename": file_obj.filename,
                         "content_type": meta.get("content_type", ""),
                         "size": meta.get("size", 0),
+                        "processing_mode": f.get("processing_mode") or meta.get("processing_mode"),
+                        "context": f.get("context"),
                     })
                 else:
                     # File not in DB -- use whatever info we have from the message
@@ -1264,6 +1308,8 @@ def _extract_files_from_messages(messages: list[dict]) -> list[dict]:
                         "filename": f.get("name") or f.get("filename") or "",
                         "content_type": f.get("content_type") or f.get("type") or "",
                         "size": f.get("size") or 0,
+                        "processing_mode": f.get("processing_mode"),
+                        "context": f.get("context"),
                     })
             except Exception:
                 result.append({
@@ -1271,6 +1317,8 @@ def _extract_files_from_messages(messages: list[dict]) -> list[dict]:
                     "filename": f.get("name") or f.get("filename") or "",
                     "content_type": f.get("content_type") or f.get("type") or "",
                     "size": f.get("size") or 0,
+                    "processing_mode": f.get("processing_mode"),
+                    "context": f.get("context"),
                 })
 
     return result
@@ -1285,12 +1333,24 @@ def _get_attachment_file_id(file_item: Any) -> str:
     return str(file_id or "").strip()
 
 
+def _get_file_item_processing_mode(file_item: Any) -> str:
+    file_id = _get_attachment_file_id(file_item)
+    file_obj = Files.get_file_by_id(file_id) if file_id else None
+    return get_requested_processing_mode_for_file_item(
+        file_item,
+        file_obj=file_obj,
+        default_mode=FILE_PROCESSING_MODE_RETRIEVAL,
+    )
+
+
 def _is_native_file_input_candidate(file_item: Any) -> bool:
     if not isinstance(file_item, dict):
         return False
     if file_item.get("type") != "file":
         return False
     if file_item.get("source") == "knowledge":
+        return False
+    if _get_file_item_processing_mode(file_item) != FILE_PROCESSING_MODE_NATIVE_FILE:
         return False
     return bool(_get_attachment_file_id(file_item))
 
@@ -1327,6 +1387,144 @@ def _merge_message_content_with_native_file_inputs(
 
     parts.extend(file_parts)
     return parts
+
+
+def _anthropic_model_supports_native_file_mode(model: dict) -> bool:
+    if not isinstance(model, dict):
+        return False
+    return (model.get("owned_by") == "anthropic") or isinstance(
+        model.get("anthropic"), dict
+    )
+
+
+def _file_supports_anthropic_native_mode(file_obj: Any) -> bool:
+    if not file_obj or not getattr(file_obj, "meta", None):
+        return False
+    content_type = str((file_obj.meta or {}).get("content_type") or "").lower()
+    return content_type in _ANTHROPIC_NATIVE_DOCUMENT_MIME_TYPES or content_type in _ANTHROPIC_NATIVE_IMAGE_MIME_TYPES
+
+
+def _extend_native_file_inputs_for_anthropic(metadata: dict, model: dict) -> None:
+    if not _anthropic_model_supports_native_file_mode(model):
+        return
+
+    native_ids = {
+        str(file_id).strip()
+        for file_id in (metadata.get("native_file_input_file_ids") or [])
+        if str(file_id).strip()
+    }
+    for file_item in metadata.get("files") or []:
+        if _get_file_item_processing_mode(file_item) != FILE_PROCESSING_MODE_NATIVE_FILE:
+            continue
+        file_id = _get_attachment_file_id(file_item)
+        if not file_id:
+            continue
+        file_obj = Files.get_file_by_id(file_id)
+        if _file_supports_anthropic_native_mode(file_obj):
+            native_ids.add(file_id)
+
+    metadata["native_file_input_file_ids"] = list(native_ids)
+
+
+async def _ensure_requested_chat_file_modes(
+    request: Request,
+    metadata: dict,
+    user: UserModel,
+    model: dict,
+    event_emitter,
+) -> None:
+    regular_files = metadata.get("files") or []
+    if not isinstance(regular_files, list) or not regular_files:
+        return
+
+    _extend_native_file_inputs_for_anthropic(metadata, model)
+    native_ids = {
+        str(file_id).strip()
+        for file_id in (metadata.get("native_file_input_file_ids") or [])
+        if str(file_id).strip()
+    }
+    default_mode = normalize_file_processing_mode(
+        request.app.state.config.FILE_PROCESSING_DEFAULT_MODE,
+        FILE_PROCESSING_MODE_RETRIEVAL,
+    )
+    fallback_messages: list[str] = []
+
+    for file_item in regular_files:
+        if not isinstance(file_item, dict) or file_item.get("type") != "file":
+            continue
+
+        file_id = _get_attachment_file_id(file_item)
+        if not file_id:
+            continue
+
+        file_obj = Files.get_file_by_id(file_id)
+        if not file_obj:
+            continue
+
+        desired_mode = get_requested_processing_mode_for_file_item(
+            file_item,
+            file_obj=file_obj,
+            default_mode=default_mode,
+        )
+
+        if desired_mode == FILE_PROCESSING_MODE_NATIVE_FILE:
+            if file_id not in native_ids:
+                desired_mode = FILE_PROCESSING_MODE_FULL_CONTEXT
+                file_item["processing_mode"] = FILE_PROCESSING_MODE_FULL_CONTEXT
+                file_item["context"] = "full"
+                fallback_messages.append(file_obj.filename)
+            else:
+                file_item["processing_mode"] = FILE_PROCESSING_MODE_NATIVE_FILE
+                file_item.pop("context", None)
+        elif desired_mode == FILE_PROCESSING_MODE_FULL_CONTEXT:
+            file_item["processing_mode"] = FILE_PROCESSING_MODE_FULL_CONTEXT
+            file_item["context"] = "full"
+        else:
+            file_item["processing_mode"] = FILE_PROCESSING_MODE_RETRIEVAL
+            file_item.pop("context", None)
+
+        current_mode = get_file_effective_processing_mode(
+            file_obj, default_mode=default_mode
+        )
+        needs_processing = current_mode != desired_mode
+        if desired_mode == FILE_PROCESSING_MODE_RETRIEVAL and not (
+            (file_obj.meta or {}).get("collection_name")
+        ):
+            needs_processing = True
+        if desired_mode == FILE_PROCESSING_MODE_FULL_CONTEXT and not (
+            (file_obj.data or {}).get("content")
+        ):
+            needs_processing = True
+
+        if needs_processing:
+            await run_in_threadpool(
+                process_file,
+                request,
+                ProcessFileForm(file_id=file_id, processing_mode=desired_mode),
+                user,
+            )
+            refreshed = Files.get_file_by_id(file_id)
+            if refreshed:
+                file_item["file"] = refreshed.model_dump()
+                if refreshed.meta and refreshed.meta.get("collection_name"):
+                    file_item["collection_name"] = refreshed.meta.get("collection_name")
+
+    metadata["files"] = regular_files
+
+    if fallback_messages and event_emitter:
+        await event_emitter(
+            {
+                "type": "notification",
+                "data": {
+                    "type": "info",
+                    "content": (
+                        "Native file inputs are unavailable for "
+                        + ", ".join(fallback_messages)
+                        + ". Retrying with full document context."
+                    ),
+                },
+            }
+        )
 
 
 async def _prepare_openai_native_file_inputs(
@@ -1800,9 +1998,17 @@ async def chat_completion_tools_handler(
 
     try:
         response = await generate_chat_completion(request, form_data=payload, user=user)
-        log.debug(f"{response=}")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "structured_output_generation response_type=%s",
+                type(response).__name__,
+            )
         content = await get_content_from_response(response)
-        log.debug(f"{content=}")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "structured_output_generation content_len=%s",
+                len(content) if isinstance(content, str) else None,
+            )
 
         if not content:
             return body, {}
@@ -1942,7 +2148,8 @@ async def chat_completion_tools_handler(
         log.debug(f"Error: {e}")
         content = None
 
-    log.debug(f"tool_contexts: {sources}")
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("tool_contexts sources_count=%d", len(sources))
 
     if skip_files and "files" in body.get("metadata", {}):
         del body["metadata"]["files"]
@@ -2164,6 +2371,13 @@ async def chat_image_generation_handler(
 
     prompt = user_message
     negative_prompt = ""
+    image_generation_options = (
+        extra_params.get("__metadata__", {})
+        .get("image_generation_options", {})
+    )
+    image_generation_options = (
+        image_generation_options if isinstance(image_generation_options, dict) else {}
+    )
 
     if request.app.state.config.ENABLE_IMAGE_PROMPT_GENERATION:
         try:
@@ -2201,7 +2415,27 @@ async def chat_image_generation_handler(
     try:
         images = await image_generations(
             request=request,
-            form_data=GenerateImageForm(**{"prompt": prompt}),
+            form_data=GenerateImageForm(
+                **{
+                    "prompt": prompt,
+                    **{
+                        key: image_generation_options.get(key)
+                        for key in (
+                            "model",
+                            "size",
+                            "image_size",
+                            "aspect_ratio",
+                            "n",
+                            "negative_prompt",
+                            "credential_source",
+                            "connection_index",
+                            "steps",
+                            "background",
+                        )
+                        if image_generation_options.get(key) is not None
+                    },
+                }
+            ),
             user=user,
         )
 
@@ -2330,7 +2564,8 @@ async def chat_completion_files_handler(
         except Exception as e:
             log.exception(e)
 
-        log.debug(f"rag_contexts:sources: {sources}")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("rag_contexts sources_count=%d", len(sources))
 
     return body, {"sources": sources}
 
@@ -2384,7 +2619,11 @@ def apply_params_to_form_data(form_data, model):
 async def process_chat_payload(request, form_data, user, metadata, model):
 
     form_data = apply_params_to_form_data(form_data, model)
-    log.debug(f"form_data: {form_data}")
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug(
+            "process_chat_payload summary=%s",
+            _summarize_form_data_for_debug(form_data),
+        )
 
     event_emitter = get_event_emitter(metadata)
     event_call = get_event_call(metadata)
@@ -2485,6 +2724,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     features = form_data.pop("features", None)
     if features:
+        if isinstance(features.get("image_generation_options"), dict):
+            metadata["image_generation_options"] = features["image_generation_options"]
         web_search_strategy = _resolve_web_search_strategy(
             request, user, model, form_data.get("model", ""), features
         )
@@ -2581,6 +2822,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     except Exception as e:
         log.exception(e)
 
+    try:
+        await _ensure_requested_chat_file_modes(
+            request, metadata, user, model, event_emitter
+        )
+    except Exception as e:
+        log.exception(e)
+
     # Server side tools
     tool_ids = metadata.get("tool_ids", None)
     # Client side tools
@@ -2608,12 +2856,16 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         if any(str(tid).startswith("mcp:") for tid in tool_ids) and not getattr(
             request.state, "MCP_SERVERS", None
         ):
+            selected_mcp_indices = extract_selected_mcp_indices(tool_ids)
             request.state.MCP_SERVER_CONNECTIONS = get_user_mcp_server_connections(
                 request, user
             )
             request.state.MCP_SERVERS = await get_mcp_servers_data(
                 request.state.MCP_SERVER_CONNECTIONS,
                 session_token=request.state.token.credentials,
+                selected_indices=selected_mcp_indices,
+                strict_selected=True,
+                user_id=user.id,
             )
 
         tools_dict = get_tools(
@@ -3048,6 +3300,7 @@ async def process_chat_response(
                 response["choices"][0]["message"]["content"] = content
 
                 if content or message_files:
+                    completed_at = int(time.time())
 
                     await event_emitter(
                         {
@@ -3065,6 +3318,7 @@ async def process_chat_response(
                                 "done": True,
                                 "content": content,
                                 "title": title,
+                                "completedAt": completed_at,
                                 **({"files": message_files} if message_files else {}),
                             },
                         }
@@ -3076,6 +3330,8 @@ async def process_chat_response(
                         metadata["message_id"],
                         {
                             "content": content,
+                            "done": True,
+                            "completedAt": completed_at,
                             **({"files": message_files} if message_files else {}),
                         },
                     )
@@ -6603,10 +6859,12 @@ async def process_chat_response(
                             "suggestion": "retry_or_switch",
                         }
 
+                completed_at = int(time.time())
                 data = {
                     "done": True,
                     "content": serialize_content_blocks(content_blocks),
                     "title": title,
+                    "completedAt": completed_at,
                     **({"files": message_files} if message_files else {}),
                 }
 
@@ -6622,11 +6880,27 @@ async def process_chat_response(
                                 metadata["chat_id"],
                                 metadata["message_id"],
                                 {
+                                    "done": True,
+                                    "completedAt": completed_at,
                                     "usage": accumulated_usage,
                                 },
                             )
                         except Exception as e:
                             log.warning(f"Failed to persist usage for analytics: {e}")
+                elif ENABLE_REALTIME_CHAT_SAVE:
+                    try:
+                        Chats.upsert_message_to_chat_by_id_and_message_id(
+                            metadata["chat_id"],
+                            metadata["message_id"],
+                            {
+                                "done": True,
+                                "completedAt": completed_at,
+                            },
+                        )
+                    except Exception as e:
+                        log.warning(
+                            f"Failed to persist stream completion metadata: {e}"
+                        )
 
                 if finalize_error_payload:
                     data["error"] = finalize_error_payload
@@ -6647,6 +6921,8 @@ async def process_chat_response(
                     # Save message in the database
                     _save_payload = {
                         "content": serialize_content_blocks(content_blocks),
+                        "done": True,
+                        "completedAt": completed_at,
                         **({"files": message_files} if message_files else {}),
                     }
                     if accumulated_usage:
@@ -6658,6 +6934,12 @@ async def process_chat_response(
                         metadata["message_id"],
                         _save_payload,
                     )
+
+                # The assistant reply is already finalized at this point. Any remaining
+                # work is post-response bookkeeping (webhooks/title/tags/follow-ups),
+                # which should not make the refreshed UI think the last assistant
+                # message is still streaming.
+                set_current_task_blocks_completion(False)
 
                 # Send a webhook notification if the user is not active
                 if get_active_status_by_user_id(user.id) is None:

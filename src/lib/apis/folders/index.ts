@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { parseJsonResponse } from '../response';
 
 export const createNewFolder = async (token: string, name: string) => {
 	let error = null;
@@ -14,10 +15,7 @@ export const createNewFolder = async (token: string, name: string) => {
 			name: name
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;
@@ -41,10 +39,7 @@ export const getFolders = async (token: string = '') => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -72,10 +67,7 @@ export const getFolderById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -106,10 +98,7 @@ export const updateFolderNameById = async (token: string, id: string, name: stri
 			name: name
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -144,10 +133,7 @@ export const updateFolderIsExpandedById = async (
 			is_expanded: isExpanded
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -178,10 +164,7 @@ export const updateFolderParentIdById = async (token: string, id: string, parent
 			parent_id: parentId
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -217,10 +200,7 @@ export const updateFolderItemsById = async (token: string, id: string, items: Fo
 			items: items
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -248,10 +228,7 @@ export const deleteFolderById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -282,10 +259,7 @@ export const updateFolderIconById = async (token: string, id: string, icon: stri
 			icon: icon
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -317,10 +291,7 @@ export const updateFolderSystemPromptById = async (
 			system_prompt: systemPrompt
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);

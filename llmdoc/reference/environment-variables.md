@@ -91,6 +91,17 @@
 **`free-lite` 预设:** 使用 Jina 免费嵌入/重排序，Web STT
 **`openai-compatible-lite` 预设:** 使用 OpenAI 兼容 API，Docling 文档解析
 
+### 3.9 MCP / 工具服务器
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA` | 项目默认值 | HTTP MCP / Tool Server 请求超时 |
+| `AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL` | 空 | Tool Server / MCP HTTP SSL 校验配置 |
+| `MCP_TOOL_CALL_TIMEOUT` | 项目默认值 | MCP 工具调用超时 |
+| `MCP_STDIO_ALLOWED_COMMANDS` | 空 | 追加允许的 `stdio` 启动命令白名单 |
+| `MCP_STDIO_START_TIMEOUT` | 项目默认值 | `stdio` MCP 初始化超时 |
+| `MCP_STDIO_IDLE_TIMEOUT` | 项目默认值 | `stdio` MCP 空闲回收时间 |
+
 ## 4. Configuration Priority
 
 ```

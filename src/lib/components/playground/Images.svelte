@@ -20,6 +20,12 @@
 		import Sparkles from '$lib/components/icons/Sparkles.svelte';
 		import { WEBUI_NAME, settings, user } from '$lib/stores';
 		import { copyToClipboard } from '$lib/utils';
+		import {
+			GEMINI_IMAGE_SIZE_OPTIONS,
+			IMAGE_ASPECT_RATIO_OPTIONS,
+			mapLegacySizeToGeminiParams,
+			modelSupportsGeminiImageOptions
+		} from '$lib/utils/image-generation';
 
 		type GeneratedImage = {
 			url: string;
@@ -95,6 +101,8 @@
 	let selectedModel = '';
 	let defaultSize = '512x512';
 	let selectedSize = '512x512';
+	let selectedGeminiImageSize = '1K';
+	let selectedAspectRatio = '1:1';
 	let batchSize = 1;
 	let steps = 0;
 	let background: 'auto' | 'transparent' | 'opaque' = 'auto';
@@ -192,12 +200,26 @@
 		? curatedSizeOptions
 		: [{ value: defaultSize, ratio: $i18n.t('Default'), label: defaultSize }, ...curatedSizeOptions];
 
-		$: selectedModelLabel =
-			modelOptions.find((option) => option.value === selectedModel)?.label ?? selectedModel;
-		$: selectedModelMeta = imageModels.find((model) => model.id === selectedModel) ?? null;
-		$: supportsBackground = Boolean(selectedModelMeta?.supports_background);
-		$: supportsBatch = selectedModelMeta?.supports_batch ?? true;
-		$: availableBatchOptions = supportsBatch ? batchOptions : [1];
+	$: selectedModelLabel =
+		modelOptions.find((option) => option.value === selectedModel)?.label ?? selectedModel;
+	$: selectedModelMeta = imageModels.find((model) => model.id === selectedModel) ?? null;
+	$: supportsBackground = Boolean(selectedModelMeta?.supports_background);
+	$: supportsBatch = selectedModelMeta?.supports_batch ?? true;
+	$: isGeminiImageContext =
+		engine === 'gemini' && Boolean(selectedModelMeta) && modelSupportsGeminiImageOptions(selectedModelMeta);
+	$: showGeminiImageSizeControl = isGeminiImageContext && Boolean(selectedModelMeta?.supports_image_size);
+	$: showGeminiAspectRatioControl =
+		isGeminiImageContext &&
+		(selectedModelMeta?.size_mode === 'aspect_ratio' || Boolean(selectedModelMeta?.supports_image_size));
+	$: currentSizeSummaryLabel = isGeminiImageContext
+		? [
+				showGeminiImageSizeControl ? selectedGeminiImageSize : null,
+				showGeminiAspectRatioControl ? selectedAspectRatio : null
+			]
+				.filter(Boolean)
+				.join(' · ')
+		: selectedSize;
+	$: availableBatchOptions = supportsBatch ? batchOptions : [1];
 
 		$: {
 			engine = usageConfig?.engine ?? engine;
@@ -282,12 +304,21 @@
 			}
 		}
 
-		$: if (!supportsBackground) {
-			background = 'auto';
+	$: if (!supportsBackground) {
+		background = 'auto';
+	}
+	$: if (!supportsBatch && batchSize !== 1) {
+		batchSize = 1;
+	}
+	$: if (isGeminiImageContext) {
+		const mappedDefaults = mapLegacySizeToGeminiParams(defaultSize);
+		if (showGeminiImageSizeControl && !selectedGeminiImageSize && mappedDefaults.imageSize) {
+			selectedGeminiImageSize = mappedDefaults.imageSize;
 		}
-		$: if (!supportsBatch && batchSize !== 1) {
-			batchSize = 1;
+		if (showGeminiAspectRatioControl && !selectedAspectRatio && mappedDefaults.aspectRatio) {
+			selectedAspectRatio = mappedDefaults.aspectRatio;
 		}
+	}
 
 	const syncSelectedModelWithAvailableModels = (models: ImageGenerationModel[]) => {
 		const availableIds = new Set(
@@ -469,12 +500,17 @@
 		const request: any = {
 					prompt: trimmedPrompt,
 					model: selectedModel || undefined,
-					size: selectedSize || undefined,
 					n: batchSize,
 					negative_prompt: negativePrompt.trim() || undefined,
 					steps: steps > 0 ? steps : undefined,
 					background: supportsBackground && background !== 'auto' ? background : undefined
 				};
+				if (isGeminiImageContext) {
+					request.image_size = showGeminiImageSizeControl ? selectedGeminiImageSize || undefined : undefined;
+					request.aspect_ratio = showGeminiAspectRatioControl ? selectedAspectRatio || undefined : undefined;
+				} else {
+					request.size = selectedSize || undefined;
+				}
 
 				if (showCredentialControls) {
 					request.credential_source = credentialSource;
@@ -535,6 +571,13 @@
 			if (typeof defaults.size === 'string' && defaults.size) {
 				defaultSize = defaults.size;
 				selectedSize = defaults.size;
+				const mappedDefaults = mapLegacySizeToGeminiParams(defaults.size);
+				if (mappedDefaults.imageSize) {
+					selectedGeminiImageSize = mappedDefaults.imageSize;
+				}
+				if (mappedDefaults.aspectRatio) {
+					selectedAspectRatio = mappedDefaults.aspectRatio;
+				}
 			}
 			if (typeof defaults.model === 'string' && defaults.model) {
 				selectedModel = defaults.model;
@@ -736,15 +779,45 @@
 					</div>
 
 					<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-						<!-- Size -->
-						<div class="space-y-1.5">
-							<div class="text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Size')}</div>
-							<HaloSelect
-								bind:value={selectedSize}
-								options={sizeOptions.map((o) => ({ value: o.value, label: `${o.ratio} · ${o.label}` }))}
-								className="w-full text-xs"
-							/>
-						</div>
+						{#if isGeminiImageContext}
+							{#if showGeminiImageSizeControl}
+								<div class="space-y-1.5">
+									<div class="text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Image Size')}</div>
+									<HaloSelect
+										bind:value={selectedGeminiImageSize}
+										options={GEMINI_IMAGE_SIZE_OPTIONS.map((option) => ({
+											value: option.value,
+											label: `${option.value} · ${option.pixels}`
+										}))}
+										className="w-full text-xs"
+									/>
+								</div>
+							{/if}
+
+							{#if showGeminiAspectRatioControl}
+								<div class="space-y-1.5">
+									<div class="text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Aspect Ratio')}</div>
+									<HaloSelect
+										bind:value={selectedAspectRatio}
+										options={IMAGE_ASPECT_RATIO_OPTIONS.map((option) => ({
+											value: option.value,
+											label: option.label
+										}))}
+										className="w-full text-xs"
+									/>
+								</div>
+							{/if}
+						{:else}
+							<!-- Size -->
+							<div class="space-y-1.5">
+								<div class="text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Size')}</div>
+								<HaloSelect
+									bind:value={selectedSize}
+									options={sizeOptions.map((o) => ({ value: o.value, label: `${o.ratio} · ${o.label}` }))}
+									className="w-full text-xs"
+								/>
+							</div>
+						{/if}
 
 						<!-- Output Count -->
 						<div class="space-y-1.5">
@@ -949,7 +1022,7 @@
 									<div
 										class="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/70 via-black/20 to-transparent p-3 text-white opacity-0 transition duration-200 group-hover:opacity-100"
 									>
-										<div class="text-xs font-medium">{selectedSize}</div>
+										<div class="text-xs font-medium">{currentSizeSummaryLabel}</div>
 										<div class="flex items-center gap-2">
 											<button
 												type="button"
@@ -1121,7 +1194,7 @@
 									{$i18n.t('Size')}
 								</div>
 								<div class="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">
-									{selectedSize}
+									{currentSizeSummaryLabel}
 								</div>
 							</div>
 							<div
@@ -1336,7 +1409,7 @@
 										<div class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
 											{selectedModelLabel || $i18n.t('No models available')}
 											<br />
-											{selectedSize}
+											{currentSizeSummaryLabel}
 											<br />
 											x{batchSize}
 											{#if steps > 0}
@@ -1376,27 +1449,74 @@
 									{/if}
 								</div>
 
-								<div class="space-y-2">
-									<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
-										{$i18n.t('Size')}
+								{#if isGeminiImageContext}
+									{#if showGeminiImageSizeControl}
+										<div class="space-y-2">
+											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+												{$i18n.t('Image Size')}
+											</div>
+											<div class="grid gap-2 sm:grid-cols-4">
+												{#each GEMINI_IMAGE_SIZE_OPTIONS as option}
+													<button
+														type="button"
+														class={segmentedButtonClass(selectedGeminiImageSize === option.value)}
+														on:click={() => {
+															selectedGeminiImageSize = option.value;
+														}}
+													>
+														<span class="text-xs font-semibold uppercase tracking-[0.14em] opacity-70">
+															{option.value}
+														</span>
+														<span class="mt-1 text-sm font-semibold">{option.pixels}</span>
+													</button>
+												{/each}
+											</div>
+										</div>
+									{/if}
+
+									{#if showGeminiAspectRatioControl}
+										<div class="space-y-2">
+											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+												{$i18n.t('Aspect Ratio')}
+											</div>
+											<div class="grid gap-2 sm:grid-cols-5">
+												{#each IMAGE_ASPECT_RATIO_OPTIONS as option}
+													<button
+														type="button"
+														class={segmentedButtonClass(selectedAspectRatio === option.value)}
+														on:click={() => {
+															selectedAspectRatio = option.value;
+														}}
+													>
+														<span class="text-sm font-semibold">{option.label}</span>
+													</button>
+												{/each}
+											</div>
+										</div>
+									{/if}
+								{:else}
+									<div class="space-y-2">
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+											{$i18n.t('Size')}
+										</div>
+										<div class="grid gap-2 sm:grid-cols-3">
+											{#each sizeOptions as option}
+												<button
+													type="button"
+													class={segmentedButtonClass(selectedSize === option.value)}
+													on:click={() => {
+														selectedSize = option.value;
+													}}
+												>
+													<span class="text-xs font-semibold uppercase tracking-[0.14em] opacity-70">
+														{option.ratio}
+													</span>
+													<span class="mt-1 text-sm font-semibold">{option.label}</span>
+												</button>
+											{/each}
+										</div>
 									</div>
-									<div class="grid gap-2 sm:grid-cols-3">
-										{#each sizeOptions as option}
-											<button
-												type="button"
-												class={segmentedButtonClass(selectedSize === option.value)}
-												on:click={() => {
-													selectedSize = option.value;
-												}}
-											>
-												<span class="text-xs font-semibold uppercase tracking-[0.14em] opacity-70">
-													{option.ratio}
-												</span>
-												<span class="mt-1 text-sm font-semibold">{option.label}</span>
-											</button>
-										{/each}
-									</div>
-								</div>
+								{/if}
 
 								<div class="grid gap-5 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
 									<div class="space-y-2">
@@ -1540,7 +1660,7 @@
 													class="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/70 via-black/20 to-transparent p-3 text-white opacity-0 transition duration-200 group-hover:opacity-100"
 												>
 													<div class="text-xs font-medium">
-														{selectedSize}
+														{currentSizeSummaryLabel}
 													</div>
 													<div class="flex items-center gap-2">
 														<button
@@ -1603,7 +1723,7 @@
 					<span
 						class="rounded-full border border-gray-200 bg-white px-3 py-1 dark:border-gray-800 dark:bg-gray-900"
 					>
-						{selectedSize}
+						{currentSizeSummaryLabel}
 					</span>
 					<span
 						class="rounded-full border border-gray-200 bg-white px-3 py-1 dark:border-gray-800 dark:bg-gray-900"

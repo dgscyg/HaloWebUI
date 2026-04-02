@@ -67,15 +67,7 @@
 	};
 
 	$: activeTabMeta = tabMeta[selectedTab];
-	$: visibleTabs = RAGConfig.BYPASS_EMBEDDING_AND_RETRIEVAL
-		? (['general', 'danger'] as const)
-		: (['general', 'embedding', 'retrieval', 'danger'] as const);
-	$: if (
-		RAGConfig.BYPASS_EMBEDDING_AND_RETRIEVAL &&
-		(selectedTab === 'embedding' || selectedTab === 'retrieval')
-	) {
-		selectedTab = 'general';
-	}
+	$: visibleTabs = ['general', 'embedding', 'retrieval', 'danger'] as const;
 	$: currentTabDirty = selectedTab === 'danger' ? false : (dirtySections[selectedTab] ?? false);
 
 	const resetCurrentTab = () => {
@@ -122,7 +114,62 @@
 	let OllamaUrl = '';
 	let OllamaKey = '';
 
+	const defaultDocumentProviderConfigs = {
+		local_default: {},
+		mineru: {
+			api_base_url: 'https://mineru.net',
+			api_key: '',
+			token: '',
+			model_version: 'vlm',
+			language: '',
+			page_range: '',
+			enable_formula: true,
+			enable_table: true,
+			is_ocr: false
+		},
+		open_mineru: {
+			api_base_url: 'https://mineru.net',
+			language: '',
+			page_range: '',
+			enable_formula: true,
+			enable_table: true,
+			is_ocr: false
+		},
+		doc2x: {
+			api_base_url: 'https://v2.doc2x.noedgeai.com',
+			api_key: ''
+		},
+		paddleocr: {
+			server_url: ''
+		},
+		mistral: {
+			api_key: ''
+		},
+		azure_document_intelligence: {
+			endpoint: '',
+			key: ''
+		}
+	};
+
+	const mergeProviderConfigs = (value: any = {}) => {
+		const merged = structuredClone(defaultDocumentProviderConfigs);
+		for (const [provider, config] of Object.entries(value ?? {})) {
+			merged[provider] = { ...(merged[provider] ?? {}), ...(config as Record<string, any>) };
+		}
+		return merged;
+	};
+
+	const normalizeDocumentsSettings = (value: any) => ({
+		...value,
+		FILE_PROCESSING_DEFAULT_MODE: value?.FILE_PROCESSING_DEFAULT_MODE ?? 'retrieval',
+		DOCUMENT_PROVIDER: value?.DOCUMENT_PROVIDER ?? 'local_default',
+		DOCUMENT_PROVIDER_CONFIGS: mergeProviderConfigs(value?.DOCUMENT_PROVIDER_CONFIGS)
+	});
+
 	let RAGConfig: any = {
+		FILE_PROCESSING_DEFAULT_MODE: 'retrieval',
+		DOCUMENT_PROVIDER: 'local_default',
+		DOCUMENT_PROVIDER_CONFIGS: mergeProviderConfigs(),
 		CONTENT_EXTRACTION_ENGINE: '',
 		PDF_EXTRACT_IMAGES: false,
 		PDF_LOADING_MODE: '',
@@ -152,6 +199,9 @@
 
 	const buildSnapshot = () => ({
 		general: {
+			FILE_PROCESSING_DEFAULT_MODE: RAGConfig?.FILE_PROCESSING_DEFAULT_MODE,
+			DOCUMENT_PROVIDER: RAGConfig?.DOCUMENT_PROVIDER,
+			DOCUMENT_PROVIDER_CONFIGS: RAGConfig?.DOCUMENT_PROVIDER_CONFIGS,
 			CONTENT_EXTRACTION_ENGINE: RAGConfig?.CONTENT_EXTRACTION_ENGINE,
 			PDF_EXTRACT_IMAGES: RAGConfig?.PDF_EXTRACT_IMAGES,
 			PDF_LOADING_MODE: RAGConfig?.PDF_LOADING_MODE,
@@ -160,7 +210,6 @@
 			DOCUMENT_INTELLIGENCE_ENDPOINT: RAGConfig?.DOCUMENT_INTELLIGENCE_ENDPOINT,
 			DOCUMENT_INTELLIGENCE_KEY: RAGConfig?.DOCUMENT_INTELLIGENCE_KEY,
 			MISTRAL_OCR_API_KEY: RAGConfig?.MISTRAL_OCR_API_KEY,
-			BYPASS_EMBEDDING_AND_RETRIEVAL: RAGConfig?.BYPASS_EMBEDDING_AND_RETRIEVAL,
 			TEXT_SPLITTER: RAGConfig?.TEXT_SPLITTER,
 			CHUNK_SIZE: RAGConfig?.CHUNK_SIZE,
 			CHUNK_OVERLAP: RAGConfig?.CHUNK_OVERLAP,
@@ -377,6 +426,23 @@
 	};
 
 	const submitHandler = async () => {
+		const providerConfig = RAGConfig.DOCUMENT_PROVIDER_CONFIGS?.[RAGConfig.DOCUMENT_PROVIDER] ?? {};
+		if (RAGConfig.DOCUMENT_PROVIDER === 'mineru' && providerConfig.api_key === '') {
+			toast.error('MinerU API Key required.');
+			return;
+		}
+		if (RAGConfig.DOCUMENT_PROVIDER === 'doc2x' && providerConfig.api_key === '') {
+			toast.error('Doc2x API Key required.');
+			return;
+		}
+		if (RAGConfig.DOCUMENT_PROVIDER === 'paddleocr' && providerConfig.server_url === '') {
+			toast.error('PaddleOCR Server URL required.');
+			return;
+		}
+		if (RAGConfig.DOCUMENT_PROVIDER === 'mistral' && providerConfig.api_key === '') {
+			toast.error('Mistral OCR API Key required.');
+			return;
+		}
 		if (RAGConfig.CONTENT_EXTRACTION_ENGINE === 'tika' && RAGConfig.TIKA_SERVER_URL === '') {
 			toast.error($i18n.t('Tika Server URL required.'));
 			return;
@@ -405,7 +471,7 @@
 			return;
 		}
 
-		if (!RAGConfig.BYPASS_EMBEDDING_AND_RETRIEVAL) {
+		if (RAGConfig.FILE_PROCESSING_DEFAULT_MODE === 'retrieval') {
 			const embeddingUpdated = await embeddingModelUpdateHandler();
 			if (!embeddingUpdated) {
 				return;
@@ -459,7 +525,7 @@
 			getRAGConfig(localStorage.token)
 		]);
 
-		RAGConfig = ragRes;
+		RAGConfig = normalizeDocumentsSettings(ragRes ?? {});
 		runtimeCapabilities = ragRes?.capabilities ?? runtimeCapabilities;
 		await tick();
 		await tick();
@@ -625,15 +691,141 @@
 					<div class="space-y-3">
 						<div class="glass-item p-5">
 							<div class="mb-3 flex items-center justify-between gap-4">
-								<div class="text-sm font-medium">{$i18n.t('Content Extraction Engine')}</div>
+								<div class="text-sm font-medium">默认文件处理模式</div>
+								<HaloSelect
+									bind:value={RAGConfig.FILE_PROCESSING_DEFAULT_MODE}
+									options={[
+										{ value: 'retrieval', label: '检索模式' },
+										{ value: 'full_context', label: '完整上下文模式' },
+										{ value: 'native_file', label: '原生文件模式' }
+									]}
+									className="w-fit"
+								/>
+							</div>
+							<div class="text-xs text-gray-500 dark:text-gray-400">
+								{#if RAGConfig.FILE_PROCESSING_DEFAULT_MODE === 'retrieval'}
+									上传后立即解析、切分并建立向量索引，适合知识库与长文档问答。
+								{:else if RAGConfig.FILE_PROCESSING_DEFAULT_MODE === 'full_context'}
+									上传后只提取全文，不建立索引；发送消息时整份注入模型上下文。
+								{:else}
+									上传后只保存原文件，不做本地解析；优先直接交给支持原生文件输入的模型。
+								{/if}
+							</div>
+						</div>
+
+						<div class="glass-item p-5">
+							<div class="mb-3 flex items-center justify-between gap-4">
+								<div class="text-sm font-medium">文档处理服务商</div>
+								<HaloSelect
+									bind:value={RAGConfig.DOCUMENT_PROVIDER}
+									options={[
+										{ value: 'local_default', label: '本地默认' },
+										{ value: 'mineru', label: 'MinerU' },
+										{ value: 'open_mineru', label: 'Open MinerU' },
+										{ value: 'doc2x', label: 'Doc2x' },
+										{ value: 'paddleocr', label: 'PaddleOCR' },
+										{ value: 'mistral', label: 'Mistral' }
+									]}
+									className="w-fit"
+								/>
+							</div>
+
+							{#if RAGConfig.DOCUMENT_PROVIDER === 'mineru'}
+								<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+									<div>
+										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API Base URL</div>
+										<input
+											class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+											bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.mineru.api_base_url}
+										/>
+									</div>
+									<div>
+										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API Key</div>
+										<SensitiveInput
+											placeholder="MinerU API Key"
+											bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.mineru.api_key}
+										/>
+									</div>
+									<div>
+										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">Token</div>
+										<input
+											class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+											placeholder="可留空，默认使用用户 ID"
+											bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.mineru.token}
+										/>
+									</div>
+									<div>
+										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">Model Version</div>
+										<HaloSelect
+											bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.mineru.model_version}
+											options={[
+												{ value: 'vlm', label: 'VLM' },
+												{ value: 'pipeline', label: 'Pipeline' }
+											]}
+											className="w-full"
+										/>
+									</div>
+								</div>
+							{:else if RAGConfig.DOCUMENT_PROVIDER === 'open_mineru'}
+								<div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API Base URL</div>
+									<input
+										class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+										bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.open_mineru.api_base_url}
+									/>
+								</div>
+							{:else if RAGConfig.DOCUMENT_PROVIDER === 'doc2x'}
+								<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+									<div>
+										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API Base URL</div>
+										<input
+											class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+											bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.doc2x.api_base_url}
+										/>
+									</div>
+									<div>
+										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API Key</div>
+										<SensitiveInput
+											placeholder="Doc2x API Key"
+											bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.doc2x.api_key}
+										/>
+									</div>
+								</div>
+							{:else if RAGConfig.DOCUMENT_PROVIDER === 'paddleocr'}
+								<div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">Server URL</div>
+									<input
+										class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+										placeholder="http://localhost:8080/ocr"
+										bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.paddleocr.server_url}
+									/>
+								</div>
+							{:else if RAGConfig.DOCUMENT_PROVIDER === 'mistral'}
+								<div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API Key</div>
+									<SensitiveInput
+										placeholder="Mistral API Key"
+										bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.mistral.api_key}
+									/>
+								</div>
+							{:else}
+								<div class="text-xs text-gray-500 dark:text-gray-400">
+									当前使用内置本地解析链路。下面的“高级自建解析”可继续切换为 Tika、Docling 或 Azure Document Intelligence。
+								</div>
+							{/if}
+						</div>
+
+						<div class="glass-item p-5">
+							<div class="mb-3 flex items-center justify-between gap-4">
+								<div class="text-sm font-medium">高级自建解析</div>
 								<HaloSelect
 									bind:value={RAGConfig.CONTENT_EXTRACTION_ENGINE}
 									options={[
-										{ value: '', label: $i18n.t('Default') },
-										{ value: 'tika', label: $i18n.t('Tika') },
-										{ value: 'docling', label: $i18n.t('Docling') },
-										{ value: 'document_intelligence', label: $i18n.t('Document Intelligence') },
-										{ value: 'mistral_ocr', label: $i18n.t('Mistral OCR') }
+										{ value: '', label: '本地默认解析' },
+										{ value: 'tika', label: 'Tika' },
+										{ value: 'docling', label: 'Docling' },
+										{ value: 'document_intelligence', label: 'Azure Document Intelligence' },
+										{ value: 'mistral_ocr', label: 'Mistral OCR (兼容)' }
 									]}
 									className="w-fit"
 								/>
@@ -676,28 +868,23 @@
 							{:else if RAGConfig.CONTENT_EXTRACTION_ENGINE === 'document_intelligence'}
 								<div class="mt-2 space-y-3">
 									<div>
-										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-											{$i18n.t('Document Intelligence Endpoint')}
-										</div>
 										<input
 											class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
-											placeholder={$i18n.t('Enter Document Intelligence Endpoint')}
+											placeholder="Azure Document Intelligence Endpoint"
 											bind:value={RAGConfig.DOCUMENT_INTELLIGENCE_ENDPOINT}
 										/>
 									</div>
 									<div>
-										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('API Key')}</div>
 										<SensitiveInput
-											placeholder={$i18n.t('Enter Document Intelligence Key')}
+											placeholder="Azure Document Intelligence Key"
 											bind:value={RAGConfig.DOCUMENT_INTELLIGENCE_KEY}
 										/>
 									</div>
 								</div>
 							{:else if RAGConfig.CONTENT_EXTRACTION_ENGINE === 'mistral_ocr'}
 								<div class="mt-2">
-									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('API Key')}</div>
 									<SensitiveInput
-										placeholder={$i18n.t('Enter Mistral API Key')}
+										placeholder="Mistral API Key"
 										bind:value={RAGConfig.MISTRAL_OCR_API_KEY}
 									/>
 								</div>
@@ -705,84 +892,61 @@
 						</div>
 
 						<div class="glass-item p-5">
-							<div class="flex items-center justify-between gap-4">
-								<div class="text-sm font-medium">
-									<Tooltip content={$i18n.t('Full Context Mode')} placement="top-start">
-										{$i18n.t('Bypass Embedding and Retrieval')}
-									</Tooltip>
-								</div>
-								<Tooltip
-									content={RAGConfig.BYPASS_EMBEDDING_AND_RETRIEVAL
-										? $i18n.t(
-												'Inject the entire content as context for comprehensive processing, this is recommended for complex queries.'
-											)
-										: $i18n.t(
-												'Default to segmented retrieval for focused and relevant content extraction, this is recommended for most cases.'
-											)}
-								>
-									<Switch bind:state={RAGConfig.BYPASS_EMBEDDING_AND_RETRIEVAL} />
-								</Tooltip>
+							<div class="mb-3 flex items-center justify-between gap-4">
+								<div class="text-sm font-medium">{$i18n.t('Text Splitter')}</div>
+								<HaloSelect
+									bind:value={RAGConfig.TEXT_SPLITTER}
+									options={[
+										{
+											value: '',
+											label: `${$i18n.t('Default')} (${$i18n.t('Character')})`
+										},
+										{
+											value: 'token',
+											label: `${$i18n.t('Token')} (${$i18n.t('Tiktoken')})`
+										},
+										{ value: 'markdown', label: $i18n.t('Markdown Header') }
+									]}
+									className="w-fit"
+								/>
 							</div>
-						</div>
 
-						{#if !RAGConfig.BYPASS_EMBEDDING_AND_RETRIEVAL}
-							<div class="glass-item p-5">
-								<div class="mb-3 flex items-center justify-between gap-4">
-									<div class="text-sm font-medium">{$i18n.t('Text Splitter')}</div>
-									<HaloSelect
-										bind:value={RAGConfig.TEXT_SPLITTER}
-										options={[
-											{
-												value: '',
-												label: `${$i18n.t('Default')} (${$i18n.t('Character')})`
-											},
-											{
-												value: 'token',
-												label: `${$i18n.t('Token')} (${$i18n.t('Tiktoken')})`
-											},
-											{ value: 'markdown', label: $i18n.t('Markdown Header') }
-										]}
-										className="w-fit"
+							<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+								<div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Chunk Size')}</div>
+									<input
+										class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+										type="number"
+										placeholder={$i18n.t('Enter Chunk Size')}
+										bind:value={RAGConfig.CHUNK_SIZE}
+										autocomplete="off"
+										min="0"
 									/>
 								</div>
-
-								<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-									<div>
-										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Chunk Size')}</div>
-										<input
-											class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
-											type="number"
-											placeholder={$i18n.t('Enter Chunk Size')}
-											bind:value={RAGConfig.CHUNK_SIZE}
-											autocomplete="off"
-											min="0"
-										/>
-									</div>
-									<div>
-										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Chunk Overlap')}</div>
-										<input
-											class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
-											type="number"
-											placeholder={$i18n.t('Enter Chunk Overlap')}
-											bind:value={RAGConfig.CHUNK_OVERLAP}
-											autocomplete="off"
-											min="0"
-										/>
-									</div>
-									<div>
-										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Min Chunk Size')}</div>
-										<input
-											class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
-											type="number"
-											placeholder={$i18n.t('0 = disabled')}
-											bind:value={RAGConfig.CHUNK_MIN_SIZE}
-											autocomplete="off"
-											min="0"
-										/>
-									</div>
+								<div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Chunk Overlap')}</div>
+									<input
+										class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+										type="number"
+										placeholder={$i18n.t('Enter Chunk Overlap')}
+										bind:value={RAGConfig.CHUNK_OVERLAP}
+										autocomplete="off"
+										min="0"
+									/>
+								</div>
+								<div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Min Chunk Size')}</div>
+									<input
+										class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+										type="number"
+										placeholder={$i18n.t('0 = disabled')}
+										bind:value={RAGConfig.CHUNK_MIN_SIZE}
+										autocomplete="off"
+										min="0"
+									/>
 								</div>
 							</div>
-						{/if}
+						</div>
 
 						<div class="glass-item p-5">
 							<div class="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">{$i18n.t('File Limits')}</div>

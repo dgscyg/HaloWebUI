@@ -318,6 +318,9 @@
 		return base ? base.toString() : null;
 	};
 
+	const isBaseModelOption = (candidate: any) =>
+		(candidate?.info?.base_model_id ?? candidate?.base_model_id ?? null) == null;
+
 	const addUsage = (base_model_id) => {
 		const baseModel = $models.find((m) => m.id === base_model_id);
 
@@ -462,7 +465,10 @@
 
 			if (model.base_model_id) {
 				const base_model = $models
-					.filter((m) => !m?.preset)
+					// Shared base models can be marked as preset by the backend when injected
+					// from the owner's connections, so we must detect true base models by
+					// the absence of an upstream base_model_id instead of `preset`.
+					.filter((m) => isBaseModelOption(m))
 					.find((m) => [model.base_model_id, `${model.base_model_id}:latest`].includes(m.id));
 
 				console.log('base_model', base_model);
@@ -773,10 +779,12 @@
 										bind:value={info.base_model_id}
 										options={[
 											{ value: null, label: $i18n.t('Select a base model') },
-											...$models.filter((m) => (model ? m.id !== model.id : true) && !m?.preset).map((m) => ({
-												value: m.id,
-												label: getModelChatDisplayName(m)
-											}))
+											...$models
+												.filter((m) => (model ? m.id !== model.id : true) && isBaseModelOption(m))
+												.map((m) => ({
+													value: m.id,
+													label: getModelChatDisplayName(m)
+												}))
 										]}
 										placeholder={$i18n.t('Select a base model (e.g. llama3, gpt-4o)')}
 										className="w-full"

@@ -237,6 +237,10 @@
 				fileItem.id = uploadedFile.id;
 				fileItem.collection_name =
 					uploadedFile?.meta?.collection_name || uploadedFile?.collection_name;
+				fileItem.processing_mode = uploadedFile?.meta?.processing_mode;
+				if (uploadedFile?.meta?.processing_mode === 'full_context') {
+					fileItem.context = 'full';
+				}
 				fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
 
 				files = files;

@@ -4,6 +4,7 @@ import { applyModelIcons } from '$lib/utils/model-icons';
 
 import { parse } from 'yaml';
 import { toast } from 'svelte-sonner';
+import { parseJsonResponse, parseTextResponse } from './response';
 
 export const getModels = async (
 	token: string = '',
@@ -19,10 +20,7 @@ export const getModels = async (
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err;
 			console.log(err);
@@ -60,10 +58,7 @@ export const chatCompleted = async (token: string, body: ChatCompletedForm) => {
 		},
 		body: JSON.stringify(body)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -99,10 +94,7 @@ export const chatAction = async (token: string, action_id: string, body: ChatAct
 		},
 		body: JSON.stringify(body)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -131,10 +123,7 @@ export const stopTask = async (token: string, id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -163,10 +152,7 @@ export const getTaskIdsByChatId = async (token: string, chat_id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -198,12 +184,10 @@ export const getToolServerData = async (token: string, url: string) => {
 		.then(async (res) => {
 			// Check if URL ends with .yaml or .yml to determine format
 			if (url.toLowerCase().endsWith('.yaml') || url.toLowerCase().endsWith('.yml')) {
-				if (!res.ok) throw await res.text();
-				const text = await res.text();
+				const text = await parseTextResponse(res);
 				return parse(text);
 			} else {
-				if (!res.ok) throw await res.json();
-				return res.json();
+				return parseJsonResponse(res);
 			}
 		})
 		.catch((err) => {
@@ -378,10 +362,7 @@ export const getTaskConfig = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -407,10 +388,7 @@ export const updateTaskConfig = async (token: string, config: object) => {
 		},
 		body: JSON.stringify(config)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -449,10 +427,7 @@ export const generateTitle = async (
 			...(chat_id && { chat_id: chat_id })
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -489,10 +464,7 @@ export const generateTags = async (
 			...(chat_id && { chat_id: chat_id })
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -561,10 +533,7 @@ export const generateEmoji = async (
 			...(chat_id && { chat_id: chat_id })
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -611,10 +580,7 @@ export const generateQueries = async (
 			type: type
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -683,10 +649,7 @@ export const generateAutoCompletion = async (
 			stream: false
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -774,10 +737,7 @@ export const getBackendConfig = async () => {
 			'Content-Type': 'application/json'
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -800,10 +760,7 @@ export const getChangelog = async () => {
 			'Content-Type': 'application/json'
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -827,10 +784,7 @@ export const getVersionUpdates = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -854,10 +808,7 @@ export const getModelFilterConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -889,10 +840,7 @@ export const updateModelFilterConfig = async (
 			models: models
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -916,10 +864,7 @@ export const getWebhookUrl = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -946,10 +891,7 @@ export const updateWebhookUrl = async (token: string, url: string) => {
 			url: url
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -973,10 +915,7 @@ export const getCommunitySharingEnabledStatus = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -1000,10 +939,7 @@ export const toggleCommunitySharingEnabledStatus = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -1027,10 +963,7 @@ export const getModelConfig = async (token: string): Promise<GlobalModelConfig> 
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -1075,10 +1008,7 @@ export const updateModelConfig = async (token: string, config: GlobalModelConfig
 			models: config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;

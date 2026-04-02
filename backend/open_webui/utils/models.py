@@ -37,6 +37,7 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 _base_model_cache: dict[str, tuple[float, list]] = {}
 _base_model_refresh_tasks: dict[str, asyncio.Task[list]] = {}
 _BASE_MODEL_CACHE_TTL = 5 * 60  # seconds
+_BASE_MODEL_CACHE_MAX_ENTRIES = 64
 _BASE_MODEL_FETCH_TIMEOUT = (
     min(float(AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST), 5.0)
     if isinstance(AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST, (int, float))
@@ -49,9 +50,26 @@ def _get_base_model_cache_key(user: Optional[UserModel]) -> str:
 
 
 def _evict_stale_base_model_cache(now: float) -> None:
-    stale_keys = [k for k, (ts, _) in _base_model_cache.items() if now - ts > (_BASE_MODEL_CACHE_TTL * 2)]
+    stale_keys = [
+        k
+        for k, (ts, _) in _base_model_cache.items()
+        if now - ts > (_BASE_MODEL_CACHE_TTL * 2)
+    ]
     for k in stale_keys:
         _base_model_cache.pop(k, None)
+
+    overflow = len(_base_model_cache) - _BASE_MODEL_CACHE_MAX_ENTRIES
+    if overflow <= 0:
+        return
+
+    oldest_keys = [
+        cache_key
+        for cache_key, _ in sorted(
+            _base_model_cache.items(), key=lambda item: item[1][0]
+        )[:overflow]
+    ]
+    for cache_key in oldest_keys:
+        _base_model_cache.pop(cache_key, None)
 
 
 def invalidate_base_model_cache(user_id: Optional[str] = None) -> None:
@@ -196,6 +214,7 @@ async def get_all_base_models(request: Request, user: UserModel = None):
 
     cache_key = _get_base_model_cache_key(user)
     now = time.time()
+    _evict_stale_base_model_cache(now)
     cached = _base_model_cache.get(cache_key)
     if cached:
         ts, models = cached
@@ -414,6 +433,7 @@ async def get_all_models(request, user: UserModel = None):
         else:
             function_module, _, _ = load_function_module_by_id(function_id)
             request.app.state.FUNCTIONS[function_id] = function_module
+        return function_module
 
     for model in models:
         action_ids = [
@@ -424,14 +444,28 @@ async def get_all_models(request, user: UserModel = None):
 
         model["actions"] = []
         for action_id in action_ids:
-            action_function = Functions.get_function_by_id(action_id)
-            if action_function is None:
-                raise Exception(f"Action not found: {action_id}")
+            try:
+                action_function = Functions.get_function_by_id(action_id)
+                if action_function is None:
+                    log.warning(
+                        "Skipping missing action while building models list: %s",
+                        action_id,
+                    )
+                    continue
 
-            function_module = get_function_module_by_id(action_id)
-            model["actions"].extend(
-                get_action_items_from_module(action_function, function_module)
-            )
+                function_module = get_function_module_by_id(action_id)
+                model["actions"].extend(
+                    get_action_items_from_module(action_function, function_module)
+                )
+            except Exception as e:
+                log.warning(
+                    "Skipping action %s for model %s while building models list: %s: %s",
+                    action_id,
+                    model.get("id"),
+                    type(e).__name__,
+                    e,
+                )
+                continue
     log.debug(f"get_all_models() returned {len(models)} models")
 
     # Per-request model map (avoid leaking across users).

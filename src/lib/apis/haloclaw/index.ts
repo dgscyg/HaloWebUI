@@ -1,4 +1,5 @@
 import { HALOCLAW_API_BASE_URL } from '$lib/constants';
+import { parseJsonResponse } from '../response';
 
 // ---------------------------------------------------------------------------
 // Global Config
@@ -12,10 +13,7 @@ export const getHaloClawConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error('getHaloClawConfig error:', err);
 			return null;
@@ -32,10 +30,7 @@ export const updateHaloClawConfig = async (token: string, config: Record<string,
 		},
 		body: JSON.stringify(config)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error('updateHaloClawConfig error:', err);
 			throw err.detail || err;
@@ -55,10 +50,7 @@ export const getGateways = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error('getGateways error:', err);
 			return [];
@@ -75,10 +67,7 @@ export const createGateway = async (token: string, data: Record<string, any>) =>
 		},
 		body: JSON.stringify(data)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error('createGateway error:', err);
 			throw err.detail || err;
@@ -95,10 +84,7 @@ export const updateGateway = async (token: string, id: string, data: Record<stri
 		},
 		body: JSON.stringify(data)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error('updateGateway error:', err);
 			throw err.detail || err;
@@ -115,10 +101,7 @@ export const toggleGateway = async (token: string, id: string, enabled: boolean)
 		},
 		body: JSON.stringify({ enabled })
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error('toggleGateway error:', err);
 			throw err.detail || err;
@@ -134,10 +117,7 @@ export const deleteGateway = async (token: string, id: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error('deleteGateway error:', err);
 			throw err.detail || err;
@@ -157,10 +137,7 @@ export const getExternalUsers = async (token: string, gatewayId: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error('getExternalUsers error:', err);
 			return [];
@@ -181,10 +158,7 @@ export const updateExternalUserModelOverride = async (
 		},
 		body: JSON.stringify({ model_override: modelOverride })
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error('updateExternalUserModelOverride error:', err);
 			throw err.detail || err;
@@ -204,10 +178,7 @@ export const getMessageLogs = async (token: string, gatewayId: string, limit = 1
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error('getMessageLogs error:', err);
 			return [];
@@ -231,10 +202,7 @@ export const getUserMessageLogs = async (
 			}
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.error('getUserMessageLogs error:', err);
 			return [];

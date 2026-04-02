@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { parseJsonResponse } from '../response';
 
 export const getNotes = async (token: string = '') => {
 	let error = null;
@@ -10,10 +11,7 @@ export const getNotes = async (token: string = '') => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;
@@ -31,10 +29,7 @@ export const getNoteById = async (token: string, noteId: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;
@@ -54,10 +49,7 @@ export const createNewNote = async (token: string, note: object) => {
 		},
 		body: JSON.stringify({ ...note })
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;
@@ -77,10 +69,7 @@ export const updateNoteById = async (token: string, noteId: string, note: object
 		},
 		body: JSON.stringify({ ...note })
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;
@@ -98,10 +87,7 @@ export const deleteNoteById = async (token: string, noteId: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;

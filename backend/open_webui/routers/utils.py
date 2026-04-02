@@ -50,7 +50,11 @@ async def format_code(form_data: CodeForm, user=Depends(get_verified_user)):
     try:
         black = _get_black_module()
     except OptionalDependencyError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        return {
+            "code": form_data.code,
+            "formatter_unavailable": True,
+            "detail": str(e),
+        }
 
     try:
         formatted_code = black.format_str(form_data.code, mode=black.Mode())

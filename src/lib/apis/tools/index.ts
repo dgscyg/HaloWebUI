@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { parseJsonResponse } from '../response';
 
 export const createNewTool = async (token: string, tool: object) => {
 	let error = null;
@@ -14,10 +15,7 @@ export const createNewTool = async (token: string, tool: object) => {
 			...tool
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -42,10 +40,7 @@ export const getTools = async (token: string = '') => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -73,10 +68,7 @@ export const getToolList = async (token: string = '') => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -104,10 +96,7 @@ export const exportTools = async (token: string = '') => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -135,10 +124,7 @@ export const getToolById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -170,10 +156,7 @@ export const updateToolById = async (token: string, id: string, tool: object) =>
 			...tool
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -202,10 +185,7 @@ export const deleteToolById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -234,10 +214,7 @@ export const getToolValvesById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -266,10 +243,7 @@ export const getToolValvesSpecById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -301,10 +275,7 @@ export const updateToolValvesById = async (token: string, id: string, valves: ob
 			...valves
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -333,10 +304,7 @@ export const getUserValvesById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -365,10 +333,7 @@ export const getUserValvesSpecById = async (token: string, id: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -400,10 +365,7 @@ export const updateUserValvesById = async (token: string, id: string, valves: ob
 			...valves
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})

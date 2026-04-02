@@ -30,7 +30,7 @@ from open_webui.models.models import Models
 
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.tools import get_tools, get_tool_servers_data
-from open_webui.utils.mcp import get_mcp_servers_data
+from open_webui.utils.mcp import extract_selected_mcp_indices, get_mcp_servers_data
 from open_webui.utils.user_tools import (
     get_user_mcp_server_connections,
     get_user_tool_server_connections,
@@ -77,6 +77,7 @@ async def get_function_models(request):
 
     for pipe in pipes:
         function_module = get_function_module_by_id(request, pipe.id)
+        has_user_valves = hasattr(function_module, "UserValves")
 
         # Check if function is a manifold
         if hasattr(function_module, "pipes"):
@@ -116,6 +117,7 @@ async def get_function_models(request):
                         "created": pipe.created_at,
                         "owned_by": "openai",
                         "pipe": pipe_flag,
+                        "has_user_valves": has_user_valves,
                     }
                 )
         else:
@@ -133,6 +135,7 @@ async def get_function_models(request):
                     "created": pipe.created_at,
                     "owned_by": "openai",
                     "pipe": pipe_flag,
+                    "has_user_valves": has_user_valves,
                 }
             )
 
@@ -233,12 +236,16 @@ async def generate_function_chat_completion(
         if any(str(tid).startswith("mcp:") for tid in tool_ids) and not getattr(
             request.state, "MCP_SERVERS", None
         ):
+            selected_mcp_indices = extract_selected_mcp_indices(tool_ids)
             request.state.MCP_SERVER_CONNECTIONS = get_user_mcp_server_connections(
                 request, user
             )
             request.state.MCP_SERVERS = await get_mcp_servers_data(
                 request.state.MCP_SERVER_CONNECTIONS,
                 session_token=session_token,
+                selected_indices=selected_mcp_indices,
+                strict_selected=True,
+                user_id=user.id,
             )
 
     __event_emitter__ = None

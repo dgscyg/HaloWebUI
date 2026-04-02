@@ -1,4 +1,5 @@
 import { AUDIO_API_BASE_URL } from '$lib/constants';
+import { ensureOkResponse, parseJsonResponse } from '../response';
 
 export const getAudioConfig = async (token: string) => {
 	let error = null;
@@ -10,10 +11,7 @@ export const getAudioConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -47,10 +45,7 @@ export const updateAudioConfig = async (token: string, payload: OpenAIConfigForm
 			...payload
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -80,10 +75,7 @@ export const transcribeAudio = async (token: string, file: File, language?: stri
 		},
 		body: data
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -117,10 +109,7 @@ export const synthesizeOpenAISpeech = async (
 			...(model && { model })
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res;
-		})
+		.then(ensureOkResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -149,10 +138,7 @@ export const getModels = async (token: string = ''): Promise<AvailableModelsResp
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -177,10 +163,7 @@ export const getVoices = async (token: string = '') => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
