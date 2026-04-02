@@ -62,6 +62,38 @@ def test_openai_seedream_description_is_detected_as_image_model():
     assert classified["generation_mode"] == "openai_chat_image"
 
 
+def test_volcengine_seedream_prefers_images_endpoint_mode():
+    classified = _classify_openai_image_model(
+        {
+            "id": "doubao-seedream-4-5-251128",
+            "name": "Doubao Seedream 4.5",
+        },
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_config={},
+        source={"effective_source": "personal"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_images"
+    assert classified["detection_method"] == "heuristic"
+
+
+def test_volcengine_seededit_prefers_images_endpoint_mode():
+    classified = _classify_openai_image_model(
+        {
+            "id": "doubao-seededit-3-0-i2i-250628",
+            "name": "Doubao SeedEdit 3.0",
+        },
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_config={},
+        source={"effective_source": "personal"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_images"
+    assert classified["detection_method"] == "heuristic"
+
+
 def test_non_image_model_is_filtered_out():
     classified = _classify_openai_image_model(
         {
