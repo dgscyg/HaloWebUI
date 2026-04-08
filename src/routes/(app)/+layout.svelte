@@ -104,7 +104,7 @@
 			}
 
 			// Fetch independent data in parallel to reduce page load time
-			const [userSettings, bannersData, toolsData] = await Promise.all([
+			const [userSettings, bannersData, toolsData, functionsData] = await Promise.all([
 				getUserSettings(localStorage.token).catch((error) => {
 					console.error(error);
 					return null;
@@ -115,6 +115,10 @@
 				}),
 				getTools(localStorage.token).catch((e) => {
 					console.error('Failed to load tools', e);
+					return [];
+				}),
+				getFunctions(localStorage.token).catch((e) => {
+					console.error('Failed to load functions', e);
 					return [];
 				})
 			]);
@@ -135,6 +139,7 @@
 
 			banners.set(bannersData);
 			tools.set(toolsData);
+			functions.set(functionsData);
 
 			// toolServers depends on $settings being set, so it runs after the parallel batch
 			toolServers.set(

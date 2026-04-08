@@ -14,8 +14,11 @@
 	import { compareVersion, extractFrontmatter } from '$lib/utils';
 	import { WEBUI_VERSION } from '$lib/constants';
 	import WorkspaceSubpageHeader from '$lib/components/workspace/shell/WorkspaceSubpageHeader.svelte';
+	import { localizeCommonError } from '$lib/utils/common-errors';
 
 	const i18n: Writable<any> = getContext('i18n');
+	const formatError = (error: unknown) =>
+		localizeCommonError(error, (key, options) => $i18n.t(key, options));
 
 	let func: any = null;
 
@@ -47,7 +50,7 @@
 			meta: data.meta,
 			content: data.content
 		}).catch((error) => {
-			toast.error(`${error}`);
+			toast.error(formatError(error));
 			return null;
 		});
 
@@ -62,7 +65,7 @@
 	};
 
 	const onEditorSave = (value: FunctionDraft) => {
-		saveHandler(value);
+		return saveHandler(value);
 	};
 
 	onMount(async () => {
@@ -75,7 +78,7 @@
 
 		if (id) {
 			func = await getFunctionById(localStorage.token, id).catch((error) => {
-				toast.error(`${error}`);
+				toast.error(formatError(error));
 				goto('/workspace/functions');
 				return null;
 			});

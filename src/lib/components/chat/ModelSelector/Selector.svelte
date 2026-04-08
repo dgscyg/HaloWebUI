@@ -112,10 +112,7 @@
 	$: userDefaultModelId =
 		($settings?.models ?? []).find((id) => typeof id === 'string' && id.trim() !== '') ?? '';
 
-	$: defaultModelId =
-		userDefaultModelId ||
-		$config?.default_models?.split(',').find((id) => id.trim() !== '') ||
-		'';
+	$: defaultModelId = userDefaultModelId;
 
 	$: defaultModelItem = items.find((item) => item.value === defaultModelId) ?? null;
 
@@ -133,7 +130,7 @@
 		const { models: _models, ...nextSettings } = currentSettings;
 		settings.set(nextSettings);
 		await updateUserSettings(localStorage.token, { ui: nextSettings });
-		toast.success($i18n.t('Restore Default'));
+		toast.success($i18n.t('Default model cleared'));
 		show = false;
 	};
 
@@ -746,9 +743,7 @@
 									role="button"
 									tabindex="-1"
 									title={userDefaultModelId === item.value
-										? $i18n.t('Restore Default')
-										: defaultModelId === item.value
-											? $i18n.t('Default')
+										? $i18n.t('Clear Default Model')
 										: $i18n.t('Set as default')}
 									class="p-1.5 rounded-lg {defaultModelId === item.value
 										? 'text-amber-500 dark:text-amber-400 bg-amber-50/90 dark:bg-amber-900/20'
@@ -757,10 +752,6 @@
 										selectedModelIdx = index;
 										if (userDefaultModelId === item.value) {
 											await clearDefaultModel();
-											return;
-										}
-
-										if (defaultModelId === item.value) {
 											return;
 										}
 

@@ -243,8 +243,6 @@
 
 		if ($settings?.models) {
 			selectedModelId = $settings?.models[0];
-		} else if ($config?.default_models) {
-			selectedModelId = $config?.default_models.split(',')[0];
 		} else {
 			selectedModelId = '';
 		}

@@ -1,5 +1,6 @@
 <script>
 	import { getContext, onMount, tick } from 'svelte';
+	import { toast } from 'svelte-sonner';
 
 	const i18n = getContext('i18n');
 
@@ -20,6 +21,7 @@
 
 	let showConfirm = false;
 	let showAccessControlModal = false;
+	const idPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 	export let edit = false;
 	export let clone = false;
@@ -52,6 +54,12 @@
 	$: if (name && !edit && !clone) {
 		id = name.replace(/\s+/g, '_').toLowerCase();
 	}
+
+	let idValidationError = '';
+	$: idValidationError =
+		!edit && id && !idPattern.test(id)
+			? 'The id must start with a letter or underscore, and may contain only letters, numbers, and underscores.'
+			: '';
 
 	const buildSnapshot = () => ({
 		id,
@@ -206,21 +214,23 @@ class Tools:
 
 	const submitHandler = async () => {
 		if (codeEditor) {
-			content = _content;
-			await tick();
-
-			const res = await codeEditor.formatPythonCodeHandler();
-			await tick();
-
-			content = _content;
-			await tick();
-
-			if (res) {
-				console.log('Code formatted successfully');
-
-				await saveHandler();
+			if (idValidationError) {
+				toast.error($i18n.t(idValidationError));
+				return;
 			}
+			content = _content;
+			await tick();
+			await saveHandler();
 		}
+	};
+
+	const formatHandler = async () => {
+		if (!codeEditor) return;
+		content = _content;
+		await tick();
+		await codeEditor.formatPythonCodeHandler();
+		await tick();
+		content = _content;
 	};
 
 	const handleReset = () => {
@@ -257,6 +267,10 @@ class Tools:
 			bind:this={formElement}
 			class=" flex flex-col max-h-[100dvh] h-full"
 			on:submit|preventDefault={() => {
+				if (idValidationError) {
+					toast.error($i18n.t(idValidationError));
+					return;
+				}
 				if (edit) {
 					submitHandler();
 				} else {
@@ -318,7 +332,11 @@ class Tools:
 							saving={loading}
 							saveAsSubmit={true}
 							align="start"
+							disabled={!!idValidationError}
+							secondaryActionLabel="Format Code"
+							secondaryActionTooltip="Ctrl/Cmd + Shift + F"
 							on:reset={handleReset}
+							on:secondary={formatHandler}
 						/>
 					</div>
 
@@ -354,6 +372,12 @@ class Tools:
 							/>
 						</Tooltip>
 					</div>
+
+					{#if idValidationError}
+						<div class="px-1 pt-1 text-xs text-rose-600 dark:text-rose-300">
+							{$i18n.t(idValidationError)}
+						</div>
+					{/if}
 				</div>
 
 				<div class="mb-2 flex-1 overflow-auto h-0 rounded-lg">
@@ -373,23 +397,14 @@ class Tools:
 					/>
 				</div>
 
-				<div class="pb-3 flex justify-between">
-					<div class="flex-1 pr-3">
-						<div class="text-xs text-gray-500 line-clamp-2">
-							<span class=" font-semibold dark:text-gray-200">{$i18n.t('Warning:')}</span>
-							{$i18n.t('Tools are a function calling system with arbitrary code execution')} <br />—
-							<span class=" font-medium dark:text-gray-400"
-								>{$i18n.t(`don't install random tools from sources you don't trust.`)}</span
-							>
-						</div>
+				<div class="pb-3">
+					<div class="text-xs text-gray-500 line-clamp-2">
+						<span class=" font-semibold dark:text-gray-200">{$i18n.t('Warning:')}</span>
+						{$i18n.t('Tools are a function calling system with arbitrary code execution')} <br />—
+						<span class=" font-medium dark:text-gray-400"
+							>{$i18n.t(`don't install random tools from sources you don't trust.`)}</span
+						>
 					</div>
-
-					<button
-						class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-						type="submit"
-					>
-						{$i18n.t('Save')}
-					</button>
 				</div>
 			</div>
 		</form>

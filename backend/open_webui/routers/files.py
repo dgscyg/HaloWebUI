@@ -30,6 +30,10 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.routers.knowledge import get_knowledge, get_knowledge_list
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.routers.audio import transcribe
+from open_webui.retrieval.document_processing import (
+    get_file_effective_processing_mode,
+    resolve_file_processing_mode_from_config,
+)
 from open_webui.retrieval.vector.connector import VECTOR_DB_CLIENT
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -112,6 +116,7 @@ def upload_file(
     user=Depends(get_verified_user),
     file_metadata: dict = {},
     process: bool = Query(True),
+    processing_mode: Optional[str] = Query(None),
 ):
     log.info(f"file.content_type: {file.content_type}")
     file_path = None
@@ -137,6 +142,9 @@ def upload_file(
         name = filename
         filename = f"{id}_{filename}"
         contents, file_path = Storage.upload_file(file.file, filename)
+        requested_processing_mode = resolve_file_processing_mode_from_config(
+            request.app.state.config, processing_mode
+        )
 
         file_item = Files.insert_new_file(
             user.id,
@@ -150,12 +158,15 @@ def upload_file(
                         "content_type": file.content_type,
                         "size": len(contents),
                         "data": file_metadata,
+                        "processing_mode": requested_processing_mode,
+                        "resolved_processing_mode": requested_processing_mode,
                     },
                 }
             ),
         )
         if process:
             try:
+                warning_message = None
                 if file.content_type in [
                     "audio/mpeg",
                     "audio/wav",
@@ -167,13 +178,32 @@ def upload_file(
 
                     process_file(
                         request,
-                        ProcessFileForm(file_id=id, content=result.get("text", "")),
+                        ProcessFileForm(
+                            file_id=id,
+                            content=result.get("text", ""),
+                            processing_mode=requested_processing_mode,
+                        ),
                         user=user,
                     )
                 elif file.content_type not in ["image/png", "image/jpeg", "image/gif"]:
-                    process_file(request, ProcessFileForm(file_id=id), user=user)
+                    process_result = process_file(
+                        request,
+                        ProcessFileForm(
+                            file_id=id,
+                            processing_mode=requested_processing_mode,
+                        ),
+                        user=user,
+                    )
+                    warning_message = process_result.get("notice") if process_result else None
 
                 file_item = Files.get_file_by_id(id=id)
+                if warning_message:
+                    file_item = FileModelResponse(
+                        **{
+                            **file_item.model_dump(),
+                            "error": warning_message,
+                        }
+                    )
             except Exception as e:
                 log.exception(e)
                 log.error(f"Error processing file: {file_item.id}")
@@ -199,6 +229,22 @@ def upload_file(
                 )
 
         if file_item:
+            if isinstance(file_item, FileModelResponse):
+                return file_item
+            effective_mode = get_file_effective_processing_mode(
+                file_item,
+                default_mode=requested_processing_mode,
+            )
+            if effective_mode != requested_processing_mode:
+                file_item = FileModelResponse(
+                    **{
+                        **file_item.model_dump(),
+                        "error": (
+                            f"文件当前已按 {effective_mode} 模式保存，"
+                            f"与请求的 {requested_processing_mode} 不一致。"
+                        ),
+                    }
+                )
             return file_item
         else:
             raise HTTPException(

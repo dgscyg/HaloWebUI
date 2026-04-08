@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { parseBlobResponse, parseJsonResponse } from '../response';
 
 export const getGravatarUrl = async (token: string, email: string) => {
 	let error = null;
@@ -10,10 +11,7 @@ export const getGravatarUrl = async (token: string, email: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -36,10 +34,7 @@ export const executeCode = async (token: string, code: string) => {
 			code: code
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 
@@ -70,10 +65,7 @@ export const formatPythonCode = async (token: string, code: string) => {
 			code: code
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 
@@ -105,10 +97,7 @@ export const downloadChatAsPDF = async (token: string, title: string, messages: 
 			messages: messages
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.blob();
-		})
+		.then(parseBlobResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -131,10 +120,7 @@ export const getHTMLFromMarkdown = async (token: string, md: string) => {
 			md: md
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err;
@@ -154,22 +140,7 @@ export const downloadDatabase = async (token: string) => {
 			}
 		});
 
-		if (!response.ok) {
-			let detail = '';
-			try {
-				const json = await response.json();
-				detail = json?.detail ?? JSON.stringify(json);
-			} catch {
-				try {
-					detail = await response.text();
-				} catch {
-					detail = '';
-				}
-			}
-			throw detail || `Request failed (${response.status})`;
-		}
-
-		const blob = await response.blob();
+		const blob = await parseBlobResponse(response);
 		const url = window.URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
@@ -193,22 +164,7 @@ export const downloadLiteLLMConfig = async (token: string) => {
 			}
 		});
 
-		if (!response.ok) {
-			let detail = '';
-			try {
-				const json = await response.json();
-				detail = json?.detail ?? JSON.stringify(json);
-			} catch {
-				try {
-					detail = await response.text();
-				} catch {
-					detail = '';
-				}
-			}
-			throw detail || `Request failed (${response.status})`;
-		}
-
-		const blob = await response.blob();
+		const blob = await parseBlobResponse(response);
 		const url = window.URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;

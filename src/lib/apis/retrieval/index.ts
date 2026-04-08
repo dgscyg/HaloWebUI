@@ -1,4 +1,5 @@
 import { RETRIEVAL_API_BASE_URL } from '$lib/constants';
+import { parseJsonResponse } from '../response';
 
 export const getRAGConfig = async (token: string) => {
 	let error = null;
@@ -10,10 +11,7 @@ export const getRAGConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -72,10 +70,7 @@ export const updateRAGConfig = async (token: string, payload: RAGConfigForm) => 
 			...payload
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -99,10 +94,7 @@ export const getQuerySettings = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -135,10 +127,7 @@ export const updateQuerySettings = async (token: string, settings: QuerySettings
 			...settings
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -162,10 +151,7 @@ export const getEmbeddingConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -204,10 +190,7 @@ export const updateEmbeddingConfig = async (token: string, payload: EmbeddingMod
 			...payload
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -231,10 +214,7 @@ export const getRerankingConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -265,10 +245,7 @@ export const updateRerankingConfig = async (token: string, payload: RerankingMod
 			...payload
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -307,10 +284,7 @@ export const processFile = async (
 			collection_name: collection_name ? collection_name : undefined
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -338,10 +312,7 @@ export const processYoutubeVideo = async (token: string, url: string) => {
 			url: url
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -370,10 +341,7 @@ export const processWeb = async (token: string, collection_name: string, url: st
 			collection_name: collection_name
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
@@ -405,10 +373,7 @@ export const processWebSearch = async (
 			collection_name: collection_name ?? ''
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -443,10 +408,7 @@ export const queryDoc = async (
 			k: k
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;
@@ -480,10 +442,7 @@ export const queryCollection = async (
 			k: k
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;
@@ -506,10 +465,7 @@ export const resetUploadDir = async (token: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;
@@ -532,10 +488,7 @@ export const resetVectorDB = async (token: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err.detail;
 			return null;

@@ -8,8 +8,10 @@
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import WorkspaceSubpageHeader from '$lib/components/workspace/shell/WorkspaceSubpageHeader.svelte';
+	import { localizeCommonError } from '$lib/utils/common-errors';
 
 	const i18n = getContext('i18n');
+	const formatError = (error) => localizeCommonError(error, (key, options) => $i18n.t(key, options));
 
 	let mounted = false;
 	let clone = false;
@@ -40,7 +42,7 @@
 			content: data.content,
 			access_control: data.access_control
 		}).catch((error) => {
-			toast.error(`${error}`);
+			toast.error(formatError(error));
 			return null;
 		});
 
@@ -102,7 +104,7 @@
 				{clone}
 				showBackButton={false}
 				onSave={(value) => {
-					saveHandler(value);
+					return saveHandler(value);
 				}}
 			/>
 		{/key}

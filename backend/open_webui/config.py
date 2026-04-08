@@ -33,6 +33,14 @@ from open_webui.env import (
 )
 from open_webui.internal.db import Base, get_db
 from open_webui.utils.redis import get_redis_connection
+from open_webui.retrieval.document_processing_shared import (
+    FILE_PROCESSING_MODE_FULL_CONTEXT,
+    FILE_PROCESSING_MODE_RETRIEVAL,
+    build_default_document_provider_configs,
+    derive_document_provider_from_legacy_engine,
+    normalize_document_provider,
+    normalize_file_processing_mode,
+)
 
 
 class EndpointFilter(logging.Filter):
@@ -68,6 +76,59 @@ LITE_PRESET_DEFAULTS = {
 
 def preset_env(name: str, default: str) -> str:
     return os.getenv(name, LITE_PRESET_DEFAULTS.get(LITE_PRESET, {}).get(name, default))
+
+
+def _get_default_file_processing_mode() -> str:
+    configured = normalize_file_processing_mode(
+        os.getenv("FILE_PROCESSING_DEFAULT_MODE")
+        or get_config_value("rag.file_processing_default_mode"),
+        "",
+    )
+    if configured in {
+        FILE_PROCESSING_MODE_RETRIEVAL,
+        FILE_PROCESSING_MODE_FULL_CONTEXT,
+    }:
+        return configured
+
+    bypass_flag = get_config_value("rag.bypass_embedding_and_retrieval")
+    if bypass_flag is None:
+        bypass_flag = os.environ.get("BYPASS_EMBEDDING_AND_RETRIEVAL", "False").lower() == "true"
+
+    return (
+        FILE_PROCESSING_MODE_FULL_CONTEXT
+        if bool(bypass_flag)
+        else FILE_PROCESSING_MODE_RETRIEVAL
+    )
+
+
+def _get_default_document_provider() -> str:
+    configured = normalize_document_provider(
+        os.getenv("DOCUMENT_PROVIDER")
+        or get_config_value("rag.document_provider"),
+        "",
+    )
+    if configured:
+        return configured
+
+    legacy_engine = get_config_value("rag.CONTENT_EXTRACTION_ENGINE") or preset_env(
+        "CONTENT_EXTRACTION_ENGINE", ""
+    )
+    return derive_document_provider_from_legacy_engine(legacy_engine)
+
+
+def _get_default_document_provider_configs() -> dict:
+    configured = get_config_value("rag.document_provider_configs")
+    if isinstance(configured, dict):
+        defaults = build_default_document_provider_configs()
+        for provider_name, provider_config in configured.items():
+            normalized = normalize_document_provider(provider_name, provider_name)
+            if normalized not in defaults:
+                defaults[normalized] = {}
+            if isinstance(provider_config, dict):
+                defaults[normalized].update(provider_config)
+        return defaults
+
+    return build_default_document_provider_configs()
 
 ####################################
 # Config helpers
@@ -1395,7 +1456,9 @@ DEFAULT_LOCALE = PersistentConfig(
 )
 
 DEFAULT_MODELS = PersistentConfig(
-    "DEFAULT_MODELS", "ui.default_models", os.environ.get("DEFAULT_MODELS", None)
+    "DEFAULT_MODELS",
+    "ui.default_models",
+    "",
 )
 
 DEFAULT_PROMPT_SUGGESTIONS = PersistentConfig(
@@ -1443,6 +1506,19 @@ MODEL_ORDER_LIST = PersistentConfig(
     "ui.model_order_list",
     [],
 )
+
+if os.environ.get("DEFAULT_MODELS") not in (None, ""):
+    log.warning(
+        "DEFAULT_MODELS is deprecated and ignored. Default models are now user-scoped."
+    )
+
+if DEFAULT_MODELS.value not in (None, ""):
+    log.warning(
+        "Clearing deprecated persistent DEFAULT_MODELS value. Default models are now user-scoped."
+    )
+    DEFAULT_MODELS.value = ""
+    if ENABLE_PERSISTENT_CONFIG:
+        DEFAULT_MODELS.save()
 
 DEFAULT_USER_ROLE = PersistentConfig(
     "DEFAULT_USER_ROLE",
@@ -2261,6 +2337,24 @@ ONEDRIVE_CLIENT_ID = PersistentConfig(
 )
 
 # RAG Content Extraction
+FILE_PROCESSING_DEFAULT_MODE = PersistentConfig(
+    "FILE_PROCESSING_DEFAULT_MODE",
+    "rag.file_processing_default_mode",
+    _get_default_file_processing_mode(),
+)
+
+DOCUMENT_PROVIDER = PersistentConfig(
+    "DOCUMENT_PROVIDER",
+    "rag.document_provider",
+    _get_default_document_provider(),
+)
+
+DOCUMENT_PROVIDER_CONFIGS = PersistentConfig(
+    "DOCUMENT_PROVIDER_CONFIGS",
+    "rag.document_provider_configs",
+    _get_default_document_provider_configs(),
+)
+
 CONTENT_EXTRACTION_ENGINE = PersistentConfig(
     "CONTENT_EXTRACTION_ENGINE",
     "rag.CONTENT_EXTRACTION_ENGINE",
@@ -3073,6 +3167,11 @@ IMAGES_OPENAI_API_BASE_URL = PersistentConfig(
     "image_generation.openai.api_base_url",
     os.getenv("IMAGES_OPENAI_API_BASE_URL", OPENAI_API_BASE_URL),
 )
+IMAGES_OPENAI_API_FORCE_MODE = PersistentConfig(
+    "IMAGES_OPENAI_API_FORCE_MODE",
+    "image_generation.openai.force_mode",
+    os.getenv("IMAGES_OPENAI_API_FORCE_MODE", "False").lower() == "true",
+)
 IMAGES_OPENAI_API_KEY = PersistentConfig(
     "IMAGES_OPENAI_API_KEY",
     "image_generation.openai.api_key",
@@ -3083,6 +3182,11 @@ IMAGES_GEMINI_API_BASE_URL = PersistentConfig(
     "IMAGES_GEMINI_API_BASE_URL",
     "image_generation.gemini.api_base_url",
     os.getenv("IMAGES_GEMINI_API_BASE_URL", GEMINI_API_BASE_URL),
+)
+IMAGES_GEMINI_API_FORCE_MODE = PersistentConfig(
+    "IMAGES_GEMINI_API_FORCE_MODE",
+    "image_generation.gemini.force_mode",
+    os.getenv("IMAGES_GEMINI_API_FORCE_MODE", "False").lower() == "true",
 )
 IMAGES_GEMINI_API_KEY = PersistentConfig(
     "IMAGES_GEMINI_API_KEY",

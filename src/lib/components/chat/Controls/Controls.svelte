@@ -19,6 +19,7 @@
 	export let models = [];
 	export let chatFiles = [];
 	export let params: Record<string, any> = {};
+	export let currentValvesContext: { tab: 'tools' | 'functions'; id: string } | null = null;
 
 	type ToolCallingMode = 'default' | 'native';
 	type SectionKey = 'system' | 'thinking' | 'advanced';
@@ -453,11 +454,11 @@
 				title={$i18n.t('Valves')}
 				buttonClassName="w-full px-3 py-2.5 rounded-xl hover:bg-gray-100/60 dark:hover:bg-white/[0.04] transition-colors duration-200"
 			>
-				<div class="text-sm px-3 pb-3" slot="content">
-					<Valves show={showValves} />
-				</div>
-			</Collapsible>
-		</div>
+					<div class="text-sm px-3 pb-3" slot="content">
+						<Valves show={showValves} preferredContext={currentValvesContext} />
+					</div>
+				</Collapsible>
+			</div>
 
 		{#if $user?.role === 'admin' || $user?.permissions.chat?.controls}
 			<!-- svelte-ignore a11y-no-static-element-interactions -->

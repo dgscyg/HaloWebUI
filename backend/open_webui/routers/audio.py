@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import uuid
 from functools import lru_cache
 from pathlib import Path
@@ -76,12 +77,26 @@ from pydub import AudioSegment
 from pydub.utils import mediainfo
 
 
+FFMPEG_MISSING_ERROR = (
+    "ffmpeg is not installed on the server. "
+    "Audio transcription requires ffmpeg. "
+    "Please install it: https://ffmpeg.org/download.html"
+)
+
+
+def _check_ffmpeg():
+    """Raise a clear error if ffmpeg/ffprobe are not installed."""
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        raise Exception(FFMPEG_MISSING_ERROR)
+
+
 def get_audio_format(file_path):
     """Check if the given file needs to be converted to a different format."""
     if not os.path.isfile(file_path):
         log.error(f"File not found: {file_path}")
         return False
 
+    _check_ffmpeg()
     info = mediainfo(file_path)
     if (
         info.get("codec_name") == "aac"
@@ -98,6 +113,7 @@ def get_audio_format(file_path):
 
 def convert_audio_to_wav(file_path, output_path, conversion_type):
     """Convert MP4/OGG audio file to WAV format."""
+    _check_ffmpeg()
     audio = AudioSegment.from_file(file_path, format=conversion_type)
     audio.export(output_path, format="wav")
     log.info(f"Converted {file_path} to {output_path}")
@@ -775,6 +791,7 @@ def transcribe(request: Request, file_path, language: str = ""):
 
 def compress_audio(file_path):
     if os.path.getsize(file_path) > MAX_FILE_SIZE:
+        _check_ffmpeg()
         file_dir = os.path.dirname(file_path)
         audio = AudioSegment.from_file(file_path)
         audio = audio.set_frame_rate(16000).set_channels(1)  # Compress audio

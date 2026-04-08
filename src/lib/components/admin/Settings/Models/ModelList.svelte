@@ -43,27 +43,30 @@
 </script>
 
 {#if modelIds.length > 0}
-	<div class="flex flex-col -translate-x-1" bind:this={modelListElement}>
+	<div class="flex flex-col gap-0.5" bind:this={modelListElement}>
 		{#each modelIds as modelId, modelIdx (modelId)}
-			<div class=" flex gap-2 w-full justify-between items-center" id="model-item-{modelId}">
-				<Tooltip content={modelId} placement="top-start">
-					<div class="flex items-center gap-1">
-						<EllipsisVertical className="size-4 cursor-move item-handle" />
+			<div
+				class="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 transition group"
+				id="model-item-{modelId}"
+			>
+				<div class="item-handle cursor-grab active:cursor-grabbing text-gray-300 dark:text-gray-600 group-hover:text-gray-400 dark:group-hover:text-gray-500 transition shrink-0">
+					<EllipsisVertical className="size-4" />
+				</div>
 
-						<div class=" text-sm flex-1 py-1 rounded-lg">
-							{#if $models.find((model) => model.id === modelId)}
-								{$models.find((model) => model.id === modelId).name}
-							{:else}
-								{modelId}
-							{/if}
-						</div>
+				<Tooltip content={modelId} placement="top-start">
+					<div class="text-sm text-gray-700 dark:text-gray-300 truncate">
+						{#if $models.find((model) => model.id === modelId)}
+							{$models.find((model) => model.id === modelId).name}
+						{:else}
+							<span class="text-gray-400 dark:text-gray-500 italic">{modelId}</span>
+						{/if}
 					</div>
 				</Tooltip>
 			</div>
 		{/each}
 	</div>
 {:else}
-	<div class="text-gray-500 text-xs text-center py-2">
+	<div class="text-gray-400 dark:text-gray-500 text-xs text-center py-8">
 		{$i18n.t('No models found')}
 	</div>
 {/if}

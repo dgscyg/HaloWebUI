@@ -155,12 +155,12 @@ def _get_embedding_hint(user: Any) -> str:
     if getattr(user, "role", None) == "admin":
         return (
             'Go to /settings/documents to configure an embedding model, '
-            'or enable "Bypass Embedding and Retrieval".'
+            'or switch the default file processing mode to "Full Context" or "Native File".'
         )
 
     return (
-        'Ask an administrator to configure document retrieval, or enable '
-        '"Bypass Embedding and Retrieval" if you have admin access.'
+        'Ask an administrator to configure document retrieval, or switch '
+        'the default file processing mode to "Full Context" or "Native File" if you have admin access.'
     )
 
 

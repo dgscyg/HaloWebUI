@@ -14,10 +14,6 @@
 	import ModelList from './ModelList.svelte';
 	import { getModelsConfig, setModelsConfig } from '$lib/apis/configs';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import { getModelChatDisplayName } from '$lib/utils/model-display';
-	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
-	import Minus from '$lib/components/icons/Minus.svelte';
-	import Plus from '$lib/components/icons/Plus.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 
@@ -25,9 +21,6 @@
 	export let initHandler = () => {};
 
 	let config = null;
-
-	let selectedModelId = '';
-	let defaultModelIds = [];
 	let modelIds = [];
 
 	let sortKey = '';
@@ -40,32 +33,8 @@
 		init();
 	}
 
-	$: if (selectedModelId) {
-		onModelSelect();
-	}
-
-	const onModelSelect = () => {
-		if (selectedModelId === '') {
-			return;
-		}
-
-		if (defaultModelIds.includes(selectedModelId)) {
-			selectedModelId = '';
-			return;
-		}
-
-		defaultModelIds = [...defaultModelIds, selectedModelId];
-		selectedModelId = '';
-	};
-
 	const init = async () => {
 		config = await getModelsConfig(localStorage.token);
-
-		if (config?.DEFAULT_MODELS) {
-			defaultModelIds = (config?.DEFAULT_MODELS).split(',').filter((id) => id);
-		} else {
-			defaultModelIds = [];
-		}
 		const modelOrderList = config.MODEL_ORDER_LIST || [];
 		const allModelIds = $models.map((model) => model.id);
 
@@ -86,16 +55,16 @@
 		loading = true;
 
 		const res = await setModelsConfig(localStorage.token, {
-			DEFAULT_MODELS: defaultModelIds.join(','),
+			DEFAULT_MODELS: '',
 			MODEL_ORDER_LIST: modelIds
 		});
 
 		if (res) {
-			toast.success($i18n.t('Models configuration saved successfully'));
+			toast.success($i18n.t('Model order saved successfully'));
 			initHandler();
 			show = false;
 		} else {
-			toast.error($i18n.t('Failed to save models configuration'));
+			toast.error($i18n.t('Failed to save model order'));
 		}
 
 		loading = false;
@@ -120,196 +89,118 @@
 />
 
 <Modal size="sm" bind:show>
-	<div>
-		<div class=" flex justify-between dark:text-gray-100 px-5 pt-4 pb-2">
-			<div class=" text-lg font-medium self-center font-primary">
-				{$i18n.t('Settings')}
+	<div class="flex flex-col max-h-[85vh]">
+		<!-- Header (fixed) -->
+		<div class="flex items-center justify-between px-5 pt-4 pb-3 border-b border-gray-100 dark:border-gray-800">
+			<div class="flex items-center gap-2.5">
+				<div class="flex items-center justify-center size-8 rounded-lg bg-gray-100 dark:bg-gray-800">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-gray-600 dark:text-gray-300">
+						<path d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zm0 10.5a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM2 10a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10z" />
+					</svg>
+				</div>
+				<div>
+					<div class="text-sm font-semibold text-gray-800 dark:text-gray-100">
+						{$i18n.t('Model Order Settings')}
+					</div>
+					<div class="text-xs text-gray-400 dark:text-gray-500">
+						{$i18n.t('Model order controls how models are listed across the app.')}
+					</div>
+				</div>
 			</div>
 			<button
-				class="self-center"
-				on:click={() => {
-					show = false;
-				}}
+				class="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-800 transition"
+				on:click={() => { show = false; }}
 			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 20 20"
-					fill="currentColor"
-					class="w-5 h-5"
-				>
-					<path
-						d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-					/>
+				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5">
+					<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
 				</svg>
 			</button>
 		</div>
 
-		<div class="flex flex-col md:flex-row w-full px-5 pb-4 md:space-x-4 dark:text-gray-200">
-			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
-				{#if config}
-					<form
-						class="flex flex-col w-full"
-						on:submit|preventDefault={() => {
-							submitHandler();
+		{#if config}
+			<form
+				class="flex flex-col min-h-0 flex-1"
+				on:submit|preventDefault={() => { submitHandler(); }}
+			>
+				<!-- Toolbar (fixed) -->
+				<div class="flex items-center justify-between px-5 py-2.5 border-b border-gray-50 dark:border-gray-850">
+					<button
+						class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-800 transition"
+						type="button"
+						on:click={() => {
+							sortKey = 'model';
+
+							if (sortOrder === 'asc') {
+								sortOrder = 'desc';
+							} else {
+								sortOrder = 'asc';
+							}
+
+							modelIds = modelIds
+								.filter((id) => id !== '')
+								.sort((a, b) => {
+									const nameA = $models.find((model) => model.id === a)?.name || a;
+									const nameB = $models.find((model) => model.id === b)?.name || b;
+									return sortOrder === 'desc'
+										? nameA.localeCompare(nameB)
+										: nameB.localeCompare(nameA);
+								});
 						}}
 					>
-						<div>
-							<div class="flex flex-col w-full">
-								<button
-									class="mb-1 flex gap-2"
-									type="button"
-									on:click={() => {
-										sortKey = 'model';
-
-										if (sortOrder === 'asc') {
-											sortOrder = 'desc';
-										} else {
-											sortOrder = 'asc';
-										}
-
-										modelIds = modelIds
-											.filter((id) => id !== '')
-											.sort((a, b) => {
-												const nameA = $models.find((model) => model.id === a)?.name || a;
-												const nameB = $models.find((model) => model.id === b)?.name || b;
-												return sortOrder === 'desc'
-													? nameA.localeCompare(nameB)
-													: nameB.localeCompare(nameA);
-											});
-									}}
-								>
-									<div class="text-xs text-gray-500">{$i18n.t('Reorder Models')}</div>
-
-									{#if sortKey === 'model'}
-										<span class="font-normal self-center">
-											{#if sortOrder === 'asc'}
-												<ChevronUp className="size-3" />
-											{:else}
-												<ChevronDown className="size-3" />
-											{/if}
-										</span>
-									{:else}
-										<span class="invisible">
-											<ChevronUp className="size-3" />
-										</span>
-									{/if}
-								</button>
-
-								<ModelList bind:modelIds />
-							</div>
-						</div>
-
-						<hr class=" border-gray-100 dark:border-gray-700/10 my-2.5 w-full" />
-
-						<div>
-							<div class="flex flex-col w-full">
-								<div class="mb-1 flex justify-between">
-									<div class="text-xs text-gray-500">{$i18n.t('Default Models')}</div>
-								</div>
-
-								<div class="flex items-center -mr-1">
-									<HaloSelect
-										bind:value={selectedModelId}
-										options={[
-											{ value: '', label: $i18n.t('Select a model') },
-											...$models.map((model) => ({ value: model.id, label: getModelChatDisplayName(model) }))
-										]}
-										placeholder={$i18n.t('Select a model')}
-										className="w-full {selectedModelId ? '' : 'text-gray-500'}"
-									/>
-								</div>
-
-								<!-- <hr class=" border-gray-100 dark:border-gray-700/10 my-2.5 w-full" /> -->
-
-								{#if defaultModelIds.length > 0}
-									<div class="flex flex-col">
-										{#each defaultModelIds as modelId, modelIdx}
-											<div class=" flex gap-2 w-full justify-between items-center">
-												<div class=" text-sm flex-1 py-1 rounded-lg">
-													{getModelChatDisplayName($models.find((model) => model.id === modelId))}
-												</div>
-												<div class="shrink-0">
-													<button
-														type="button"
-														on:click={() => {
-															defaultModelIds = defaultModelIds.filter(
-																(_, idx) => idx !== modelIdx
-															);
-														}}
-													>
-														<Minus strokeWidth="2" className="size-3.5" />
-													</button>
-												</div>
-											</div>
-										{/each}
-									</div>
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
+							<path fill-rule="evenodd" d="M2 3.75A.75.75 0 012.75 3h11.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zM2 7.5a.75.75 0 01.75-.75h6.365a.75.75 0 010 1.5H2.75A.75.75 0 012 7.5zM14 7a.75.75 0 01.55.24l3.25 3.5a.75.75 0 11-1.1 1.02l-1.95-2.1v6.59a.75.75 0 01-1.5 0V9.66l-1.95 2.1a.75.75 0 11-1.1-1.02l3.25-3.5A.75.75 0 0114 7zM2 11.25a.75.75 0 01.75-.75H7A.75.75 0 017 12H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd" />
+						</svg>
+						{$i18n.t('Reorder Models')}
+						{#if sortKey === 'model'}
+							<span class="self-center">
+								{#if sortOrder === 'asc'}
+									<ChevronUp className="size-3" />
 								{:else}
-									<div class="text-gray-500 text-xs text-center py-2">
-										{$i18n.t('No models selected')}
-									</div>
+									<ChevronDown className="size-3" />
 								{/if}
-							</div>
-						</div>
+							</span>
+						{/if}
+					</button>
+					<span class="text-xs text-gray-400 dark:text-gray-500 tabular-nums">
+						{modelIds.length} {$i18n.t('models')}
+					</span>
+				</div>
 
-						<div class="flex justify-between pt-3 text-sm font-medium gap-1.5">
-							<Tooltip content={$i18n.t('This will delete all models including custom models')}>
-								<button
-									class="px-3.5 py-1.5 text-sm font-medium dark:bg-black dark:hover:bg-gray-950 dark:text-white bg-white text-black hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center"
-									type="button"
-									on:click={() => {
-										showResetModal = true;
-									}}
-								>
-									<!-- {$i18n.t('Delete All Models')} -->
-									{$i18n.t('Reset All Models')}
-								</button>
-							</Tooltip>
+				<!-- Model list (scrollable) -->
+				<div class="flex-1 min-h-0 overflow-y-auto px-5 py-2">
+					<ModelList bind:modelIds />
+				</div>
 
-							<button
-								class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center {loading
-									? ' cursor-not-allowed'
-									: ''}"
-								type="submit"
-								disabled={loading}
-							>
-								{$i18n.t('Save')}
+				<!-- Footer (fixed) -->
+				<div class="flex items-center justify-between px-5 py-3 border-t border-gray-100 dark:border-gray-800">
+					<Tooltip content={$i18n.t('This will delete all models including custom models')}>
+						<button
+							class="px-3.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+							type="button"
+							on:click={() => { showResetModal = true; }}
+						>
+							{$i18n.t('Reset All Models')}
+						</button>
+					</Tooltip>
 
-								{#if loading}
-									<div class="ml-2 self-center">
-										<svg
-											class=" w-4 h-4"
-											viewBox="0 0 24 24"
-											fill="currentColor"
-											xmlns="http://www.w3.org/2000/svg"
-											><style>
-												.spinner_ajPY {
-													transform-origin: center;
-													animation: spinner_AtaB 0.75s infinite linear;
-												}
-												@keyframes spinner_AtaB {
-													100% {
-														transform: rotate(360deg);
-													}
-												}
-											</style><path
-												d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"
-												opacity=".25"
-											/><path
-												d="M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z"
-												class="spinner_ajPY"
-											/></svg
-										>
-									</div>
-								{/if}
-							</button>
-						</div>
-					</form>
-				{:else}
-					<div>
-						<Spinner />
-					</div>
-				{/if}
+					<button
+						class="px-4 py-1.5 text-xs font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-lg flex items-center gap-1.5 {loading
+							? ' cursor-not-allowed'
+							: ''}"
+						type="submit"
+						disabled={loading}
+					>
+						{$i18n.t('Save')}
+						{#if loading}
+							<Spinner className="size-3.5" />
+						{/if}
+					</button>
+				</div>
+			</form>
+		{:else}
+			<div class="flex items-center justify-center py-12">
+				<Spinner />
 			</div>
-		</div>
+		{/if}
 	</div>
 </Modal>

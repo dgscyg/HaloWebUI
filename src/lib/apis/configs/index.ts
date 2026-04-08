@@ -1,5 +1,6 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type { Banner } from '$lib/types';
+import { parseJsonResponse } from '../response';
 
 export const importConfig = async (token: string, config) => {
 	let error = null;
@@ -14,10 +15,7 @@ export const importConfig = async (token: string, config) => {
 			config: config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -41,10 +39,7 @@ export const exportConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -71,10 +66,7 @@ export const getConnectionsConfig = async (token: string) => {
 				Authorization: `Bearer ${token}`
 			}
 		})
-			.then(async (res) => {
-				if (!res.ok) throw await res.json();
-				return res.json();
-			})
+			.then(parseJsonResponse)
 			.catch((err) => {
 				console.log(err);
 				error = err.detail;
@@ -111,10 +103,7 @@ export const setConnectionsConfig = async (token: string, config: object) => {
 				...config
 			})
 		})
-			.then(async (res) => {
-				if (!res.ok) throw await res.json();
-				return res.json();
-			})
+			.then(parseJsonResponse)
 			.catch((err) => {
 				console.log(err);
 				error = err.detail;
@@ -144,10 +133,7 @@ export const getDirectConnectionsConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -174,10 +160,7 @@ export const setDirectConnectionsConfig = async (token: string, config: object) 
 			...config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -201,10 +184,7 @@ export const getToolServerConnections = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -231,10 +211,7 @@ export const setToolServerConnections = async (token: string, connections: objec
 			...connections
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -261,10 +238,7 @@ export const verifyToolServerConnection = async (token: string, connection: obje
 			...connection
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -288,10 +262,7 @@ export const getNativeToolsConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -318,10 +289,7 @@ export const setNativeToolsConfig = async (token: string, config: object) => {
 			...config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -345,10 +313,7 @@ export const getMCPServerConnections = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -375,10 +340,7 @@ export const setMCPServerConnections = async (token: string, connections: object
 			...connections
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -405,10 +367,7 @@ export const verifyMCPServerConnection = async (token: string, connection: objec
 			...connection
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -516,10 +475,7 @@ export const getCodeExecutionConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -546,10 +502,7 @@ export const setCodeExecutionConfig = async (token: string, config: object) => {
 			...config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -573,10 +526,7 @@ export const getModelsConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -603,10 +553,7 @@ export const setModelsConfig = async (token: string, config: object) => {
 			...config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -633,10 +580,7 @@ export const setDefaultPromptSuggestions = async (token: string, promptSuggestio
 			suggestions: promptSuggestions
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -722,10 +666,7 @@ export const getBanners = async (token: string): Promise<Banner[]> => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;
@@ -752,10 +693,7 @@ export const setBanners = async (token: string, banners: Banner[]) => {
 			banners: banners
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			error = err.detail;

@@ -1,9 +1,12 @@
 import { OPENAI_API_BASE_URL, WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+import { createResponseError, parseJsonResponse, parseResponsePayload } from '../response';
 
 const OPENAI_CHAT_COMPLETIONS_SUFFIX = '/chat/completions';
 
 type OpenAIConnectionConfig = Record<string, any> & {
 	force_mode?: boolean;
+	azure?: boolean;
+	api_version?: string;
 };
 
 type OpenAIVerifyPurpose = 'connection' | 'models';
@@ -14,6 +17,100 @@ const isForceModeConnection = (
 ) => {
 	const normalizedUrl = (url || '').trim().replace(/\/+$/, '');
 	return Boolean(config?.force_mode) || normalizedUrl.endsWith(OPENAI_CHAT_COMPLETIONS_SUFFIX);
+};
+
+const isAzureConnection = (url: string, config?: OpenAIConnectionConfig) => {
+	if (config?.azure) return true;
+
+	try {
+		const parsed = new URL(url.trim());
+		const host = parsed.hostname.toLowerCase();
+		return (
+			host.endsWith('.openai.azure.com') ||
+			host.endsWith('.cognitiveservices.azure.com') ||
+			host.endsWith('.cognitive.microsoft.com')
+		);
+	} catch {
+		return false;
+	}
+};
+
+const stripKnownOpenAISuffixes = (path: string) => {
+	let normalizedPath = (path || '').replace(/\/+$/, '');
+
+	for (const suffix of ['/responses', '/models', OPENAI_CHAT_COMPLETIONS_SUFFIX, '/completions']) {
+		if (normalizedPath.endsWith(suffix)) {
+			normalizedPath = normalizedPath.slice(0, -suffix.length).replace(/\/+$/, '');
+		}
+	}
+
+	return normalizedPath;
+};
+
+const buildUrlFromPath = (parsed: URL, path: string) => {
+	const normalizedPath = path ? (path.startsWith('/') ? path : `/${path}`) : '';
+	return `${parsed.protocol}//${parsed.host}${normalizedPath}`;
+};
+
+const normalizeAzureOpenAIBaseUrl = (url: string, config?: OpenAIConnectionConfig) => {
+	const normalizedUrl = (url || '').trim().replace(/\/+$/, '');
+	if (!normalizedUrl || isForceModeConnection(normalizedUrl, config)) {
+		return normalizedUrl;
+	}
+
+	try {
+		const parsed = new URL(normalizedUrl);
+		const path = stripKnownOpenAISuffixes(parsed.pathname);
+
+		if (path.includes('/openai/deployments/')) {
+			const [prefix, remainder] = path.split('/openai/deployments/', 2);
+			const deployment = remainder.split('/', 1)[0]?.trim();
+			const deploymentPath = deployment
+				? `${prefix}/openai/deployments/${deployment}`
+				: `${prefix}/openai/v1`;
+			return buildUrlFromPath(parsed, deploymentPath);
+		}
+
+		if (path.endsWith('/openai/v1')) {
+			return buildUrlFromPath(parsed, path);
+		}
+
+		if (path.endsWith('/openai')) {
+			return buildUrlFromPath(parsed, `${path}/v1`);
+		}
+
+		if (path.endsWith('/v1')) {
+			return buildUrlFromPath(parsed, `${path.slice(0, -'/v1'.length)}/openai/v1`);
+		}
+
+		return buildUrlFromPath(parsed, path ? `${path}/openai/v1` : '/openai/v1');
+	} catch {
+		return normalizedUrl;
+	}
+};
+
+const getAzureResourceBaseUrl = (url: string) => {
+	const normalizedUrl = (url || '').trim().replace(/\/+$/, '');
+	if (!normalizedUrl) return normalizedUrl;
+
+	try {
+		const parsed = new URL(normalizedUrl);
+		let path = stripKnownOpenAISuffixes(parsed.pathname);
+
+		if (path.includes('/openai/deployments/')) {
+			path = path.split('/openai/deployments/', 1)[0];
+		} else if (path.endsWith('/openai/v1')) {
+			path = path.slice(0, -'/openai/v1'.length);
+		} else if (path.endsWith('/openai')) {
+			path = path.slice(0, -'/openai'.length);
+		} else if (path.endsWith('/v1')) {
+			path = path.slice(0, -'/v1'.length);
+		}
+
+		return buildUrlFromPath(parsed, path);
+	} catch {
+		return normalizedUrl;
+	}
 };
 
 const isDashScopeCompatibleConnection = (url: string) => {
@@ -86,6 +183,14 @@ const getOpenAIModelsEndpoint = (
 	const normalizedUrl = (url || '').trim().replace(/\/+$/, '');
 	if (!normalizedUrl) return '';
 
+	if (isAzureConnection(normalizedUrl, config)) {
+		const azureBase = normalizeAzureOpenAIBaseUrl(normalizedUrl, config);
+		if (azureBase.includes('/openai/deployments/')) {
+			return `${getAzureResourceBaseUrl(normalizedUrl)}/openai/v1/models`;
+		}
+		return `${azureBase}/models`;
+	}
+
 	if (isForceModeConnection(normalizedUrl, config)) {
 		if (normalizedUrl.endsWith(OPENAI_CHAT_COMPLETIONS_SUFFIX)) {
 			return `${normalizedUrl.slice(0, -OPENAI_CHAT_COMPLETIONS_SUFFIX.length)}/models`;
@@ -94,6 +199,50 @@ const getOpenAIModelsEndpoint = (
 	}
 
 	return `${normalizedUrl}/models`;
+};
+
+const getOpenAIRequestHeaders = (
+	url: string,
+	key: string,
+	config?: OpenAIConnectionConfig
+) => {
+	const authType = String(config?.auth_type ?? '').trim().toLowerCase();
+	const headers: Record<string, string> = {};
+
+	if (config?.headers && typeof config.headers === 'object') {
+		for (const [headerKey, headerValue] of Object.entries(config.headers)) {
+			if (headerValue == null) continue;
+			headers[String(headerKey)] = String(headerValue);
+		}
+	}
+
+	const lowerHeaders = new Set(Object.keys(headers).map((header) => header.toLowerCase()));
+
+	if (key) {
+		if (authType === 'none' || authType === 'custom' || authType === 'custom_headers_only') {
+			// Leave auth to custom headers.
+		} else if (
+			authType === 'api-key' ||
+			authType === 'x-api-key' ||
+			(isAzureConnection(url, config) &&
+				!['bearer', 'authorization', 'azure_ad', 'microsoft_entra_id'].includes(authType))
+		) {
+			if (!lowerHeaders.has('api-key') && !lowerHeaders.has('authorization')) {
+				headers['api-key'] = key;
+			}
+		} else if (!lowerHeaders.has('authorization') && !lowerHeaders.has('api-key')) {
+			headers.Authorization = `Bearer ${key}`;
+		}
+	}
+
+	if (!lowerHeaders.has('accept')) {
+		headers.Accept = 'application/json';
+	}
+	if (!lowerHeaders.has('content-type')) {
+		headers['Content-Type'] = 'application/json';
+	}
+
+	return headers;
 };
 
 export const getOpenAIConfig = async (token: string = '') => {
@@ -107,10 +256,7 @@ export const getOpenAIConfig = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -149,10 +295,7 @@ export const updateOpenAIConfig = async (token: string = '', config: OpenAIConfi
 			...config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -181,10 +324,7 @@ export const getOpenAIUrls = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -216,10 +356,7 @@ export const updateOpenAIUrls = async (token: string = '', urls: string[]) => {
 			urls: urls
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -248,10 +385,7 @@ export const getOpenAIKeys = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -283,10 +417,7 @@ export const updateOpenAIKeys = async (token: string = '', keys: string[]) => {
 			keys: keys
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
 			if ('detail' in err) {
@@ -313,16 +444,12 @@ export const getOpenAIModelsDirect = async (
 
 	const res = await fetch(getOpenAIModelsEndpoint(url, config), {
 		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(key && { authorization: `Bearer ${key}` })
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
+		headers: getOpenAIRequestHeaders(url, key, {
+			...config,
+			azure: isAzureConnection(url, config)
 		})
+	})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = `OpenAI: ${err?.detail ?? err?.error?.message ?? err?.message ?? 'Network Problem'}`;
 			return [];
@@ -349,10 +476,7 @@ export const getOpenAIModels = async (token: string, urlIdx?: number) => {
 			}
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = `OpenAI: ${err?.error?.message ?? 'Network Problem'}`;
 			return [];
@@ -400,24 +524,14 @@ export const verifyOpenAIConnection = async (
 	if (isDirect) {
 		res = await fetch(getOpenAIModelsEndpoint(url, config), {
 			method: 'GET',
-			headers: {
-				Accept: 'application/json',
-				Authorization: `Bearer ${key}`,
-				'Content-Type': 'application/json'
-			}
+			headers: getOpenAIRequestHeaders(url, key, {
+				...config,
+				azure: isAzureConnection(url, config)
+			})
 		})
 			.then(async (res) => {
 				if (!res.ok) {
-					let upstreamError: any = null;
-					try {
-						upstreamError = await res.json();
-					} catch {
-						try {
-							upstreamError = await res.text();
-						} catch {
-							upstreamError = null;
-						}
-					}
+					const upstreamError = await parseResponsePayload(res);
 
 					if (
 						isDashScopeCompatibleConnection(url) &&
@@ -426,9 +540,10 @@ export const verifyOpenAIConnection = async (
 						return buildDashScopeVerifyFallback(purpose);
 					}
 
-					throw upstreamError;
+					throw createResponseError(res, upstreamError);
 				}
-				return res.json();
+
+				return parseJsonResponse(res);
 			})
 			.catch((err) => {
 				error = `OpenAI: ${err?.detail ?? err?.error?.message ?? err?.message ?? 'Network Problem'}`;
@@ -453,10 +568,7 @@ export const verifyOpenAIConnection = async (
 				purpose
 			})
 		})
-			.then(async (res) => {
-				if (!res.ok) throw await res.json();
-				return res.json();
-			})
+			.then(parseJsonResponse)
 			.catch((err) => {
 				error = `OpenAI: ${err?.detail ?? err?.error?.message ?? err?.message ?? 'Network Problem'}`;
 				return [];
@@ -514,10 +626,7 @@ export const generateOpenAIChatCompletion = async (
 		},
 		body: JSON.stringify(body)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = `${err?.detail ?? err}`;
 			return null;

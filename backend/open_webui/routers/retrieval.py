@@ -73,6 +73,21 @@ from open_webui.retrieval.runtime import (
     reset_embedding_runtime,
     reset_reranking_runtime,
 )
+from open_webui.retrieval.document_processing import (
+    DOCUMENT_PROVIDER_LOCAL_DEFAULT,
+    FILE_PROCESSING_MODE_FULL_CONTEXT,
+    FILE_PROCESSING_MODE_NATIVE_FILE,
+    FILE_PROCESSING_MODE_RETRIEVAL,
+    build_processing_notice,
+    extract_documents_for_file,
+    get_file_effective_processing_mode,
+    normalize_document_provider,
+    normalize_file_processing_mode,
+    resolve_document_provider_configs,
+    resolve_file_processing_mode_from_config,
+    should_extract_for_mode,
+    should_index_for_mode,
+)
 from open_webui.utils.misc import (
     calculate_sha256_string,
 )
@@ -103,6 +118,34 @@ log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
 router = APIRouter()
+
+
+def _log_text_content_summary(
+    context: str,
+    *,
+    text_content: Optional[str],
+    collection_name: Optional[str] = None,
+    processing_mode: Optional[str] = None,
+    provider: Optional[str] = None,
+) -> None:
+    if not log.isEnabledFor(logging.DEBUG):
+        return
+
+    log.debug(
+        "%s text_content_len=%d collection_name=%s processing_mode=%s provider=%s",
+        context,
+        len(text_content or ""),
+        collection_name,
+        processing_mode,
+        provider,
+    )
+
+
+def _log_web_results_summary(engine: str, web_results: list[SearchResult]) -> None:
+    if not log.isEnabledFor(logging.DEBUG):
+        return
+
+    log.debug("web_results_count=%d engine=%s", len(web_results), engine)
 
 
 class CollectionNameForm(BaseModel):
@@ -299,12 +342,15 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         "TOP_K": request.app.state.config.TOP_K,
         "BYPASS_EMBEDDING_AND_RETRIEVAL": request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL,
         "RAG_FULL_CONTEXT": request.app.state.config.RAG_FULL_CONTEXT,
+        "FILE_PROCESSING_DEFAULT_MODE": request.app.state.config.FILE_PROCESSING_DEFAULT_MODE,
         # Hybrid search settings
         "ENABLE_RAG_HYBRID_SEARCH": request.app.state.config.ENABLE_RAG_HYBRID_SEARCH,
         "RAG_HYBRID_SEARCH_BM25_WEIGHT": request.app.state.config.RAG_HYBRID_SEARCH_BM25_WEIGHT,
         "TOP_K_RERANKER": request.app.state.config.TOP_K_RERANKER,
         "RELEVANCE_THRESHOLD": request.app.state.config.RELEVANCE_THRESHOLD,
         # Content extraction settings
+        "DOCUMENT_PROVIDER": request.app.state.config.DOCUMENT_PROVIDER,
+        "DOCUMENT_PROVIDER_CONFIGS": request.app.state.config.DOCUMENT_PROVIDER_CONFIGS,
         "CONTENT_EXTRACTION_ENGINE": request.app.state.config.CONTENT_EXTRACTION_ENGINE,
         "PDF_EXTRACT_IMAGES": request.app.state.config.PDF_EXTRACT_IMAGES,
         "PDF_LOADING_MODE": request.app.state.config.PDF_LOADING_MODE,
@@ -438,6 +484,7 @@ class ConfigForm(BaseModel):
     TOP_K: Optional[int] = None
     BYPASS_EMBEDDING_AND_RETRIEVAL: Optional[bool] = None
     RAG_FULL_CONTEXT: Optional[bool] = None
+    FILE_PROCESSING_DEFAULT_MODE: Optional[str] = None
 
     # Hybrid search settings
     ENABLE_RAG_HYBRID_SEARCH: Optional[bool] = None
@@ -446,6 +493,8 @@ class ConfigForm(BaseModel):
     RELEVANCE_THRESHOLD: Optional[float] = None
 
     # Content extraction settings
+    DOCUMENT_PROVIDER: Optional[str] = None
+    DOCUMENT_PROVIDER_CONFIGS: Optional[dict] = None
     CONTENT_EXTRACTION_ENGINE: Optional[str] = None
     PDF_EXTRACT_IMAGES: Optional[bool] = None
     PDF_LOADING_MODE: Optional[str] = None
@@ -493,10 +542,21 @@ async def update_rag_config(
         if form_data.TOP_K is not None
         else request.app.state.config.TOP_K
     )
+    if form_data.FILE_PROCESSING_DEFAULT_MODE is not None:
+        request.app.state.config.FILE_PROCESSING_DEFAULT_MODE = normalize_file_processing_mode(
+            form_data.FILE_PROCESSING_DEFAULT_MODE,
+            request.app.state.config.FILE_PROCESSING_DEFAULT_MODE,
+        )
+    elif form_data.BYPASS_EMBEDDING_AND_RETRIEVAL is not None:
+        request.app.state.config.FILE_PROCESSING_DEFAULT_MODE = (
+            FILE_PROCESSING_MODE_FULL_CONTEXT
+            if form_data.BYPASS_EMBEDDING_AND_RETRIEVAL
+            else FILE_PROCESSING_MODE_RETRIEVAL
+        )
+
     request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL = (
-        form_data.BYPASS_EMBEDDING_AND_RETRIEVAL
-        if form_data.BYPASS_EMBEDDING_AND_RETRIEVAL is not None
-        else request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
+        request.app.state.config.FILE_PROCESSING_DEFAULT_MODE
+        == FILE_PROCESSING_MODE_FULL_CONTEXT
     )
     request.app.state.config.RAG_FULL_CONTEXT = (
         form_data.RAG_FULL_CONTEXT
@@ -532,6 +592,15 @@ async def update_rag_config(
     )
 
     # Content extraction settings
+    if form_data.DOCUMENT_PROVIDER is not None:
+        request.app.state.config.DOCUMENT_PROVIDER = normalize_document_provider(
+            form_data.DOCUMENT_PROVIDER,
+            request.app.state.config.DOCUMENT_PROVIDER,
+        )
+    if form_data.DOCUMENT_PROVIDER_CONFIGS is not None:
+        request.app.state.config.DOCUMENT_PROVIDER_CONFIGS = (
+            resolve_document_provider_configs(form_data.DOCUMENT_PROVIDER_CONFIGS)
+        )
     request.app.state.config.CONTENT_EXTRACTION_ENGINE = (
         form_data.CONTENT_EXTRACTION_ENGINE
         if form_data.CONTENT_EXTRACTION_ENGINE is not None
@@ -726,12 +795,15 @@ async def update_rag_config(
         "TOP_K": request.app.state.config.TOP_K,
         "BYPASS_EMBEDDING_AND_RETRIEVAL": request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL,
         "RAG_FULL_CONTEXT": request.app.state.config.RAG_FULL_CONTEXT,
+        "FILE_PROCESSING_DEFAULT_MODE": request.app.state.config.FILE_PROCESSING_DEFAULT_MODE,
         # Hybrid search settings
         "ENABLE_RAG_HYBRID_SEARCH": request.app.state.config.ENABLE_RAG_HYBRID_SEARCH,
         "RAG_HYBRID_SEARCH_BM25_WEIGHT": request.app.state.config.RAG_HYBRID_SEARCH_BM25_WEIGHT,
         "TOP_K_RERANKER": request.app.state.config.TOP_K_RERANKER,
         "RELEVANCE_THRESHOLD": request.app.state.config.RELEVANCE_THRESHOLD,
         # Content extraction settings
+        "DOCUMENT_PROVIDER": request.app.state.config.DOCUMENT_PROVIDER,
+        "DOCUMENT_PROVIDER_CONFIGS": request.app.state.config.DOCUMENT_PROVIDER_CONFIGS,
         "CONTENT_EXTRACTION_ENGINE": request.app.state.config.CONTENT_EXTRACTION_ENGINE,
         "PDF_EXTRACT_IMAGES": request.app.state.config.PDF_EXTRACT_IMAGES,
         "PDF_LOADING_MODE": request.app.state.config.PDF_LOADING_MODE,
@@ -1027,6 +1099,160 @@ class ProcessFileForm(BaseModel):
     content: Optional[str] = None
     collection_name: Optional[str] = None
     overwrite: bool = False
+    processing_mode: Optional[str] = None
+    document_provider: Optional[str] = None
+
+
+def _delete_collection_if_exists(collection_name: Optional[str]) -> None:
+    if not collection_name:
+        return
+    try:
+        if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
+            VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
+    except Exception:
+        pass
+
+
+def _clear_standalone_file_collection(file_id: str) -> None:
+    _delete_collection_if_exists(f"file-{file_id}")
+
+
+def _build_docs_from_text(file, text_content: str) -> list[Document]:
+    return [
+        Document(
+            page_content=text_content.replace("<br/>", "\n"),
+            metadata={
+                **(file.meta or {}),
+                "name": file.filename,
+                "created_by": file.user_id,
+                "file_id": file.id,
+                "source": file.filename,
+            },
+        )
+    ]
+
+
+def _resolve_processing_mode_for_request(
+    request: Request, form_data: ProcessFileForm
+) -> str:
+    if form_data.collection_name:
+        return FILE_PROCESSING_MODE_RETRIEVAL
+    return resolve_file_processing_mode_from_config(
+        request.app.state.config, form_data.processing_mode
+    )
+
+
+def _resolve_requested_document_provider(
+    request: Request, form_data: ProcessFileForm
+) -> str:
+    return normalize_document_provider(
+        form_data.document_provider or request.app.state.config.DOCUMENT_PROVIDER,
+        DOCUMENT_PROVIDER_LOCAL_DEFAULT,
+    )
+
+
+def _get_cached_file_collection_docs(file) -> list[Document]:
+    result = VECTOR_DB_CLIENT.query(
+        collection_name=f"file-{file.id}", filter={"file_id": file.id}
+    )
+    if result is not None and len(result.ids[0]) > 0:
+        return [
+            Document(
+                page_content=result.documents[0][idx],
+                metadata=result.metadatas[0][idx],
+            )
+            for idx, _ in enumerate(result.ids[0])
+        ]
+    return []
+
+
+def _prepare_documents_for_processing(
+    request: Request,
+    file,
+    *,
+    processing_mode: str,
+    requested_provider: str,
+    content: Optional[str] = None,
+    allow_cached_collection_docs: bool = False,
+) -> tuple[list[Document], str, str, Optional[str], list[str], str]:
+    resolved_provider = requested_provider
+    processing_notice = None
+    processing_fallbacks: list[str] = []
+    current_mode = get_file_effective_processing_mode(file)
+    current_provider = normalize_document_provider(
+        (file.meta or {}).get("processing_provider") or requested_provider,
+        requested_provider,
+    )
+
+    if content is not None:
+        effective_mode = (
+            FILE_PROCESSING_MODE_FULL_CONTEXT
+            if processing_mode == FILE_PROCESSING_MODE_NATIVE_FILE
+            else processing_mode
+        )
+        return (
+            _build_docs_from_text(file, content),
+            content,
+            requested_provider,
+            None,
+            [],
+            effective_mode,
+        )
+
+    if allow_cached_collection_docs:
+        cached_docs = _get_cached_file_collection_docs(file)
+        if cached_docs and current_mode == FILE_PROCESSING_MODE_RETRIEVAL and current_provider == requested_provider:
+            return (
+                cached_docs,
+                " ".join(doc.page_content for doc in cached_docs),
+                current_provider,
+                (file.meta or {}).get("processing_notice"),
+                list((file.meta or {}).get("processing_fallbacks") or []),
+                processing_mode,
+            )
+
+    can_reuse_cached_text = (
+        (file.data or {}).get("content")
+        and current_mode != FILE_PROCESSING_MODE_NATIVE_FILE
+        and current_provider == requested_provider
+    )
+    if can_reuse_cached_text:
+        text_content = (file.data or {}).get("content", "")
+        return (
+            _build_docs_from_text(file, text_content),
+            text_content,
+            current_provider,
+            (file.meta or {}).get("processing_notice"),
+            list((file.meta or {}).get("processing_fallbacks") or []),
+            processing_mode,
+        )
+
+    if file.path and should_extract_for_mode(processing_mode):
+        extraction = extract_documents_for_file(
+            request,
+            file,
+            provider=requested_provider,
+            allow_local_fallback=True,
+        )
+        docs = extraction.docs
+        return (
+            docs,
+            " ".join(doc.page_content for doc in docs),
+            extraction.provider,
+            extraction.notice,
+            extraction.fallbacks,
+            processing_mode,
+        )
+
+    text_content = (file.data or {}).get("content", "") or ""
+    return (
+        _build_docs_from_text(file, text_content),
+        text_content,
+        current_provider,
+        (file.meta or {}).get("processing_notice"),
+        list((file.meta or {}).get("processing_fallbacks") or []),
+        processing_mode,
+    )
 
 
 @router.post("/process/file")
@@ -1038,11 +1264,24 @@ def process_file(
     file = None
     try:
         file = Files.get_file_by_id(form_data.file_id)
+        if not file:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ERROR_MESSAGES.NOT_FOUND,
+            )
 
         collection_name = form_data.collection_name
 
         if collection_name is None:
             collection_name = f"file-{file.id}"
+
+        processing_mode = _resolve_processing_mode_for_request(request, form_data)
+        requested_provider = _resolve_requested_document_provider(request, form_data)
+        resolved_provider = requested_provider
+        processing_notice = None
+        processing_fallbacks: list[str] = []
+        text_content = None
+        docs: list[Document] = []
 
         if form_data.content:
             # Update the content in the file
@@ -1055,156 +1294,149 @@ def process_file(
                 # Audio file upload pipeline
                 pass
 
-            docs = [
-                Document(
-                    page_content=form_data.content.replace("<br/>", "\n"),
-                    metadata={
-                        **file.meta,
-                        "name": file.filename,
-                        "created_by": file.user_id,
-                        "file_id": file.id,
-                        "source": file.filename,
+            (
+                docs,
+                text_content,
+                resolved_provider,
+                processing_notice,
+                processing_fallbacks,
+                processing_mode,
+            ) = _prepare_documents_for_processing(
+                request,
+                file,
+                processing_mode=processing_mode,
+                requested_provider=requested_provider,
+                content=form_data.content,
+            )
+        elif form_data.collection_name:
+            (
+                docs,
+                text_content,
+                resolved_provider,
+                processing_notice,
+                processing_fallbacks,
+                processing_mode,
+            ) = _prepare_documents_for_processing(
+                request,
+                file,
+                processing_mode=processing_mode,
+                requested_provider=requested_provider,
+                allow_cached_collection_docs=True,
+            )
+        else:
+            if processing_mode == FILE_PROCESSING_MODE_NATIVE_FILE:
+                _clear_standalone_file_collection(file.id)
+                Files.update_file_data_by_id(file.id, {"content": None})
+                Files.update_file_hash_by_id(file.id, "")
+                Files.update_file_metadata_by_id(
+                    file.id,
+                    {
+                        "collection_name": None,
+                        "processing_mode": FILE_PROCESSING_MODE_NATIVE_FILE,
+                        "resolved_processing_mode": FILE_PROCESSING_MODE_NATIVE_FILE,
+                        "processing_provider": FILE_PROCESSING_MODE_NATIVE_FILE,
+                        "requested_document_provider": requested_provider,
+                        "processing_notice": None,
+                        "processing_fallbacks": [],
                     },
                 )
-            ]
+                return {
+                    "status": True,
+                    "collection_name": None,
+                    "filename": file.filename,
+                    "content": None,
+                    "processing_mode": FILE_PROCESSING_MODE_NATIVE_FILE,
+                    "processing_provider": FILE_PROCESSING_MODE_NATIVE_FILE,
+                    "notice": None,
+                }
 
-            text_content = form_data.content
-        elif form_data.collection_name:
-            # Check if the file has already been processed and save the content
-            # Usage: /knowledge/{id}/file/add, /knowledge/{id}/file/update
-
-            result = VECTOR_DB_CLIENT.query(
-                collection_name=f"file-{file.id}", filter={"file_id": file.id}
+            (
+                docs,
+                text_content,
+                resolved_provider,
+                processing_notice,
+                processing_fallbacks,
+                processing_mode,
+            ) = _prepare_documents_for_processing(
+                request,
+                file,
+                processing_mode=processing_mode,
+                requested_provider=requested_provider,
             )
 
-            if result is not None and len(result.ids[0]) > 0:
-                docs = [
-                    Document(
-                        page_content=result.documents[0][idx],
-                        metadata=result.metadatas[0][idx],
-                    )
-                    for idx, id in enumerate(result.ids[0])
-                ]
-            else:
-                docs = [
-                    Document(
-                        page_content=file.data.get("content", ""),
-                        metadata={
-                            **file.meta,
-                            "name": file.filename,
-                            "created_by": file.user_id,
-                            "file_id": file.id,
-                            "source": file.filename,
-                        },
-                    )
-                ]
-
-            text_content = file.data.get("content", "")
-        else:
-            # Process the file and save the content
-            # Usage: /files/
-            file_path = file.path
-            if file_path:
-                file_path = Storage.get_file(file_path)
-                from open_webui.retrieval.loaders.main import Loader
-
-                loader = Loader(
-                    engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
-                    TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
-                    DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
-                    PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
-                    DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-                    DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
-                    MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
-                )
-                docs = loader.load(
-                    file.filename, file.meta.get("content_type"), file_path
-                )
-
-                # PDF single mode: merge all pages into one document
-                if (
-                    request.app.state.config.PDF_LOADING_MODE == "single"
-                    and file.filename.lower().endswith(".pdf")
-                    and len(docs) > 1
-                ):
-                    merged_content = "\n\n".join(doc.page_content for doc in docs)
-                    docs = [Document(page_content=merged_content, metadata=docs[0].metadata)]
-
-                docs = [
-                    Document(
-                        page_content=doc.page_content,
-                        metadata={
-                            **doc.metadata,
-                            "name": file.filename,
-                            "created_by": file.user_id,
-                            "file_id": file.id,
-                            "source": file.filename,
-                        },
-                    )
-                    for doc in docs
-                ]
-            else:
-                docs = [
-                    Document(
-                        page_content=file.data.get("content", ""),
-                        metadata={
-                            **file.meta,
-                            "name": file.filename,
-                            "created_by": file.user_id,
-                            "file_id": file.id,
-                            "source": file.filename,
-                        },
-                    )
-                ]
-            text_content = " ".join([doc.page_content for doc in docs])
-
-        log.debug(f"text_content: {text_content}")
-        Files.update_file_data_by_id(
-            file.id,
-            {"content": text_content},
+        text_content = text_content or ""
+        _log_text_content_summary(
+            "process_file",
+            text_content=text_content,
+            collection_name=collection_name,
+            processing_mode=processing_mode,
+            provider=resolved_provider,
         )
+        Files.update_file_data_by_id(file.id, {"content": text_content})
 
         hash = calculate_sha256_string(text_content)
         Files.update_file_hash_by_id(file.id, hash)
 
-        if not request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-            try:
-                result = save_docs_to_vector_db(
-                    request,
-                    docs=docs,
-                    collection_name=collection_name,
-                    metadata={
-                        "file_id": file.id,
-                        "name": file.filename,
-                        "hash": hash,
+        if should_index_for_mode(processing_mode):
+            result = save_docs_to_vector_db(
+                request,
+                docs=docs,
+                collection_name=collection_name,
+                metadata={
+                    "file_id": file.id,
+                    "name": file.filename,
+                    "hash": hash,
+                },
+                overwrite=form_data.overwrite,
+                add=(True if form_data.collection_name else False),
+                user=user,
+            )
+
+            if result:
+                Files.update_file_metadata_by_id(
+                    file.id,
+                    {
+                        "collection_name": collection_name,
+                        "processing_mode": processing_mode,
+                        "resolved_processing_mode": processing_mode,
+                        "processing_provider": resolved_provider,
+                        "requested_document_provider": requested_provider,
+                        "processing_notice": processing_notice,
+                        "processing_fallbacks": processing_fallbacks,
                     },
-                    overwrite=form_data.overwrite,
-                    add=(True if form_data.collection_name else False),
-                    user=user,
                 )
 
-                if result:
-                    Files.update_file_metadata_by_id(
-                        file.id,
-                        {
-                            "collection_name": collection_name,
-                        },
-                    )
-
-                    return {
-                        "status": True,
-                        "collection_name": collection_name,
-                        "filename": file.filename,
-                        "content": text_content,
-                    }
-            except Exception as e:
-                raise e
+                return {
+                    "status": True,
+                    "collection_name": collection_name,
+                    "filename": file.filename,
+                    "content": text_content,
+                    "processing_mode": processing_mode,
+                    "processing_provider": resolved_provider,
+                    "notice": processing_notice,
+                }
         else:
+            _clear_standalone_file_collection(file.id)
+            Files.update_file_metadata_by_id(
+                file.id,
+                {
+                    "collection_name": None,
+                    "processing_mode": processing_mode,
+                    "resolved_processing_mode": processing_mode,
+                    "processing_provider": resolved_provider,
+                    "requested_document_provider": requested_provider,
+                    "processing_notice": processing_notice,
+                    "processing_fallbacks": processing_fallbacks,
+                },
+            )
             return {
                 "status": True,
                 "collection_name": None,
                 "filename": file.filename,
                 "content": text_content,
+                "processing_mode": processing_mode,
+                "processing_provider": resolved_provider,
+                "notice": processing_notice,
             }
 
     except Exception as e:
@@ -1254,7 +1486,11 @@ def process_text(
         )
     ]
     text_content = form_data.content
-    log.debug(f"text_content: {text_content}")
+    _log_text_content_summary(
+        "process_text",
+        text_content=text_content,
+        collection_name=collection_name,
+    )
 
     result = save_docs_to_vector_db(request, docs, collection_name, user=user)
     if result:
@@ -1286,8 +1522,13 @@ def process_youtube_video(
         )
 
         docs = loader.load()
-        content = " ".join([doc.page_content for doc in docs])
-        log.debug(f"text_content: {content}")
+        content = " ".join(doc.page_content for doc in docs)
+        _log_text_content_summary(
+            "process_youtube_video",
+            text_content=content,
+            collection_name=collection_name,
+            provider="youtube",
+        )
 
         save_docs_to_vector_db(
             request, docs, collection_name, overwrite=True, user=user
@@ -1331,9 +1572,13 @@ def process_web(
             requests_per_second=request.app.state.config.WEB_SEARCH_CONCURRENT_REQUESTS,
         )
         docs = loader.load()
-        content = " ".join([doc.page_content for doc in docs])
-
-        log.debug(f"text_content: {content}")
+        content = " ".join(doc.page_content for doc in docs)
+        _log_text_content_summary(
+            "process_web",
+            text_content=content,
+            collection_name=collection_name,
+            provider="web",
+        )
 
         if not request.app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
             save_docs_to_vector_db(
@@ -1668,7 +1913,7 @@ async def process_web_search(
             detail=ERROR_MESSAGES.WEB_SEARCH_ERROR(e),
         )
 
-    log.debug(f"web_results: {web_results}")
+    _log_web_results_summary(engine, web_results)
 
     try:
         urls = [str(result.link or "").strip() for result in web_results if str(result.link or "").strip()]
@@ -2012,41 +2257,52 @@ def process_files_batch(
     """
     results: List[BatchProcessFilesResult] = []
     errors: List[BatchProcessFilesResult] = []
-    collection_name = form_data.collection_name
-
-    # Prepare all documents first
     all_docs: List[Document] = []
+    collection_name = form_data.collection_name
     for file in form_data.files:
         try:
-            text_content = file.data.get("content", "")
-
-            docs: List[Document] = [
-                Document(
-                    page_content=text_content.replace("<br/>", "\n"),
-                    metadata={
-                        **file.meta,
-                        "name": file.filename,
-                        "created_by": file.user_id,
-                        "file_id": file.id,
-                        "source": file.filename,
-                    },
-                )
-            ]
-
-            hash = calculate_sha256_string(text_content)
-            Files.update_file_hash_by_id(file.id, hash)
-            Files.update_file_data_by_id(file.id, {"content": text_content})
-
+            (
+                docs,
+                text_content,
+                resolved_provider,
+                processing_notice,
+                processing_fallbacks,
+                _resolved_mode,
+            ) = _prepare_documents_for_processing(
+                request,
+                file,
+                processing_mode=FILE_PROCESSING_MODE_RETRIEVAL,
+                requested_provider=normalize_document_provider(
+                    request.app.state.config.DOCUMENT_PROVIDER,
+                    DOCUMENT_PROVIDER_LOCAL_DEFAULT,
+                ),
+                allow_cached_collection_docs=True,
+            )
+            file_hash = calculate_sha256_string(text_content or "")
+            Files.update_file_hash_by_id(file.id, file_hash)
+            Files.update_file_data_by_id(file.id, {"content": text_content or ""})
+            Files.update_file_metadata_by_id(
+                file.id,
+                {
+                    "processing_mode": FILE_PROCESSING_MODE_RETRIEVAL,
+                    "resolved_processing_mode": FILE_PROCESSING_MODE_RETRIEVAL,
+                    "processing_provider": resolved_provider,
+                    "requested_document_provider": normalize_document_provider(
+                        request.app.state.config.DOCUMENT_PROVIDER,
+                        DOCUMENT_PROVIDER_LOCAL_DEFAULT,
+                    ),
+                    "processing_notice": processing_notice,
+                    "processing_fallbacks": processing_fallbacks,
+                },
+            )
             all_docs.extend(docs)
             results.append(BatchProcessFilesResult(file_id=file.id, status="prepared"))
-
         except Exception as e:
             log.error(f"process_files_batch: Error processing file {file.id}: {str(e)}")
             errors.append(
                 BatchProcessFilesResult(file_id=file.id, status="failed", error=str(e))
             )
 
-    # Save all documents in one batch
     if all_docs:
         try:
             save_docs_to_vector_db(
@@ -2056,14 +2312,16 @@ def process_files_batch(
                 add=True,
                 user=user,
             )
-
-            # Update all files with collection name
             for result in results:
                 Files.update_file_metadata_by_id(
-                    result.file_id, {"collection_name": collection_name}
+                    result.file_id,
+                    {
+                        "collection_name": collection_name,
+                        "processing_mode": FILE_PROCESSING_MODE_RETRIEVAL,
+                        "resolved_processing_mode": FILE_PROCESSING_MODE_RETRIEVAL,
+                    },
                 )
                 result.status = "completed"
-
         except Exception as e:
             log.error(
                 f"process_files_batch: Error saving documents to vector DB: {str(e)}"

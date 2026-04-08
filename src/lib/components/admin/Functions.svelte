@@ -32,6 +32,7 @@
 	import Search from '../icons/Search.svelte';
 	import Plus from '../icons/Plus.svelte';
 	import ChevronRight from '../icons/ChevronRight.svelte';
+	import Spinner from '../common/Spinner.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -50,6 +51,8 @@
 	let showDeleteConfirm = false;
 
 	let filteredItems = [];
+	$: isInitialLoading = $functions === null;
+	$: countLabel = isInitialLoading ? '...' : `${filteredItems.length}`;
 	$: filteredItems = ($functions ?? [])
 		.filter(
 			(f) =>
@@ -193,7 +196,7 @@
 				{$i18n.t('Functions')}
 				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850" />
 				<span class="text-base font-lg text-gray-500 dark:text-gray-300"
-					>{filteredItems.length}</span
+					>{countLabel}</span
 				>
 			</div>
 		</div>
@@ -222,6 +225,11 @@
 	</div>
 
 	<div class="mb-5">
+		{#if isInitialLoading}
+			<div class="w-full flex justify-center py-10">
+				<Spinner />
+			</div>
+		{:else}
 		{#each filteredItems as func (func.id)}
 			<div
 				class=" flex space-x-4 cursor-pointer w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl"
@@ -373,6 +381,7 @@
 				</div>
 			</div>
 		{/each}
+		{/if}
 	</div>
 
 	<!-- <div class=" text-gray-500 text-xs mt-1 mb-2">

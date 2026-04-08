@@ -135,6 +135,10 @@
 		}
 	};
 
+	const getUserNoteLabel = (note: string | null | undefined) => {
+		return (note ?? '').replace(/\s+/g, ' ').trim();
+	};
+
 	const advanceRole = async (targetUser: any) => {
 		if (targetUser.role === 'user') {
 			await updateRoleHandler(targetUser.id, 'admin');
@@ -154,7 +158,8 @@
 			const query = search.toLowerCase();
 			const name = (user?.name ?? '').toLowerCase();
 			const email = (user?.email ?? '').toLowerCase();
-			return name.includes(query) || email.includes(query);
+			const note = getUserNoteLabel(user?.note).toLowerCase();
+			return name.includes(query) || email.includes(query) || note.includes(query);
 		})
 		.sort((a, b) => {
 			const aValue = getSortValue(a, sortKey);
@@ -183,7 +188,7 @@
 	}}
 />
 
-{#key selectedUser}
+{#key `${selectedUser?.id ?? ''}:${showEditUserModal}`}
 	<EditUserModal
 		bind:show={showEditUserModal}
 		{selectedUser}
@@ -414,6 +419,7 @@
 						</tr>
 					{:else}
 						{#each pagedUsers as user (user.id)}
+							{@const userNote = getUserNoteLabel(user.note)}
 							<tr class="group transition-colors hover:bg-gray-50/50 dark:hover:bg-gray-800/30">
 								<td class="px-5 py-4 align-middle">
 									<button
@@ -430,7 +436,14 @@
 									<div class="flex min-w-[14rem] items-center gap-3">
 										<LetterAvatar name={user.name} size="size-11" className="rounded-2xl" textClass="text-base" />
 										<div class="min-w-0">
-											<div class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</div>
+											<div class="flex min-w-0 items-center gap-1.5">
+												<span class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</span>
+												{#if userNote}
+													<span class="inline-flex min-w-0 max-w-[16rem] shrink items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400" title={userNote}>
+														<span class="truncate">{userNote}</span>
+													</span>
+												{/if}
+											</div>
 											<div class="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">
 												{user.email}
 											</div>
@@ -614,12 +627,20 @@
 						</tr>
 					{:else}
 						{#each pagedUsers as user (user.id)}
+							{@const userNote = getUserNoteLabel(user.note)}
 							<tr class="group transition-colors hover:bg-gray-50/50 dark:hover:bg-gray-800/30">
 								<td class="px-5 py-4 align-middle">
 									<div class="flex min-w-0 items-center gap-3">
 										<LetterAvatar name={user.name} size="size-10" className="rounded-2xl" textClass="text-sm" />
 										<div class="min-w-0">
-											<div class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</div>
+											<div class="flex min-w-0 items-center gap-1.5">
+												<span class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</span>
+												{#if userNote}
+													<span class="inline-flex min-w-0 max-w-[14rem] shrink items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400" title={userNote}>
+														<span class="truncate">{userNote}</span>
+													</span>
+												{/if}
+											</div>
 											<div class="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">
 												{user.email}
 											</div>
@@ -747,12 +768,20 @@
 			</div>
 		{:else}
 			{#each pagedUsers as user (user.id)}
+				{@const userNote = getUserNoteLabel(user.note)}
 				<article class="glass-item p-4">
 					<div class="flex items-start justify-between gap-3">
 						<div class="flex min-w-0 items-center gap-3">
 							<LetterAvatar name={user.name} size="size-12" className="rounded-2xl" textClass="text-lg" />
 							<div class="min-w-0">
-								<div class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</div>
+								<div class="flex min-w-0 items-center gap-1.5">
+									<span class="truncate font-semibold text-gray-900 dark:text-white">{user.name}</span>
+									{#if userNote}
+										<span class="inline-flex min-w-0 max-w-[12rem] shrink items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400" title={userNote}>
+											<span class="truncate">{userNote}</span>
+										</span>
+									{/if}
+								</div>
 								<div class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{user.email}</div>
 							</div>
 						</div>

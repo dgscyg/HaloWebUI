@@ -63,6 +63,7 @@
 		normalizeWebSearchMode,
 		type WebSearchMode
 	} from '$lib/utils/web-search-mode';
+	import { getFunctionPipeRootId } from '$lib/utils/image-generation';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
 	import {
@@ -72,8 +73,8 @@
 		deleteTagsById,
 		getAllTags,
 		getChatById,
+		getChatContextById,
 		getChatList,
-		getTagsById,
 		updateChatById
 	} from '$lib/apis/chats';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
@@ -87,8 +88,7 @@
 		generateQueries,
 		chatAction,
 		generateMoACompletion,
-		stopTask,
-		getTaskIdsByChatId
+		stopTask
 	} from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
 	import { ensureModels } from '$lib/services/models';
@@ -169,6 +169,11 @@
 
 	let selectedToolIds = [];
 	let imageGenerationEnabled = false;
+	let imageGenerationOptions: {
+		image_size?: string | null;
+		aspect_ratio?: string | null;
+		n?: number | null;
+	} = {};
 	let webSearchMode: WebSearchMode = 'off';
 	let codeInterpreterEnabled = false;
 
@@ -359,6 +364,12 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
 						? imageGenerationEnabled
 						: false,
+				image_generation_options:
+					imageGenerationEnabled &&
+					$config?.features?.enable_image_generation &&
+					($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
+						? getImageGenerationOptionsPayload()
+						: undefined,
 				code_interpreter:
 					$config?.features?.enable_code_interpreter &&
 					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
@@ -397,6 +408,38 @@
 	const getPreferredDefaultWebSearchMode = (): WebSearchMode =>
 		getPreferredWebSearchMode($settings, $config, 'off');
 
+	const getImageGenerationOptionsPayload = () => {
+		const raw = imageGenerationOptions ?? {};
+		const payload = Object.fromEntries(
+			Object.entries(raw).filter(([, value]) => value !== undefined && value !== null && value !== '')
+		);
+		return Object.keys(payload).length > 0 ? payload : undefined;
+	};
+
+	$: currentValvesContext = (() => {
+		const activeModelId =
+			atSelectedModel?.id ??
+			(selectedModelIds.length === 1 && selectedModelIds[0] ? selectedModelIds[0] : null);
+		if (activeModelId) {
+			const model = getModelById(activeModelId);
+			if (model?.pipe) {
+				return {
+					tab: 'functions' as const,
+					id: getFunctionPipeRootId(activeModelId)
+				};
+			}
+		}
+
+		if (selectedToolIds.length > 0) {
+			return {
+				tab: 'tools' as const,
+				id: selectedToolIds[0]
+			};
+		}
+
+		return null;
+	})();
+
 	const resolveStoredWebSearchMode = (
 		value: { webSearchMode?: unknown; webSearchEnabled?: unknown } | null | undefined,
 		fallback: WebSearchMode = getPreferredDefaultWebSearchMode()
@@ -415,6 +458,18 @@
 	const getChatSessionStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
 		`chat-session-state-${id && id !== '' ? id : 'new'}`;
 
+	const safeParseStoredJson = <T>(rawValue: string | null | undefined, fallback: T): T => {
+		if (!rawValue) {
+			return fallback;
+		}
+
+		try {
+			return JSON.parse(rawValue) as T;
+		} catch {
+			return fallback;
+		}
+	};
+
 	const readLegacyInputSettings = (id: string | null | undefined = $chatId || chatIdProp) => {
 		try {
 			const input = JSON.parse(localStorage.getItem(`chat-input-${id ?? ''}`) || 'null');
@@ -425,7 +480,8 @@
 			return {
 				webSearchMode: input.webSearchMode,
 				reasoningEffort: input.reasoningEffort,
-				maxThinkingTokens: input.maxThinkingTokens
+				maxThinkingTokens: input.maxThinkingTokens,
+				imageGenerationOptions: input.imageGenerationOptions
 			};
 		} catch {
 			return null;
@@ -451,6 +507,9 @@
 				if (state.imageGenerationEnabled !== undefined) {
 					imageGenerationEnabled = Boolean(state.imageGenerationEnabled);
 				}
+				if (state.imageGenerationOptions !== undefined) {
+					imageGenerationOptions = state.imageGenerationOptions ?? {};
+				}
 				if (state.codeInterpreterEnabled !== undefined) {
 					codeInterpreterEnabled = Boolean(state.codeInterpreterEnabled);
 				}
@@ -470,6 +529,7 @@
 						getPreferredDefaultWebSearchMode()
 					),
 					imageGenerationEnabled,
+					imageGenerationOptions,
 					codeInterpreterEnabled,
 					reasoningEffort,
 					maxThinkingTokens
@@ -523,19 +583,19 @@
 	$: if (chatIdProp) {
 		(async () => {
 			loading = true;
-			console.log(chatIdProp);
 
 			prompt = '';
 			files = [];
 			selectedToolIds = [];
 			webSearchMode = getPreferredDefaultWebSearchMode();
 			imageGenerationEnabled = false;
+			imageGenerationOptions = {};
 			reasoningEffort = null;
 			maxThinkingTokens = null;
 
 			if (chatIdProp && (await loadChat())) {
-				await tick();
 				loading = false;
+				await tick();
 				restoreChatSessionState(chatIdProp);
 
 				if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
@@ -546,6 +606,7 @@
 						files = input.files;
 						selectedToolIds = input.selectedToolIds;
 						imageGenerationEnabled = input.imageGenerationEnabled;
+						imageGenerationOptions = input.imageGenerationOptions ?? {};
 					} catch (e) {}
 				}
 
@@ -567,7 +628,6 @@
 			return;
 		}
 		sessionStorage.selectedModels = JSON.stringify(selectedModels);
-		console.log('saveSessionSelectedModels', selectedModels, sessionStorage.selectedModels);
 	};
 
 	// When models finish loading after page refresh, restore selection from sessionStorage
@@ -820,40 +880,43 @@
 	};
 
 	onMount(async () => {
-		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
 		window.addEventListener('chat:set-input', onSetInputHandler as EventListener);
 		$socket?.on('chat-events', chatEventHandler);
 
-		if (!$chatId) {
+		if (!chatIdProp && !$chatId) {
 			chatIdUnsubscriber = chatId.subscribe(async (value) => {
 				if (!value) {
 					await tick(); // Wait for DOM updates
 					await initNewChat();
 				}
 			});
-		} else {
+		} else if (chatIdProp) {
 			if ($temporaryChatEnabled) {
 				await goto('/');
 			}
 		}
 
-		if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
-			try {
-				const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
-				prompt = input.prompt;
-				files = input.files;
-				selectedToolIds = input.selectedToolIds;
-				imageGenerationEnabled = input.imageGenerationEnabled;
-			} catch (e) {
-				prompt = '';
-				files = [];
-				selectedToolIds = [];
-				webSearchMode = getPreferredDefaultWebSearchMode();
-				imageGenerationEnabled = false;
+		if (!chatIdProp) {
+			if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
+				try {
+					const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
+					prompt = input.prompt;
+					files = input.files;
+					selectedToolIds = input.selectedToolIds;
+					imageGenerationEnabled = input.imageGenerationEnabled;
+					imageGenerationOptions = input.imageGenerationOptions ?? {};
+				} catch (e) {
+					prompt = '';
+					files = [];
+					selectedToolIds = [];
+					webSearchMode = getPreferredDefaultWebSearchMode();
+					imageGenerationEnabled = false;
+					imageGenerationOptions = {};
+				}
 			}
+			restoreChatSessionState(chatIdProp);
 		}
-		restoreChatSessionState(chatIdProp);
 
 		showControls.subscribe(async (value) => {
 			if (controlPane && !$mobile) {
@@ -1058,6 +1121,10 @@
 			fileItem.id = uploadedFile.id;
 			fileItem.size = file.size;
 			fileItem.collection_name = uploadedFile?.meta?.collection_name;
+			fileItem.processing_mode = uploadedFile?.meta?.processing_mode;
+			if (uploadedFile?.meta?.processing_mode === 'full_context') {
+				fileItem.context = 'full';
+			}
 			fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
 
 			files = files;
@@ -1187,19 +1254,20 @@
 			}
 		} else if (!fresh) {
 			if (sessionStorage.selectedModels) {
-				selectedModels = JSON.parse(sessionStorage.selectedModels);
+				const storedSelectedModels = safeParseStoredJson<string[] | null>(
+					sessionStorage.selectedModels,
+					null
+				);
+				if (Array.isArray(storedSelectedModels)) {
+					selectedModels = storedSelectedModels;
+				}
 			} else {
 				if ($settings?.models) {
 					selectedModels = $settings?.models;
-				} else if ($config?.default_models) {
-					console.log($config?.default_models.split(',') ?? '');
-					selectedModels = $config?.default_models.split(',');
 				}
 			}
 		} else if ($settings?.models) {
 			selectedModels = $settings?.models;
-		} else if ($config?.default_models) {
-			selectedModels = $config?.default_models.split(',');
 		} else if (fresh) {
 			// fresh=true but no default model configured — reset to empty so user must choose
 			selectedModels = [''];
@@ -1266,6 +1334,7 @@
 			files = [];
 			selectedToolIds = [];
 			imageGenerationEnabled = false;
+			imageGenerationOptions = {};
 			codeInterpreterEnabled = false;
 		}
 
@@ -1342,7 +1411,7 @@
 			settings.set(userSettings.ui);
 			temporaryChatState = syncTemporaryChatState(userSettings.ui);
 		} else {
-			const localSettings = JSON.parse(localStorage.getItem('settings') ?? '{}');
+			const localSettings = safeParseStoredJson(localStorage.getItem('settings'), {});
 			settings.set(localSettings);
 			temporaryChatState = syncTemporaryChatState(localSettings);
 		}
@@ -1393,6 +1462,13 @@
 	const loadChat = async () => {
 		const navigationId = chatIdProp;
 		chatId.set(chatIdProp);
+		tags = [];
+		taskIds = null;
+		const chatContextPromise = getChatContextById(localStorage.token, chatIdProp).catch(() => ({
+			tags: [],
+			task_ids: []
+		}));
+
 		chat = await getChatById(localStorage.token, $chatId).catch(async (error) => {
 			await goto('/');
 			return null;
@@ -1401,17 +1477,9 @@
 		if (navigationId !== chatIdProp) return null;
 
 		if (chat) {
-			tags = await getTagsById(localStorage.token, $chatId).catch(async (error) => {
-				return [];
-			});
-
-			if (navigationId !== chatIdProp) return null;
-
 			const chatContent = chat.chat;
 
 			if (chatContent) {
-				console.log(chatContent);
-
 				selectedModels =
 					(chatContent?.models ?? undefined) !== undefined
 						? chatContent.models
@@ -1423,33 +1491,24 @@
 
 				chatTitle.set(chatContent.title);
 
-				const userSettings = await getUserSettings(localStorage.token);
-
-				if (navigationId !== chatIdProp) return null;
-
-				if (userSettings) {
-					await settings.set(userSettings.ui);
-				} else {
-					await settings.set(JSON.parse(localStorage.getItem('settings') ?? '{}'));
+				if (!$settings || Object.keys($settings).length === 0) {
+					await settings.set(safeParseStoredJson(localStorage.getItem('settings'), {}));
 				}
 
 				params = chatContent?.params ?? {};
 				chatFiles = chatContent?.files ?? [];
 
-				const taskRes = await getTaskIdsByChatId(localStorage.token, $chatId).catch((error) => {
-					return null;
-				});
+				void (async () => {
+					const nextContext = await chatContextPromise;
 
-				if (navigationId !== chatIdProp) return null;
+					if (navigationId !== chatIdProp) return;
 
-				taskIds = taskRes?.task_ids ?? [];
-				reconcileLoadedAssistantMessages(taskIds);
+					tags = nextContext?.tags ?? [];
+					taskIds = nextContext?.task_ids ?? [];
+					reconcileLoadedAssistantMessages(taskIds);
+				})();
 
 				resetAutoScrollLock();
-				await tick();
-
-				await tick();
-
 				return true;
 			} else {
 				return null;
@@ -2572,6 +2631,12 @@
 						($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
 							? imageGenerationEnabled
 							: false,
+					image_generation_options:
+						imageGenerationEnabled &&
+						$config?.features?.enable_image_generation &&
+						($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
+							? getImageGenerationOptionsPayload()
+							: undefined,
 					code_interpreter:
 						$config?.features?.enable_code_interpreter &&
 						($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
@@ -3319,6 +3384,7 @@
 								bind:autoScroll
 								bind:selectedToolIds
 								bind:imageGenerationEnabled
+								bind:imageGenerationOptions
 								bind:codeInterpreterEnabled
 								bind:webSearchMode
 								bind:atSelectedModel
@@ -3389,7 +3455,7 @@
 						</div>
 					{:else}
 						<div class="overflow-auto w-full h-full flex items-center">
-							<Placeholder
+								<Placeholder
 								{history}
 								{selectedModels}
 								bind:files
@@ -3397,6 +3463,7 @@
 								bind:autoScroll
 								bind:selectedToolIds
 								bind:imageGenerationEnabled
+								bind:imageGenerationOptions
 								bind:codeInterpreterEnabled
 								bind:webSearchMode
 								bind:atSelectedModel
@@ -3451,6 +3518,7 @@
 				{stopResponse}
 				{showMessage}
 				{eventTarget}
+				{currentValvesContext}
 			/>
 		</PaneGroup>
 	{:else if loading}

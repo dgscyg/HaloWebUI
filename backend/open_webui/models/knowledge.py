@@ -86,10 +86,12 @@ class KnowledgeUserModel(KnowledgeModel):
 
 class KnowledgeResponse(KnowledgeModel):
     files: Optional[list[FileMetadataResponse | dict]] = None
+    warnings: Optional[dict] = None
 
 
 class KnowledgeUserResponse(KnowledgeUserModel):
     files: Optional[list[FileMetadataResponse | dict]] = None
+    warnings: Optional[dict] = None
 
 
 class KnowledgeForm(BaseModel):

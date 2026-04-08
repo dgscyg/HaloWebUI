@@ -30,6 +30,7 @@ from open_webui.utils.file_upload_diagnostics import (
 
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.models.models import Models, ModelForm
+from open_webui.retrieval.document_processing import FILE_PROCESSING_MODE_RETRIEVAL
 
 
 log = logging.getLogger(__name__)
@@ -377,20 +378,16 @@ def add_file_to_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-    if not file.data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.FILE_NOT_PROCESSED,
-        )
 
     # Add content to the vector database
     try:
-        process_file(
+        process_result = process_file(
             request,
             ProcessFileForm(
                 file_id=form_data.file_id,
                 collection_name=id,
                 overwrite=form_data.overwrite,
+                processing_mode=FILE_PROCESSING_MODE_RETRIEVAL,
             ),
             user=user,
         )
@@ -425,6 +422,16 @@ def add_file_to_knowledge_by_id(
                 return KnowledgeFilesResponse(
                     **knowledge.model_dump(),
                     files=files,
+                    warnings=(
+                        {
+                            "message": "知识库文件已强制转为检索模式。",
+                            "processing_notice": process_result.get("notice"),
+                        }
+                        if process_result
+                        and process_result.get("processing_mode")
+                        != (file.meta or {}).get("processing_mode")
+                        else None
+                    ),
                 )
             else:
                 raise HTTPException(
@@ -484,7 +491,11 @@ def update_file_from_knowledge_by_id(
     try:
         process_file(
             request,
-            ProcessFileForm(file_id=form_data.file_id, collection_name=id),
+            ProcessFileForm(
+                file_id=form_data.file_id,
+                collection_name=id,
+                processing_mode=FILE_PROCESSING_MODE_RETRIEVAL,
+            ),
             user=user,
         )
     except HTTPException as e:
@@ -795,7 +806,9 @@ def add_files_to_knowledge_batch(
         )
 
     return KnowledgeFilesResponse(
-        **knowledge.model_dump(), files=Files.get_files_by_ids(existing_file_ids)
+        **knowledge.model_dump(),
+        files=Files.get_files_by_ids(existing_file_ids),
+        warnings={"message": "知识库文件已强制转为检索模式。"},
     )
 
 

@@ -341,6 +341,7 @@ def get_tools(
                                 ).credentials
                                 if getattr(getattr(request, "state", None), "token", None)
                                 else None,
+                                user_id=getattr(user, "id", None),
                                 on_notification=notif_cb,
                             )
 

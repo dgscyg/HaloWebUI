@@ -1,5 +1,6 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { getTimeRange } from '$lib/utils';
+import { parseJsonResponse } from '../response';
 
 export const createNewChat = async (token: string, chat: object) => {
 	let error = null;
@@ -15,10 +16,7 @@ export const createNewChat = async (token: string, chat: object) => {
 			chat: chat
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err;
 			console.log(err);
@@ -55,10 +53,7 @@ export const importChat = async (
 			folder_id: folderId
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err;
 			console.log(err);
@@ -88,10 +83,7 @@ export const getChatList = async (token: string = '', page: number | null = null
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -122,10 +114,7 @@ export const getChatListByUserId = async (token: string = '', userId: string) =>
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -156,10 +145,7 @@ export const getArchivedChatList = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -187,10 +173,7 @@ export const getAllChats = async (token: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -222,10 +205,7 @@ export const getChatListBySearchText = async (token: string, text: string, page:
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -256,10 +236,7 @@ export const getChatsByFolderId = async (token: string, folderId: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -287,10 +264,7 @@ export const getAllArchivedChats = async (token: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -318,10 +292,7 @@ export const getAllUserChats = async (token: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -349,10 +320,7 @@ export const getAllTags = async (token: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -380,10 +348,7 @@ export const getPinnedChatList = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -417,10 +382,7 @@ export const getChatListByTagName = async (token: string = '', tagName: string) 
 			name: tagName
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -451,10 +413,7 @@ export const getChatById = async (token: string, id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -472,6 +431,36 @@ export const getChatById = async (token: string, id: string) => {
 	return res;
 };
 
+export const getChatContextById = async (token: string, id: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/context`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		}
+	})
+		.then(parseJsonResponse)
+		.catch((err) => {
+			error = err.detail;
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return (
+		res ?? {
+			tags: [],
+			task_ids: []
+		}
+	);
+};
+
 export const getSharedChatList = async (token: string = '') => {
 	let error = null;
 
@@ -483,10 +472,7 @@ export const getSharedChatList = async (token: string = '') => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			error = err;
 			console.log(err);
@@ -511,10 +497,7 @@ export const getChatByShareId = async (token: string, share_id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -543,10 +526,7 @@ export const getChatPinnedStatusById = async (token: string, id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -581,10 +561,7 @@ export const toggleChatPinnedStatusById = async (token: string, id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -622,10 +599,7 @@ export const cloneChatById = async (token: string, id: string, title?: string) =
 			...(title && { title: title })
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -660,10 +634,7 @@ export const cloneSharedChatById = async (token: string, id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -698,10 +669,7 @@ export const shareChatById = async (token: string, id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -733,10 +701,7 @@ export const updateChatFolderIdById = async (token: string, id: string, folderId
 			folder_id: folderId
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -765,10 +730,7 @@ export const archiveChatById = async (token: string, id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -797,10 +759,7 @@ export const deleteSharedChatById = async (token: string, id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -832,10 +791,7 @@ export const updateChatById = async (token: string, id: string, chat: object) =>
 			chat: chat
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -864,10 +820,7 @@ export const deleteChatById = async (token: string, id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -896,10 +849,7 @@ export const getTagsById = async (token: string, id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -931,10 +881,7 @@ export const addTagById = async (token: string, id: string, tagName: string) => 
 			name: tagName
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -965,10 +912,7 @@ export const deleteTagById = async (token: string, id: string, tagName: string) 
 			name: tagName
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -996,10 +940,7 @@ export const deleteTagsById = async (token: string, id: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -1028,10 +969,7 @@ export const deleteAllChats = async (token: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})
@@ -1060,10 +998,7 @@ export const archiveAllChats = async (token: string) => {
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.then((json) => {
 			return json;
 		})

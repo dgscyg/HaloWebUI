@@ -3,7 +3,7 @@ import time
 from typing import Optional
 
 from open_webui.internal.db import Base, JSONField, get_db
-from open_webui.models.users import Users
+from open_webui.models.users import Users, UserResponse
 from open_webui.env import SRC_LOG_LEVELS
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Boolean, Column, String, Text, Index
@@ -75,6 +75,10 @@ class FunctionResponse(BaseModel):
     created_at: int  # timestamp in epoch
 
 
+class FunctionUserResponse(FunctionResponse):
+    user: Optional[UserResponse] = None
+
+
 class FunctionForm(BaseModel):
     id: str
     name: str
@@ -134,6 +138,40 @@ class FunctionsTable:
                     FunctionModel.model_validate(function)
                     for function in db.query(Function).all()
                 ]
+
+    def get_function_responses(self, active_only=False) -> list[FunctionUserResponse]:
+        with get_db() as db:
+            query = db.query(Function)
+            if active_only:
+                query = query.filter_by(is_active=True)
+
+            rows = query.all()
+            user_ids = list({row.user_id for row in rows if row.user_id})
+            users_map = Users.get_users_map_by_ids(user_ids) if user_ids else {}
+
+            return [
+                FunctionUserResponse(
+                    **FunctionModel.model_validate(row).model_dump(
+                        include={
+                            "id",
+                            "user_id",
+                            "type",
+                            "name",
+                            "meta",
+                            "is_active",
+                            "is_global",
+                            "updated_at",
+                            "created_at",
+                        }
+                    ),
+                    user=(
+                        UserResponse(**users_map[row.user_id].model_dump())
+                        if row.user_id in users_map
+                        else None
+                    ),
+                )
+                for row in rows
+            ]
 
     def get_functions_by_type(
         self, type: str, active_only=False

@@ -27,6 +27,7 @@
 	const i18n = getContext('i18n');
 
 	export let show = false;
+	export let preferredContext: { tab: 'tools' | 'functions'; id: string } | null = null;
 
 	let tab = 'tools';
 	let selectedId = '';
@@ -37,6 +38,7 @@
 	let valves = {};
 
 	let debounceTimer;
+	let lastAppliedPreferredKey = '';
 
 	const debounceSubmitHandler = async () => {
 		if (debounceTimer) {
@@ -122,6 +124,10 @@
 		init();
 	}
 
+	$: if (show && preferredContext?.id) {
+		void applyPreferredContext(preferredContext);
+	}
+
 	const init = async () => {
 		loading = true;
 
@@ -133,6 +139,30 @@
 		}
 
 		loading = false;
+
+		if (preferredContext?.id) {
+			await applyPreferredContext(preferredContext);
+		}
+	};
+
+	const applyPreferredContext = async (
+		context: { tab: 'tools' | 'functions'; id: string } | null
+	) => {
+		if (!context?.id) {
+			return;
+		}
+
+		const nextKey = `${context.tab}:${context.id}`;
+		if (nextKey === lastAppliedPreferredKey && selectedId === context.id && tab === context.tab) {
+			return;
+		}
+
+		lastAppliedPreferredKey = nextKey;
+		if (tab !== context.tab) {
+			tab = context.tab;
+			await tick();
+		}
+		selectedId = context.id;
 	};
 </script>
 
