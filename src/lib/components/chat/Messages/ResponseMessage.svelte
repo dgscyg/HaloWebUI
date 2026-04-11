@@ -1054,8 +1054,8 @@
 										class="w-full flex flex-col relative {!message.done ? 'streaming-fade' : ''}"
 										id="response-content-container"
 									>
-										{#if !message.done && !message.error && !hasVisibleAssistantOutput && displayStatusHistory.length > 0}
-											<!-- Show the full progress steps only before user-visible output starts -->
+										{#if !message.done && !message.error && !hasVisibleAssistantOutput}
+											<!-- Keep the waiting indicator visible even before backend status steps arrive -->
 											<ThinkingIndicator
 												statusHistory={displayStatusHistory}
 												messageTimestamp={message.timestamp}
