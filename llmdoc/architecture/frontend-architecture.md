@@ -89,7 +89,12 @@ graph TD
 | `/admin/[...path]` | `+page.svelte` | 管理后台子路由 |
 | `/settings/*` | 多个 `+page.svelte` | 设置子页面 |
 | `/workspace/*` | 多个 `+page.svelte` | 工作区子页面 |
-| `/playground/*` | 多个 `+page.svelte` | 测试场子页面 |
+
+补充说明:
+
+- 首页聊天占位区由 `src/lib/components/chat/Placeholder.svelte` 负责，现支持首页精选助手与建议提示词并存。
+- 图片生成入口已集中到 `/workspace/images`，原 `playground/*` 页面已删除。
+- 消息详情渲染链中新增 `src/lib/components/chat/Messages/MessageOutline.svelte`，用于桌面端消息大纲展示。
 
 ### 4.2 公开路由
 

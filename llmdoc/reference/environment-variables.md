@@ -101,6 +101,7 @@
 | `MCP_STDIO_ALLOWED_COMMANDS` | 空 | 追加允许的 `stdio` 启动命令白名单 |
 | `MCP_STDIO_START_TIMEOUT` | 项目默认值 | `stdio` MCP 初始化超时 |
 | `MCP_STDIO_IDLE_TIMEOUT` | 项目默认值 | `stdio` MCP 空闲回收时间 |
+| `HALO_RUNTIME_PROFILE` | `main` | 容器运行时配置档位；`slim` 镜像会裁剪 Node.js、`uv`、`git` 等内置运行时 |
 
 ## 4. Configuration Priority
 
