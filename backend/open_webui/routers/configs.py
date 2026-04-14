@@ -47,6 +47,20 @@ from open_webui.utils.user_tools import (
 router = APIRouter()
 
 
+def _log_background_task_exception(task: asyncio.Task, *, label: str) -> None:
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        return
+
+    if exc is not None:
+        import logging
+
+        logging.getLogger(__name__).warning("Background task failed: %s", label, exc_info=exc)
+
+
 ############################
 # ImportConfig
 ############################
@@ -140,7 +154,13 @@ async def set_connections_config(
         try:
             from open_webui.utils.models import get_all_base_models
 
-            asyncio.create_task(get_all_base_models(request, user=user))
+            task = asyncio.create_task(get_all_base_models(request, user=user))
+            task.add_done_callback(
+                lambda finished_task: _log_background_task_exception(
+                    finished_task,
+                    label="warm base models cache",
+                )
+            )
         except Exception:
             # Cache warmup is best-effort; the next /api/models call will populate it.
             pass

@@ -189,22 +189,30 @@
 	let buttonsContainerElement: HTMLDivElement;
 	let citationsRef: any = null;
 	let buttonsScrollBound = false;
+	let buttonsWheelHandler: ((event: WheelEvent) => void) | null = null;
 
 	function setupButtonsScroll() {
 		if (buttonsContainerElement && !buttonsScrollBound) {
 			buttonsScrollBound = true;
-			buttonsContainerElement.addEventListener('wheel', function (event) {
+			buttonsWheelHandler = (event: WheelEvent) => {
 				event.preventDefault();
 				if (event.deltaY !== 0) {
 					buttonsContainerElement.scrollLeft += event.deltaY;
 				}
-			});
+			};
+			buttonsContainerElement.addEventListener('wheel', buttonsWheelHandler);
 		}
 	}
 
 	$: if (buttonsContainerElement) {
 		setupButtonsScroll();
 	}
+
+	onDestroy(() => {
+		if (buttonsContainerElement && buttonsWheelHandler) {
+			buttonsContainerElement.removeEventListener('wheel', buttonsWheelHandler);
+		}
+	});
 	let showDeleteConfirm = false;
 	let showRegenerateConfirm = false;
 	let showRegenerateMenu = false;

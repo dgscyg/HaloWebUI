@@ -123,19 +123,31 @@
 	let loading = false;
 
 	const eventTarget = new EventTarget();
+	type MessageFile = Record<string, unknown>;
 	type PendingGeminiImage = {
 		mimeType: string;
 		parts: string[];
 	};
 	const pendingGeminiImages = new Map<string, Map<string, PendingGeminiImage>>();
 	const buildImageDataUrl = (mimeType: string, data: string) => `data:${mimeType};base64,${data}`;
-	const mergeMessageFiles = (existing: any[] = [], incoming: any[] = []) => {
-		const merged = [];
+	const normalizeMessageFile = (file: unknown): MessageFile | null => {
+		if (!file || typeof file !== 'object') return null;
+
+		try {
+			return JSON.parse(JSON.stringify(file)) as MessageFile;
+		} catch (error) {
+			console.warn('Failed to normalize message file', error);
+			return null;
+		}
+	};
+
+	const mergeMessageFiles = (existing: MessageFile[] = [], incoming: MessageFile[] = []) => {
+		const merged: MessageFile[] = [];
 		const seen = new Set<string>();
 
 		for (const file of [...existing, ...incoming]) {
-			if (!file || typeof file !== 'object') continue;
-			const normalized = JSON.parse(JSON.stringify(file));
+			const normalized = normalizeMessageFile(file);
+			if (!normalized) continue;
 			const key = JSON.stringify(normalized);
 			if (seen.has(key)) continue;
 			seen.add(key);
