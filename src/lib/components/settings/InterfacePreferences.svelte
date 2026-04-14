@@ -119,11 +119,13 @@
 	let widescreenMode = false;
 	let chatDirection: 'LTR' | 'RTL' | 'auto' = 'auto';
 	let showUsername = false;
+	let showFeaturedAssistantsOnHome = true;
 	let notificationSound = true;
 	let showChatTitleInTab = true;
 	let textScale: number | null = null;
 	let collapseCodeBlocks = false;
 	let collapseHistoricalLongResponses = true;
+	let showMessageOutline = true;
 	let expandDetails = false;
 
 	// Chat behavior
@@ -209,6 +211,7 @@
 		layout: {
 			defaultModelId: string;
 			showChatTitleInTab: boolean;
+			showFeaturedAssistantsOnHome: boolean;
 			landingPageMode: string;
 			chatBubble: boolean;
 			showUsername: boolean;
@@ -243,6 +246,7 @@
 			temporaryChatByDefault: boolean;
 			collapseCodeBlocks: boolean;
 			collapseHistoricalLongResponses: boolean;
+			showMessageOutline: boolean;
 			expandDetails: boolean;
 			promptSuggestionsEnabled: boolean;
 			insertSuggestionPrompt: boolean;
@@ -530,6 +534,7 @@
 		},
 		layout: {
 			showChatTitleInTab,
+			showFeaturedAssistantsOnHome,
 			landingPageMode,
 			chatBubble,
 			showUsername,
@@ -565,6 +570,7 @@
 			temporaryChatByDefault,
 			collapseCodeBlocks,
 			collapseHistoricalLongResponses,
+			showMessageOutline,
 			expandDetails,
 			promptSuggestionsEnabled,
 			insertSuggestionPrompt,
@@ -606,6 +612,7 @@
 	const applyLayoutSnapshot = (snapshot: SectionSnapshot['layout']) => {
 		defaultModelId = normalizeModelId(snapshot.defaultModelId);
 		showChatTitleInTab = snapshot.showChatTitleInTab;
+		showFeaturedAssistantsOnHome = snapshot.showFeaturedAssistantsOnHome;
 		landingPageMode = snapshot.landingPageMode;
 		chatBubble = snapshot.chatBubble;
 		showUsername = snapshot.showUsername;
@@ -642,6 +649,7 @@
 		temporaryChatByDefault = snapshot.temporaryChatByDefault;
 		collapseCodeBlocks = snapshot.collapseCodeBlocks;
 		collapseHistoricalLongResponses = snapshot.collapseHistoricalLongResponses;
+		showMessageOutline = snapshot.showMessageOutline;
 		expandDetails = snapshot.expandDetails;
 		promptSuggestionsEnabled = snapshot.promptSuggestionsEnabled;
 		insertSuggestionPrompt = snapshot.insertSuggestionPrompt;
@@ -678,6 +686,7 @@
 		textScale;
 		defaultModelId;
 		showChatTitleInTab;
+		showFeaturedAssistantsOnHome;
 		landingPageMode;
 		chatBubble;
 		showUsername;
@@ -710,6 +719,7 @@
 		enableAutoScrollOnStreaming;
 		collapseCodeBlocks;
 		collapseHistoricalLongResponses;
+		showMessageOutline;
 		expandDetails;
 		promptSuggestionsEnabled;
 		insertSuggestionPrompt;
@@ -925,6 +935,7 @@
 
 			const payload: Record<string, any> = {
 				showChatTitleInTab,
+				showFeaturedAssistantsOnHome,
 				landingPageMode,
 				chatBubble,
 				showUsername,
@@ -1005,6 +1016,7 @@
 				temporaryChatByDefault,
 				collapseCodeBlocks,
 				collapseHistoricalLongResponses,
+				showMessageOutline,
 				expandDetails,
 				insertSuggestionPrompt,
 				keepFollowUpPrompts,
@@ -1174,6 +1186,7 @@
 		enableMemory = $settings?.memory ?? false;
 
 		showUsername = $settings?.showUsername ?? false;
+		showFeaturedAssistantsOnHome = $settings?.showFeaturedAssistantsOnHome ?? true;
 
 		showEmojiInCall = $settings?.showEmojiInCall ?? false;
 		voiceInterruption = $settings?.voiceInterruption ?? false;
@@ -1204,6 +1217,7 @@
 
 		collapseCodeBlocks = $settings?.collapseCodeBlocks ?? false;
 		collapseHistoricalLongResponses = $settings?.collapseHistoricalLongResponses ?? true;
+		showMessageOutline = $settings?.showMessageOutline ?? true;
 		expandDetails = $settings?.expandDetails ?? false;
 
 		landingPageMode = $settings?.landingPageMode ?? '';
@@ -1228,7 +1242,7 @@
 		defaultModelId = getEffectiveDefaultModelId();
 
 		backgroundImageUrl = $settings?.backgroundImageUrl ?? null;
-		webSearchMode = getPreferredWebSearchMode($settings, $config, 'off');
+		webSearchMode = getPreferredWebSearchMode($settings, 'off');
 		iframeSandboxAllowSameOrigin = $settings?.iframeSandboxAllowSameOrigin ?? false;
 		iframeSandboxAllowForms = $settings?.iframeSandboxAllowForms ?? false;
 
@@ -1594,6 +1608,15 @@
 												{ value: '', label: $i18n.t('Default') },
 												{ value: 'chat', label: $i18n.t('Chat') }
 											]}
+										/>
+									</div>
+
+									<div class="flex items-center justify-between glass-item px-4 py-3">
+										<div class="text-sm font-medium">
+											{$i18n.t('Show featured assistants on home page')}
+										</div>
+										<Switch
+											bind:state={showFeaturedAssistantsOnHome}
 										/>
 									</div>
 
@@ -2141,6 +2164,14 @@
 										</div>
 										<div class="flex items-center justify-between glass-item px-4 py-3">
 											<div class="text-sm font-medium">
+												{$i18n.t('Show Message Outline')}
+											</div>
+											<Switch
+												bind:state={showMessageOutline}
+											/>
+										</div>
+										<div class="flex items-center justify-between glass-item px-4 py-3">
+											<div class="text-sm font-medium">
 												{$i18n.t('Expand Tool and Detail Blocks by Default')}
 											</div>
 											<Switch
@@ -2501,6 +2532,7 @@
 															value: option.value,
 															label: option.label,
 															description: option.description,
+															descriptionTone: option.descriptionTone,
 															disabled: option.disabled,
 															badge: option.badge
 														}))}

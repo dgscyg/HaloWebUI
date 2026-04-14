@@ -56,7 +56,7 @@
 
 	const tabMeta: Record<string, { label: string; description: string; badgeColor: string; iconColor: string }> = {
 		native:    { label: '内置功能',       description: '管理工具调用模式、内置搜索、知识库、图像生成等原生工具开关。', badgeColor: 'bg-emerald-50 dark:bg-emerald-950/30', iconColor: 'text-emerald-500 dark:text-emerald-400' },
-		mcp:       { label: 'MCP 服务器',     description: '通过 MCP 协议连接外部工具服务器，支持 HTTP 与 stdio 传输。', badgeColor: 'bg-violet-50 dark:bg-violet-950/30',  iconColor: 'text-violet-500 dark:text-violet-400' },
+		mcp:       { label: 'MCP 服务器',     description: '通过 MCP 协议连接外部工具服务器，支持 HTTP（优先 Streamable HTTP，自动兼容旧版 HTTP+SSE）与 stdio 传输。', badgeColor: 'bg-violet-50 dark:bg-violet-950/30',  iconColor: 'text-violet-500 dark:text-violet-400' },
 		workspace: { label: '工作空间工具',   description: '管理自定义 Python 工具，支持导入、导出和阀门配置。',           badgeColor: 'bg-blue-50 dark:bg-blue-950/30',    iconColor: 'text-blue-500 dark:text-blue-400' },
 		openapi:   { label: 'OpenAPI 服务器', description: '连接兼容 OpenAPI 规范的工具服务器，适用于企业级集成。',       badgeColor: 'bg-orange-50 dark:bg-orange-950/30', iconColor: 'text-orange-500 dark:text-orange-400' }
 	};
@@ -74,7 +74,7 @@
 
 	// ==================== Native Features 配置 ====================
 	const defaultNativeToolsConfig = {
-		TOOL_CALLING_MODE: 'default', // 'default' | 'native'
+		TOOL_CALLING_MODE: 'default', // 'default' | 'native' | 'off'
 		ENABLE_INTERLEAVED_THINKING: false,
 		MAX_TOOL_CALL_ROUNDS: DEFAULT_MAX_TOOL_CALL_ROUNDS,
 
@@ -104,7 +104,9 @@
 		...cloneSettingsSnapshot(defaultNativeToolsConfig),
 		...(value ?? {}),
 		TOOL_CALLING_MODE:
-			value?.TOOL_CALLING_MODE === 'native' || value?.TOOL_CALLING_MODE === 'default'
+			value?.TOOL_CALLING_MODE === 'native' ||
+			value?.TOOL_CALLING_MODE === 'default' ||
+			value?.TOOL_CALLING_MODE === 'off'
 				? value.TOOL_CALLING_MODE
 				: defaultNativeToolsConfig.TOOL_CALLING_MODE,
 		ENABLE_INTERLEAVED_THINKING: Boolean(value?.ENABLE_INTERLEAVED_THINKING),
@@ -204,32 +206,70 @@
 				workspace: false
 			};
 
-	// ==================== Workspace Tools 配置 ====================
-	let workspaceTools: Array<any> = [];
-	let toolsImportInputElement: HTMLInputElement;
+		// ==================== Workspace Tools 配置 ====================
+		let workspaceTools: Array<any> = [];
+		let toolsImportInputElement: HTMLInputElement;
 
-	let showValvesModal = false;
-	let selectedValvesToolId: string | null = null;
+		let showValvesModal = false;
+		let selectedValvesToolId: string | null = null;
 
-	// ==================== MCP 配置 ====================
-	let mcpServers: Array<any> = [];
-	let showMCPModal = false;
-	let editingMCPServerIndex: number | null = null;
-	const defaultMCPAppsConfig = {
-		ENABLE_MCP_APPS: false,
-		MCP_SERVER_APPS: {}
-	};
-	const normalizeMCPAppDisplayMode = (value: unknown): 'inline' | 'sidebar' =>
-		value === 'sidebar' ? 'sidebar' : 'inline';
-	const defaultMCPAppsCapabilities = {
-		ENABLE_MCP_APPS: false,
-		servers: []
-	};
-	let mcpAppsConfig = cloneSettingsSnapshot(defaultMCPAppsConfig);
-	let mcpAppsCapabilities = cloneSettingsSnapshot(defaultMCPAppsCapabilities);
-	let mcpAppDisplayMode: 'inline' | 'sidebar' = normalizeMCPAppDisplayMode(
-		$settings?.mcpAppDisplayMode
-	);
+		// ==================== MCP 配置 ====================
+		type MCPRuntimeCommandCapability = {
+			available: boolean;
+			message?: string | null;
+		};
+
+		type MCPRuntimeCapabilities = {
+			commands: Record<string, MCPRuntimeCommandCapability>;
+		};
+
+		type MCPRuntimeProfile = 'main' | 'slim' | 'custom';
+
+		const buildDefaultMCPRuntimeCapabilities = (): MCPRuntimeCapabilities => ({
+			commands: {
+				npx: { available: true, message: null },
+				uvx: { available: true, message: null },
+				git: { available: true, message: null }
+			}
+		});
+
+		const normalizeMCPRuntimeCapabilities = (value: any): MCPRuntimeCapabilities => {
+			const defaults = buildDefaultMCPRuntimeCapabilities();
+			const commands = { ...defaults.commands };
+
+			for (const [command, capability] of Object.entries(value?.commands ?? {})) {
+				commands[command] = {
+					available: (capability as any)?.available !== false,
+					message: typeof (capability as any)?.message === 'string' ? (capability as any).message : null
+				};
+			}
+
+			return { commands };
+		};
+
+		const normalizeMCPRuntimeProfile = (value: any): MCPRuntimeProfile =>
+			value === 'main' || value === 'slim' ? value : 'custom';
+
+		let mcpServers: Array<any> = [];
+		let mcpRuntimeCapabilities: MCPRuntimeCapabilities = buildDefaultMCPRuntimeCapabilities();
+		let mcpRuntimeProfile: MCPRuntimeProfile = 'custom';
+		let showMCPModal = false;
+		let editingMCPServerIndex: number | null = null;
+		const defaultMCPAppsConfig = {
+			ENABLE_MCP_APPS: false,
+			MCP_SERVER_APPS: {}
+		};
+		const normalizeMCPAppDisplayMode = (value: unknown): 'inline' | 'sidebar' =>
+			value === 'sidebar' ? 'sidebar' : 'inline';
+		const defaultMCPAppsCapabilities = {
+			ENABLE_MCP_APPS: false,
+			servers: []
+		};
+		let mcpAppsConfig = cloneSettingsSnapshot(defaultMCPAppsConfig);
+		let mcpAppsCapabilities = cloneSettingsSnapshot(defaultMCPAppsCapabilities);
+		let mcpAppDisplayMode: 'inline' | 'sidebar' = normalizeMCPAppDisplayMode(
+			$settings?.mcpAppDisplayMode
+		);
 
 	const normalizeMCPServer = (server: any) => ({
 		transport_type: server?.transport_type ?? 'http',
@@ -237,6 +277,7 @@
 		command: server?.command ?? '',
 		args: Array.isArray(server?.args) ? [...server.args] : [],
 		env: server?.env ?? {},
+		headers: { ...(server?.headers ?? {}) },
 		name: server?.name,
 		description: server?.description,
 		auth_type: server?.auth_type ?? 'none',
@@ -247,7 +288,8 @@
 		},
 		server_info: server?.server_info ?? undefined,
 		tool_count: server?.tool_count ?? undefined,
-		verified_at: server?.verified_at ?? undefined
+		verified_at: server?.verified_at ?? undefined,
+		tools: Array.isArray(server?.tools) ? [...server.tools] : undefined
 	});
 
 const getServerDisplayName = (server: any): string => {
@@ -324,15 +366,18 @@ const normalizeMCPAppsConfig = (value: Record<string, any> | null | undefined) =
 const getMCPTransportLabel = (server: any): string =>
 	(server.transport_type ?? 'http') === 'stdio' ? 'stdio' : 'HTTP';
 
-const getMCPPrimaryValue = (server: any): string =>
-	(server.transport_type ?? 'http') === 'stdio' ? server.command || '' : server.url || '';
+	const getMCPPrimaryValue = (server: any): string =>
+		(server.transport_type ?? 'http') === 'stdio' ? server.command || '' : server.url || '';
 
-const formatVerifiedAt = (value?: string): string => {
-	if (!value) return '';
-	const parsed = new Date(value);
-	if (Number.isNaN(parsed.getTime())) return value;
-	return parsed.toLocaleString();
-};
+	const getMCPHeaderCount = (server: any): number =>
+		Object.keys(server?.headers ?? {}).length;
+
+	const formatVerifiedAt = (value?: string): string => {
+		if (!value) return '';
+		const parsed = new Date(value);
+		if (Number.isNaN(parsed.getTime())) return value;
+		return parsed.toLocaleString();
+	};
 
 	// ==================== OpenAPI Servers 配置 ====================
 	let openAPIServers: Array<{
@@ -515,6 +560,8 @@ const formatVerifiedAt = (value?: string): string => {
 		});
 
 		mcpServers = (res?.MCP_SERVER_CONNECTIONS || []).map(normalizeMCPServer);
+		mcpRuntimeCapabilities = normalizeMCPRuntimeCapabilities(res?.MCP_RUNTIME_CAPABILITIES);
+		mcpRuntimeProfile = normalizeMCPRuntimeProfile(res?.MCP_RUNTIME_PROFILE);
 	};
 
 	const loadMCPAppsState = async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -581,6 +628,8 @@ const formatVerifiedAt = (value?: string): string => {
 			if (refreshMCPAppsState) {
 				await loadMCPAppsState({ silent: true });
 			}
+			mcpRuntimeCapabilities = normalizeMCPRuntimeCapabilities(res?.MCP_RUNTIME_CAPABILITIES);
+			mcpRuntimeProfile = normalizeMCPRuntimeProfile(res?.MCP_RUNTIME_PROFILE);
 			if (!silent) toast.success($i18n.t('MCP 服务器已保存'));
 			await refreshToolsStore();
 			return true;
@@ -757,19 +806,23 @@ const formatVerifiedAt = (value?: string): string => {
 	}}
 />
 
-<MCPServerModal
-	bind:show={showMCPModal}
-	isAdmin={$user?.role === 'admin'}
-	connection={editingMCPServerIndex !== null ? mcpServers[editingMCPServerIndex] : null}
-	onSubmit={async (connection) => {
-		if (editingMCPServerIndex !== null) {
-			await updateMCPServer(editingMCPServerIndex, connection);
-		} else {
-			await addMCPServer(connection);
-		}
-		editingMCPServerIndex = null;
-	}}
-/>
+	{#if showMCPModal}
+		<MCPServerModal
+			bind:show={showMCPModal}
+			isAdmin={$user?.role === 'admin'}
+			runtimeCapabilities={mcpRuntimeCapabilities}
+			runtimeProfile={mcpRuntimeProfile}
+			connection={editingMCPServerIndex !== null ? mcpServers[editingMCPServerIndex] : null}
+			onSubmit={async (connection) => {
+				if (editingMCPServerIndex !== null) {
+					await updateMCPServer(editingMCPServerIndex, connection);
+				} else {
+					await addMCPServer(connection);
+				}
+				editingMCPServerIndex = null;
+			}}
+		/>
+	{/if}
 
 <!-- OpenAPI Server Modal -->
 <AddServerModal bind:show={showOpenAPIModal} onSubmit={addOpenAPIServer} />
@@ -885,21 +938,24 @@ const formatVerifiedAt = (value?: string): string => {
 							class="glass-item p-4"
 						>
 							<div class="flex items-center justify-between mb-2.5">
-								<div class="text-sm font-medium">{$i18n.t('工具调用模式')}</div>
+								<div class="text-sm font-medium">{$i18n.t('Tool Calling Mode')}</div>
 								<HaloSelect
 									bind:value={nativeToolsConfig.TOOL_CALLING_MODE}
 									options={[
-										{ value: 'default', label: $i18n.t('默认') },
-										{ value: 'native', label: $i18n.t('原生') }
+										{ value: 'default', label: $i18n.t('Compatibility') },
+										{ value: 'native', label: $i18n.t('Native') },
+										{ value: 'off', label: $i18n.t('Off') }
 									]}
 									className="w-fit text-right"
 								/>
 							</div>
 							<div class="text-xs text-gray-500 dark:text-gray-400">
 								{#if nativeToolsConfig.TOOL_CALLING_MODE === 'default'}
-									{$i18n.t('使用基于提示词的逻辑，几乎兼容所有模型，但可能较慢。')}
+									{$i18n.t('Compatibility mode uses prompt-based tool orchestration, works with a wider range of models, but may be slower.')}
+								{:else if nativeToolsConfig.TOOL_CALLING_MODE === 'off'}
+									{$i18n.t('Off mode disables tool calling while keeping your selected MCP / OpenAPI tools configured.')}
 								{:else}
-									{$i18n.t('使用内置工具调用实现更快、更可靠的多步骤操作。需要高质量模型。')}
+									{$i18n.t("Native mode uses the model's built-in tool-calling capabilities for faster, more reliable multi-step operations. Requires a strong tool-capable model.")}
 								{/if}
 							</div>
 						</div>
@@ -1187,11 +1243,11 @@ const formatVerifiedAt = (value?: string): string => {
 									<div class="text-xs font-medium text-blue-700 dark:text-blue-300">
 										{$i18n.t('关于 MCP')}
 									</div>
-									<div class="text-xs leading-relaxed text-blue-600 dark:text-blue-400 mt-0.5">
-										{$i18n.t(
-											'MCP（模型上下文协议）是一个用于 LLM 与外部工具通信的开放标准。当前支持 HTTP 与 stdio 两种传输方式。'
-										)}
-									</div>
+										<div class="text-xs leading-relaxed text-blue-600 dark:text-blue-400 mt-0.5">
+											{$i18n.t(
+												'MCP（模型上下文协议）是一个用于 LLM 与外部工具通信的开放标准。当前支持 HTTP（优先 Streamable HTTP，自动兼容旧版 HTTP+SSE）与 stdio 两种传输方式。'
+											)}
+										</div>
 								</div>
 							</div>
 						</div>
@@ -1371,6 +1427,13 @@ const formatVerifiedAt = (value?: string): string => {
 														>
 															{server.auth_type || 'none'}
 														</span>
+														{#if getMCPHeaderCount(server) > 0}
+															<span
+																class="px-1.5 py-0.5 text-xs rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 shrink-0"
+															>
+																{$i18n.t('自定义头')} {getMCPHeaderCount(server)}
+															</span>
+														{/if}
 													{/if}
 													<span
 														class="px-1.5 py-0.5 text-xs rounded bg-gray-100 dark:bg-gray-800/70 text-gray-600 dark:text-gray-300 shrink-0"
@@ -1386,6 +1449,12 @@ const formatVerifiedAt = (value?: string): string => {
 												{#if server.verified_at}
 													<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5 ml-4">
 														{$i18n.t('上次验证于')} {formatVerifiedAt(server.verified_at)}
+													</div>
+												{:else}
+													<div class="text-xs text-amber-600 dark:text-amber-300 mt-0.5 ml-4">
+														{$i18n.t(
+															'Saved but not verified yet. Open edit and click "Verify Connection".'
+														)}
 													</div>
 												{/if}
 											</div>
@@ -1500,6 +1569,12 @@ const formatVerifiedAt = (value?: string): string => {
 										>OAuth 2.1</span
 									>
 									<span>{$i18n.t('用于带有身份提供商流程的企业级部署')}</span>
+								</div>
+								<div class="flex items-start gap-2">
+									<span class="px-1.5 py-0.5 rounded bg-gray-100/80 dark:bg-gray-800/60 font-mono"
+										>Headers</span
+									>
+									<span>{$i18n.t('适用于 x-consumer-api-key、x-api-key 或供应商要求的专用请求头')}</span>
 								</div>
 							</div>
 						</div>

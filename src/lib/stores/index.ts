@@ -73,6 +73,7 @@ export const toolServers = writable([]);
 export const banners: Writable<Banner[]> = writable([]);
 
 export const settings: Writable<Settings> = writable({});
+export const settingsRevision = writable(0);
 
 // Cached configs to avoid repeated API calls
 export const ollamaConfigCache = writable(null);
@@ -131,6 +132,26 @@ export type NativeWebSearchSupport = {
 	supported?: boolean;
 	can_attempt?: boolean;
 	connection_name?: string;
+	effective_scope?: string;
+	connection_support?: {
+		status?: 'supported' | 'unknown' | 'unsupported';
+		reason?: string;
+		source?: string;
+		provider?: string;
+		official?: boolean;
+		configured?: boolean | null;
+		supported?: boolean;
+		can_attempt?: boolean;
+		connection_name?: string;
+	};
+	model_rule?: {
+		status?: 'supported' | 'unknown' | 'unsupported';
+		reason?: string;
+		source?: string;
+		match_type?: string;
+		match_value?: string;
+		matched_on?: string;
+	};
 };
 
 type BaseModel = {
@@ -198,6 +219,7 @@ type Settings = {
 	showUsername?: boolean;
 	highContrastMode?: boolean;
 	showChatTitleInTab?: boolean;
+	showFeaturedAssistantsOnHome?: boolean;
 	notificationEnabled?: boolean;
 	notificationSound?: boolean;
 	notificationSoundAlways?: boolean;
@@ -230,6 +252,7 @@ type Settings = {
 	regenerateMenu?: boolean;
 	collapseCodeBlocks?: boolean;
 	collapseHistoricalLongResponses?: boolean;
+	showMessageOutline?: boolean;
 	expandDetails?: boolean;
 	renderMarkdownInPreviews?: boolean;
 	displayMultiModelResponsesInTabs?: boolean;
@@ -333,7 +356,6 @@ type Config = {
 		enable_web_search?: boolean;
 		enable_halo_web_search?: boolean;
 		enable_native_web_search?: boolean;
-		default_web_search_mode?: 'off' | 'halo' | 'native' | 'auto';
 		enable_google_drive_integration: boolean;
 		enable_onedrive_integration: boolean;
 		enable_image_generation: boolean;

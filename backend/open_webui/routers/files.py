@@ -137,6 +137,25 @@ def upload_file(
                 detail=build_file_upload_error_detail(diagnostic),
             )
 
+        file_extension = os.path.splitext(filename)[1]
+        file_extension = file_extension[1:].lower() if file_extension else ""
+        allowed_extensions = getattr(
+            request.app.state.config, "ALLOWED_FILE_EXTENSIONS", None
+        )
+        if process and allowed_extensions:
+            normalized_extensions = [
+                str(ext).strip().lower().lstrip(".")
+                for ext in allowed_extensions
+                if str(ext).strip()
+            ]
+            if file_extension not in normalized_extensions:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT(
+                        f"File type {file_extension} is not allowed"
+                    ),
+                )
+
         # replace filename with uuid
         id = str(uuid.uuid4())
         name = filename

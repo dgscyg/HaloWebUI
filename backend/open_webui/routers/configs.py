@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.config import get_config, save_config
@@ -14,8 +14,11 @@ from open_webui.config import BannerModel
 from open_webui.utils.tools import get_tool_server_data, get_tool_servers_data
 from open_webui.utils.mcp import (
     build_mcp_app_resource_proxy_path,
+    get_mcp_runtime_capabilities,
+    get_mcp_runtime_profile,
     get_mcp_server_data,
     get_mcp_servers_data,
+    normalize_mcp_http_headers,
     read_mcp_resource,
 )
 from open_webui.utils.user_tools import (
@@ -263,7 +266,7 @@ async def set_native_tools_config(
     if mode_raw not in TOOL_CALLING_MODE_ALLOWED:
         raise HTTPException(
             status_code=400,
-            detail="Invalid TOOL_CALLING_MODE. Must be 'default' or 'native'.",
+            detail="Invalid TOOL_CALLING_MODE. Must be 'default', 'native', or 'off'.",
         )
     mode = normalize_tool_calling_mode(mode_raw, default=TOOL_CALLING_MODE_DEFAULT)
 
@@ -289,6 +292,7 @@ class MCPServerConnection(BaseModel):
     command: Optional[str] = None
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
+    headers: Dict[str, str] = Field(default_factory=dict)
     name: Optional[str] = None
     description: Optional[str] = None
     auth_type: Optional[str] = None
@@ -298,6 +302,7 @@ class MCPServerConnection(BaseModel):
     tool_count: Optional[int] = None
     mcp_apps: Optional[dict] = Field(default=None, alias=MCP_APPS_KEY)
     verified_at: Optional[str] = None
+    tools: Optional[list[dict]] = None
 
     model_config = ConfigDict(extra="allow")
 
@@ -308,6 +313,7 @@ class MCPServerConnection(BaseModel):
         self.command = (self.command or "").strip() or None
         self.args = [str(item) for item in (self.args or [])]
         self.env = {str(key): str(value) for key, value in (self.env or {}).items()}
+        self.headers = normalize_mcp_http_headers(self.headers or {})
 
         if self.transport_type == "http":
             if not self.url:
@@ -315,6 +321,7 @@ class MCPServerConnection(BaseModel):
         elif self.transport_type == "stdio":
             if not self.command:
                 raise ValueError("command is required when transport_type is stdio")
+            self.headers = {}
 
         return self
 
@@ -338,6 +345,7 @@ def _normalize_mcp_server_connection(connection: MCPServerConnection) -> dict:
     if connection.transport_type == "stdio":
         normalized.pop("url", None)
         normalized.pop("auth_type", None)
+        normalized.pop("headers", None)
         normalized.pop("key", None)
         normalized["command"] = connection.command
         normalized["args"] = [str(item) for item in (connection.args or [])]
@@ -350,6 +358,8 @@ def _normalize_mcp_server_connection(connection: MCPServerConnection) -> dict:
         normalized.pop("env", None)
         normalized["url"] = (connection.url or "").rstrip("/")
         normalized["auth_type"] = connection.auth_type
+        if connection.headers:
+            normalized["headers"] = connection.headers
         if connection.key:
             normalized["key"] = connection.key
         else:
@@ -396,13 +406,23 @@ class MCPAppsCapabilitiesResponse(BaseModel):
 
 class MCPServersConfigForm(BaseModel):
     MCP_SERVER_CONNECTIONS: list[MCPServerConnection]
+    MCP_RUNTIME_CAPABILITIES: Dict[str, Any] = Field(default_factory=dict)
+    MCP_RUNTIME_PROFILE: str = "custom"
+
+
+def _build_mcp_servers_config_response(connections: list[dict]) -> dict:
+    return {
+        "MCP_SERVER_CONNECTIONS": connections,
+        "MCP_RUNTIME_CAPABILITIES": get_mcp_runtime_capabilities(),
+        "MCP_RUNTIME_PROFILE": get_mcp_runtime_profile(),
+    }
 
 
 @router.get("/mcp_servers", response_model=MCPServersConfigForm)
 async def get_mcp_servers_config(request: Request, user=Depends(get_verified_user)):
-    return {
-        "MCP_SERVER_CONNECTIONS": get_user_mcp_server_connections(request, user),
-    }
+    return _build_mcp_servers_config_response(
+        get_user_mcp_server_connections(request, user)
+    )
 
 
 @router.post("/mcp_servers", response_model=MCPServersConfigForm)
@@ -425,9 +445,7 @@ async def set_mcp_servers_config(
 
     set_user_mcp_server_connections(user, connections)
 
-    return {
-        "MCP_SERVER_CONNECTIONS": connections,
-    }
+    return _build_mcp_servers_config_response(connections)
 
 
 @router.post("/mcp_servers/verify")
@@ -472,6 +490,7 @@ async def verify_mcp_server_connection(
                 {
                     "name": t.get("name"),
                     "description": t.get("description"),
+                    "inputSchema": t.get("inputSchema") or {},
                 }
                 for t in tools[:50]
             ],

@@ -39,6 +39,7 @@
 
 	let tools = {};
 	let show = false;
+	let loadingTools = false;
 
 	function toggleToolEnabled(toolId: string, enabled?: boolean) {
 		const nextEnabled = enabled ?? !tools?.[toolId]?.enabled;
@@ -70,11 +71,19 @@
 		Boolean($config?.features?.enable_native_web_search);
 
 	const init = async () => {
-		if ($_tools === null) {
-			await _tools.set(await getTools(localStorage.token));
+		if (!loadingTools) {
+			loadingTools = true;
+			try {
+				const latestTools = await getTools(localStorage.token).catch(() => null);
+				if (latestTools) {
+					_tools.set(latestTools);
+				}
+			} finally {
+				loadingTools = false;
+			}
 		}
 
-		tools = $_tools.reduce((a, tool, i, arr) => {
+		tools = ($_tools ?? []).reduce((a, tool) => {
 			a[tool.id] = {
 				name: tool.name,
 				description: tool.meta.description,
@@ -109,6 +118,17 @@
 		currentWebSearchModeOption?.shortLabel ??
 		currentWebSearchModeOption?.label ??
 		getWebSearchModeLabel(webSearchMode);
+
+	const getOptionDescriptionClasses = (tone?: WebSearchModeOption['descriptionTone']) => {
+		switch (tone) {
+			case 'warning':
+				return 'mt-0.5 text-xs leading-4 text-amber-600/90 dark:text-amber-400/80';
+			case 'info':
+				return 'mt-0.5 text-xs leading-4 text-sky-600/80 dark:text-sky-400/80';
+			default:
+				return 'mt-0.5 text-xs leading-4 text-gray-500 dark:text-gray-400';
+		}
+	};
 </script>
 
 <!-- Hidden file input used to open the camera on mobile -->
@@ -226,7 +246,7 @@
 												{/if}
 											</div>
 											{#if option.description}
-												<div class="mt-0.5 text-xs leading-4 text-gray-500 dark:text-gray-400">
+												<div class={getOptionDescriptionClasses(option.descriptionTone)}>
 													{option.description}
 												</div>
 											{/if}

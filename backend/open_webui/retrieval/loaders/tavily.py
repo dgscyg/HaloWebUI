@@ -1,10 +1,11 @@
 import requests
 import logging
-from typing import Iterator, List, Literal, Union
+from typing import Iterator, List, Literal, Optional, Union
 
 from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document
 from open_webui.env import SRC_LOG_LEVELS
+from open_webui.retrieval.web.tavily import build_tavily_api_url
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["RAG"])
@@ -29,6 +30,8 @@ class TavilyLoader(BaseLoader):
         api_key: str,
         extract_depth: Literal["basic", "advanced"] = "basic",
         continue_on_failure: bool = True,
+        api_base_url: Optional[str] = None,
+        force_mode: bool = False,
     ) -> None:
         """Initialize Tavily Extract client.
 
@@ -45,12 +48,18 @@ class TavilyLoader(BaseLoader):
         """
         if not urls:
             raise ValueError("At least one URL must be provided.")
+        if not str(api_key or "").strip():
+            raise ValueError("TAVILY_API_KEY is required for the Tavily loader.")
 
         self.api_key = api_key
         self.urls = urls if isinstance(urls, list) else [urls]
         self.extract_depth = extract_depth
         self.continue_on_failure = continue_on_failure
-        self.api_url = "https://api.tavily.com/extract"
+        self.api_url = build_tavily_api_url(
+            api_base_url,
+            "extract",
+            force_mode=force_mode,
+        )
 
     def lazy_load(self) -> Iterator[Document]:
         """Extract and yield documents from the URLs using Tavily Extract API."""

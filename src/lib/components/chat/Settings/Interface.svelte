@@ -60,6 +60,7 @@
 
 	let collapseCodeBlocks = false;
 	let collapseHistoricalLongResponses = true;
+	let showMessageOutline = true;
 	let expandDetails = false;
 
 	let imageCompression = false;
@@ -94,6 +95,11 @@
 	const toggleCollapseCodeBlocks = () => {
 		collapseCodeBlocks = !collapseCodeBlocks;
 		saveSettings({ collapseCodeBlocks });
+	};
+
+	const toggleShowMessageOutline = () => {
+		showMessageOutline = !showMessageOutline;
+		saveSettings({ showMessageOutline });
 	};
 
 	const toggleSplitLargeChunks = async () => {
@@ -334,6 +340,7 @@
 
 		collapseCodeBlocks = $settings.collapseCodeBlocks ?? false;
 		collapseHistoricalLongResponses = $settings.collapseHistoricalLongResponses ?? true;
+		showMessageOutline = $settings.showMessageOutline ?? true;
 		expandDetails = $settings.expandDetails ?? false;
 
 		landingPageMode = $settings.landingPageMode ?? '';
@@ -354,7 +361,7 @@
 		defaultModelId = $settings?.models?.at(0) ?? '';
 
 		backgroundImageUrl = $settings.backgroundImageUrl ?? null;
-		webSearchMode = getPreferredWebSearchMode($settings, $config, 'off');
+		webSearchMode = getPreferredWebSearchMode($settings, 'off');
 	});
 </script>
 
@@ -811,6 +818,26 @@
 
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">
+					<div class=" self-center text-xs">{$i18n.t('Show Message Outline')}</div>
+
+					<button
+						class="p-1 px-3 text-xs flex rounded-sm transition"
+						on:click={() => {
+							toggleShowMessageOutline();
+						}}
+						type="button"
+					>
+						{#if showMessageOutline === true}
+							<span class="ml-2 self-center">{$i18n.t('On')}</span>
+						{:else}
+							<span class="ml-2 self-center">{$i18n.t('Off')}</span>
+						{/if}
+					</button>
+				</div>
+			</div>
+
+			<div>
+				<div class=" py-0.5 flex w-full justify-between">
 					<div class=" self-center text-xs">
 						{$i18n.t('Expand Tool and Detail Blocks by Default')}
 					</div>
@@ -977,6 +1004,7 @@
 									value: option.value,
 									label: option.label,
 									description: option.description,
+									descriptionTone: option.descriptionTone,
 									disabled: option.disabled,
 									badge: option.badge
 								}))}

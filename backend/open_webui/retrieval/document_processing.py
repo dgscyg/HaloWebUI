@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import mimetypes
 import os
 import time
@@ -36,10 +37,21 @@ from open_webui.retrieval.document_processing_shared import (
 from open_webui.retrieval.loaders.main import Loader
 from open_webui.retrieval.loaders.mistral import MistralLoader
 from open_webui.storage.provider import Storage
+from open_webui.utils.error_handling import extract_error_detail, read_requests_error_payload
 from open_webui.utils.file_upload_diagnostics import (
     FileUploadDiagnosticError,
     classify_file_upload_error,
 )
+
+log = logging.getLogger(__name__)
+
+STRICT_LOCAL_FALLBACK_PROVIDERS = {
+    DOCUMENT_PROVIDER_DOC2X,
+    DOCUMENT_PROVIDER_MINERU,
+    DOCUMENT_PROVIDER_MISTRAL,
+    DOCUMENT_PROVIDER_OPEN_MINERU,
+    DOCUMENT_PROVIDER_PADDLEOCR,
+}
 
 
 def resolve_file_processing_mode_from_config(
@@ -185,20 +197,90 @@ def build_processing_notice(
     return None
 
 
-def _get_loader_for_provider(request: Any, provider: str, provider_config: dict[str, Any]) -> Loader:
+def _get_loader_for_provider(
+    request: Any,
+    provider: str,
+    provider_config: dict[str, Any],
+    *,
+    force_local_engine: bool = False,
+) -> Loader:
     engine = request.app.state.config.CONTENT_EXTRACTION_ENGINE
     if provider == DOCUMENT_PROVIDER_AZURE_DOCUMENT_INTELLIGENCE:
         engine = "document_intelligence"
+    elif force_local_engine:
+        engine = ""
 
     return Loader(
         engine=engine,
+        user=getattr(request.state, "user", None),
+        EXTERNAL_DOCUMENT_LOADER_URL=getattr(
+            request.app.state.config, "EXTERNAL_DOCUMENT_LOADER_URL", ""
+        ),
+        EXTERNAL_DOCUMENT_LOADER_URL_IS_FULL_PATH=getattr(
+            request.app.state.config,
+            "EXTERNAL_DOCUMENT_LOADER_URL_IS_FULL_PATH",
+            False,
+        ),
+        EXTERNAL_DOCUMENT_LOADER_API_KEY=getattr(
+            request.app.state.config, "EXTERNAL_DOCUMENT_LOADER_API_KEY", ""
+        ),
         TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
         DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
+        DOCLING_API_KEY=getattr(request.app.state.config, "DOCLING_API_KEY", ""),
+        DOCLING_PARAMS=getattr(request.app.state.config, "DOCLING_PARAMS", {}),
+        DATALAB_MARKER_API_KEY=getattr(
+            request.app.state.config, "DATALAB_MARKER_API_KEY", ""
+        ),
+        DATALAB_MARKER_API_BASE_URL=getattr(
+            request.app.state.config, "DATALAB_MARKER_API_BASE_URL", ""
+        ),
+        DATALAB_MARKER_ADDITIONAL_CONFIG=getattr(
+            request.app.state.config, "DATALAB_MARKER_ADDITIONAL_CONFIG", ""
+        ),
+        DATALAB_MARKER_USE_LLM=getattr(
+            request.app.state.config, "DATALAB_MARKER_USE_LLM", False
+        ),
+        DATALAB_MARKER_SKIP_CACHE=getattr(
+            request.app.state.config, "DATALAB_MARKER_SKIP_CACHE", False
+        ),
+        DATALAB_MARKER_FORCE_OCR=getattr(
+            request.app.state.config, "DATALAB_MARKER_FORCE_OCR", False
+        ),
+        DATALAB_MARKER_PAGINATE=getattr(
+            request.app.state.config, "DATALAB_MARKER_PAGINATE", False
+        ),
+        DATALAB_MARKER_STRIP_EXISTING_OCR=getattr(
+            request.app.state.config, "DATALAB_MARKER_STRIP_EXISTING_OCR", False
+        ),
+        DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=getattr(
+            request.app.state.config, "DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION", False
+        ),
+        DATALAB_MARKER_FORMAT_LINES=getattr(
+            request.app.state.config, "DATALAB_MARKER_FORMAT_LINES", False
+        ),
+        DATALAB_MARKER_OUTPUT_FORMAT=getattr(
+            request.app.state.config, "DATALAB_MARKER_OUTPUT_FORMAT", "markdown"
+        ),
         PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
+        PDF_LOADING_MODE=getattr(request.app.state.config, "PDF_LOADING_MODE", ""),
+        PDF_LOADER_MODE=getattr(request.app.state.config, "PDF_LOADING_MODE", "page"),
         DOCUMENT_INTELLIGENCE_ENDPOINT=provider_config.get("endpoint")
         or request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
         DOCUMENT_INTELLIGENCE_KEY=provider_config.get("key")
         or request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
+        DOCUMENT_INTELLIGENCE_MODEL=getattr(
+            request.app.state.config, "DOCUMENT_INTELLIGENCE_MODEL", "prebuilt-layout"
+        ),
+        MINERU_API_MODE=getattr(request.app.state.config, "MINERU_API_MODE", "local"),
+        MINERU_API_URL=getattr(
+            request.app.state.config, "MINERU_API_URL", "http://localhost:8000"
+        ),
+        MINERU_API_KEY=getattr(request.app.state.config, "MINERU_API_KEY", ""),
+        MINERU_API_TIMEOUT=getattr(request.app.state.config, "MINERU_API_TIMEOUT", "300"),
+        MINERU_PARAMS=getattr(request.app.state.config, "MINERU_PARAMS", {}),
+        MISTRAL_OCR_API_BASE_URL=getattr(
+            request.app.state.config, "MISTRAL_OCR_API_BASE_URL", "https://api.mistral.ai/v1"
+        ),
         MISTRAL_OCR_API_KEY=provider_config.get("api_key")
         or request.app.state.config.MISTRAL_OCR_API_KEY,
     )
@@ -240,10 +322,36 @@ def _read_bytes(path: str) -> bytes:
 
 
 def _requests_json(response: requests.Response) -> dict[str, Any]:
-    response.raise_for_status()
+    if not response.ok:
+        payload = read_requests_error_payload(response)
+        detail = (
+            extract_error_detail(payload)
+            or extract_error_detail(getattr(response, "text", None))
+            or response.reason
+            or "Request failed."
+        )
+        raise RuntimeError(
+            f"HTTP {response.status_code} {response.reason or ''}: {detail}".strip()
+        )
     if not response.content:
         return {}
     return response.json()
+
+
+def _raise_provider_api_error(payload: Any, provider_name: str) -> None:
+    if not isinstance(payload, dict):
+        return
+
+    code = payload.get("code")
+    if code in (None, 0, "0"):
+        return
+
+    msg = extract_error_detail(payload.get("msg")) or f"{provider_name} API returned an error."
+    trace_id = extract_error_detail(payload.get("trace_id"))
+    detail = f"{provider_name} API error {code}: {msg}"
+    if trace_id:
+        detail = f"{detail} (trace_id: {trace_id})"
+    raise RuntimeError(detail)
 
 
 def _download_text(url: str, headers: Optional[dict[str, str]] = None) -> str:
@@ -318,8 +426,103 @@ def _build_document_list(text: str, metadata: Optional[dict[str, Any]] = None) -
 class ExtractionResult:
     docs: list[Document]
     provider: str
+    requested_provider: str
     notice: Optional[str] = None
     fallbacks: list[str] = field(default_factory=list)
+    primary_provider_error: Optional[str] = None
+    fallback_provider: Optional[str] = None
+    fallback_reason: Optional[str] = None
+
+
+def _stringify_provider_error(error: Any) -> str:
+    detail = extract_error_detail(error)
+    return detail or "Unknown document provider error."
+
+
+def _should_use_strict_local_fallback(provider: str) -> bool:
+    return provider in STRICT_LOCAL_FALLBACK_PROVIDERS
+
+
+def _build_provider_chain_message(
+    requested_provider: str,
+    primary_provider_error: str,
+    fallback_provider: str,
+    fallback_error: Optional[str] = None,
+) -> str:
+    message = (
+        f"Primary provider `{requested_provider}` failed: {primary_provider_error}. "
+        f"Fallback provider `{fallback_provider}` was attempted."
+    )
+    if fallback_error:
+        return f"{message} Fallback failed: {fallback_error}."
+    return message
+
+
+def _fallback_to_local_default(
+    request: Any,
+    file_obj: FileModel,
+    *,
+    requested_provider: str,
+    provider_configs: dict[str, dict[str, Any]],
+    primary_provider_error: str,
+    fallback_reason: str,
+) -> ExtractionResult:
+    fallback_provider = DOCUMENT_PROVIDER_LOCAL_DEFAULT
+    strict_local_only = _should_use_strict_local_fallback(requested_provider)
+    log.warning(
+        "Document extraction fallback requested: %s -> %s (strict_local_only=%s, reason=%s)",
+        requested_provider,
+        fallback_provider,
+        strict_local_only,
+        fallback_reason,
+    )
+
+    try:
+        local_docs = _extract_docs_with_provider(
+            request,
+            file_obj,
+            fallback_provider,
+            provider_configs.get(fallback_provider, {}),
+            strict_local_only=strict_local_only,
+        )
+    except Exception as fallback_exc:
+        fallback_error = _stringify_provider_error(fallback_exc)
+        log.error(
+            "Document extraction chain failed: %s -> %s (primary_error=%s, fallback_error=%s)",
+            requested_provider,
+            fallback_provider,
+            primary_provider_error,
+            fallback_error,
+        )
+        raise RuntimeError(
+            _build_provider_chain_message(
+                requested_provider,
+                primary_provider_error,
+                fallback_provider,
+                fallback_error=fallback_error,
+            )
+        ) from fallback_exc
+
+    log.info(
+        "Document extraction chain succeeded: %s -> %s",
+        requested_provider,
+        fallback_provider,
+    )
+    return ExtractionResult(
+        docs=local_docs,
+        provider=fallback_provider,
+        requested_provider=requested_provider,
+        notice=build_processing_notice(
+            FILE_PROCESSING_MODE_FULL_CONTEXT,
+            requested_provider,
+            fallback_provider=fallback_provider,
+            reason=fallback_reason,
+        ),
+        fallbacks=[requested_provider],
+        primary_provider_error=primary_provider_error,
+        fallback_provider=fallback_provider,
+        fallback_reason=fallback_reason,
+    )
 
 
 class MinerULoader:
@@ -374,20 +577,24 @@ class MinerULoader:
             timeout=60,
         )
         data = _requests_json(response)
+        _raise_provider_api_error(data, "MinerU")
         file_urls = _get_nested_value(data, ("data", "file_urls"), ("file_urls",)) or []
         if not file_urls:
             raise RuntimeError("MinerU did not return an upload URL.")
-        upload_url = file_urls[0].get("url") or file_urls[0].get("presigned_url")
+
+        first_file_url = file_urls[0]
+        if isinstance(first_file_url, str):
+            upload_url = first_file_url
+        elif isinstance(first_file_url, dict):
+            upload_url = first_file_url.get("url") or first_file_url.get("presigned_url")
+        else:
+            raise RuntimeError("MinerU returned an unsupported upload URL format.")
+
         batch_id = _get_nested_value(data, ("data", "batch_id"), ("batch_id",))
         if not upload_url or not batch_id:
             raise RuntimeError("MinerU batch creation response is incomplete.")
 
-        requests.put(
-            upload_url,
-            data=_read_bytes(self.file_path),
-            headers={"Content-Type": self.file_obj.meta.get("content_type") or "application/octet-stream"},
-            timeout=120,
-        ).raise_for_status()
+        requests.put(upload_url, data=_read_bytes(self.file_path), timeout=120).raise_for_status()
 
         poll_interval = _coerce_poll_interval(self.config, 3)
         timeout = _coerce_timeout(self.config, 180)
@@ -404,6 +611,7 @@ class MinerULoader:
                 timeout=60,
             )
             poll_data = _requests_json(poll_response)
+            _raise_provider_api_error(poll_data, "MinerU")
             results = (
                 _get_nested_value(
                     poll_data,
@@ -434,7 +642,12 @@ class MinerULoader:
                     break
                 if state in {"failed", "error"}:
                     raise RuntimeError(
-                        str(result_item.get("message") or result_item.get("error") or "MinerU parsing failed.")
+                        str(
+                            result_item.get("err_msg")
+                            or result_item.get("message")
+                            or result_item.get("error")
+                            or "MinerU parsing failed."
+                        )
                     )
 
             time.sleep(poll_interval)
@@ -488,17 +701,13 @@ class OpenMinerULoader:
             timeout=60,
         )
         data = _requests_json(response)
+        _raise_provider_api_error(data, "Open MinerU")
         file_url = _get_nested_value(data, ("data", "file_url"), ("file_url",))
         task_id = _get_nested_value(data, ("data", "task_id"), ("task_id",))
         if not file_url or not task_id:
             raise RuntimeError("Open MinerU did not return upload information.")
 
-        requests.put(
-            file_url,
-            data=_read_bytes(self.file_path),
-            headers={"Content-Type": self.file_obj.meta.get("content_type") or "application/octet-stream"},
-            timeout=120,
-        ).raise_for_status()
+        requests.put(file_url, data=_read_bytes(self.file_path), timeout=120).raise_for_status()
 
         poll_interval = _coerce_poll_interval(self.config, 3)
         timeout = _coerce_timeout(self.config, 180)
@@ -511,6 +720,7 @@ class OpenMinerULoader:
                 timeout=60,
             )
             poll_data = _requests_json(poll_response)
+            _raise_provider_api_error(poll_data, "Open MinerU")
             status = str(
                 _get_nested_value(poll_data, ("data", "status"), ("status",))
                 or ""
@@ -642,6 +852,18 @@ class PaddleOCRLoader:
         self.file_path = file_path
         self.config = config
 
+    def _build_headers(self) -> dict[str, str]:
+        api_key = str(self.config.get("api_key") or "").strip()
+        if not api_key:
+            return {}
+
+        if api_key.lower().startswith(("bearer ", "token ")):
+            auth_value = api_key
+        else:
+            auth_value = f"token {api_key}"
+
+        return {"Authorization": auth_value}
+
     def load(self) -> list[Document]:
         server_url = str(self.config.get("server_url") or "").strip()
         if not server_url:
@@ -654,7 +876,12 @@ class PaddleOCRLoader:
             "fileType": file_type,
             "file": base64.b64encode(_read_bytes(self.file_path)).decode("utf-8"),
         }
-        response = requests.post(server_url, json=payload, timeout=120)
+        response = requests.post(
+            server_url,
+            json=payload,
+            headers=self._build_headers(),
+            timeout=120,
+        )
         data = _requests_json(response)
 
         results = (
@@ -681,6 +908,8 @@ def _extract_docs_with_provider(
     file_obj: FileModel,
     provider: str,
     provider_config: dict[str, Any],
+    *,
+    strict_local_only: bool = False,
 ) -> list[Document]:
     file_path = Storage.get_file(file_obj.path)
 
@@ -688,7 +917,12 @@ def _extract_docs_with_provider(
         DOCUMENT_PROVIDER_LOCAL_DEFAULT,
         DOCUMENT_PROVIDER_AZURE_DOCUMENT_INTELLIGENCE,
     }:
-        loader = _get_loader_for_provider(request, provider, provider_config)
+        loader = _get_loader_for_provider(
+            request,
+            provider,
+            provider_config,
+            force_local_engine=(strict_local_only and provider == DOCUMENT_PROVIDER_LOCAL_DEFAULT),
+        )
         docs = loader.load(file_obj.filename, file_obj.meta.get("content_type"), file_path)
         docs = _merge_pdf_single_mode(request, file_obj, docs)
         return _merge_document_metadata(file_obj, docs)
@@ -698,6 +932,12 @@ def _extract_docs_with_provider(
             api_key=provider_config.get("api_key")
             or request.app.state.config.MISTRAL_OCR_API_KEY,
             file_path=file_path,
+            mime_type=file_obj.meta.get("content_type"),
+            base_url=getattr(
+                request.app.state.config,
+                "MISTRAL_OCR_API_BASE_URL",
+                "https://api.mistral.ai/v1",
+            ),
         )
         docs = loader.load()
         docs = _merge_pdf_single_mode(request, file_obj, docs)
@@ -742,22 +982,17 @@ def extract_documents_for_file(
     if not provider_supports_file(resolved_provider, file_obj.filename, mime):
         if resolved_provider == DOCUMENT_PROVIDER_LOCAL_DEFAULT or not allow_local_fallback:
             raise RuntimeError(f"{resolved_provider} does not support {file_obj.filename}.")
-        local_docs = _extract_docs_with_provider(
+        primary_provider_error = (
+            f"{resolved_provider} does not support {file_obj.filename}."
+        )
+        fallback_reason = f"{resolved_provider} 暂不支持 {file_obj.filename}"
+        return _fallback_to_local_default(
             request,
             file_obj,
-            DOCUMENT_PROVIDER_LOCAL_DEFAULT,
-            provider_configs.get(DOCUMENT_PROVIDER_LOCAL_DEFAULT, {}),
-        )
-        return ExtractionResult(
-            docs=local_docs,
-            provider=DOCUMENT_PROVIDER_LOCAL_DEFAULT,
-            notice=build_processing_notice(
-                FILE_PROCESSING_MODE_FULL_CONTEXT,
-                resolved_provider,
-                fallback_provider=DOCUMENT_PROVIDER_LOCAL_DEFAULT,
-                reason=f"{resolved_provider} 暂不支持 {file_obj.filename}",
-            ),
-            fallbacks=[resolved_provider],
+            requested_provider=resolved_provider,
+            provider_configs=provider_configs,
+            primary_provider_error=primary_provider_error,
+            fallback_reason=fallback_reason,
         )
 
     try:
@@ -767,8 +1002,18 @@ def extract_documents_for_file(
             resolved_provider,
             provider_config,
         )
-        return ExtractionResult(docs=docs, provider=resolved_provider)
+        log.info(
+            "Document extraction succeeded with provider=%s for filename=%s",
+            resolved_provider,
+            file_obj.filename,
+        )
+        return ExtractionResult(
+            docs=docs,
+            provider=resolved_provider,
+            requested_provider=resolved_provider,
+        )
     except Exception as exc:
+        primary_provider_error = _stringify_provider_error(exc)
         if not allow_local_fallback or resolved_provider == DOCUMENT_PROVIDER_LOCAL_DEFAULT:
             raise FileUploadDiagnosticError(
                 classify_file_upload_error(
@@ -778,19 +1023,11 @@ def extract_documents_for_file(
                 )
             ) from exc
 
-        local_docs = _extract_docs_with_provider(
+        return _fallback_to_local_default(
             request,
             file_obj,
-            DOCUMENT_PROVIDER_LOCAL_DEFAULT,
-            provider_configs.get(DOCUMENT_PROVIDER_LOCAL_DEFAULT, {}),
-        )
-        return ExtractionResult(
-            docs=local_docs,
-            provider=DOCUMENT_PROVIDER_LOCAL_DEFAULT,
-            notice=build_processing_notice(
-                FILE_PROCESSING_MODE_FULL_CONTEXT,
-                resolved_provider,
-                fallback_provider=DOCUMENT_PROVIDER_LOCAL_DEFAULT,
-            ),
-            fallbacks=[resolved_provider],
+            requested_provider=resolved_provider,
+            provider_configs=provider_configs,
+            primary_provider_error=primary_provider_error,
+            fallback_reason=primary_provider_error,
         )

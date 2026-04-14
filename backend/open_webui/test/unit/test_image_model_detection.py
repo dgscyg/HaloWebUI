@@ -9,6 +9,7 @@ if str(_BACKEND_DIR) not in sys.path:
 from open_webui.routers.images import (  # noqa: E402
     _classify_gemini_image_model,
     _classify_openai_image_model,
+    _extract_generated_images_from_openai_response,
     load_b64_image_data,
 )
 
@@ -60,6 +61,38 @@ def test_openai_seedream_description_is_detected_as_image_model():
 
     assert classified is not None
     assert classified["generation_mode"] == "openai_chat_image"
+
+
+def test_volcengine_seedream_prefers_images_endpoint_mode():
+    classified = _classify_openai_image_model(
+        {
+            "id": "doubao-seedream-4-5-251128",
+            "name": "Doubao Seedream 4.5",
+        },
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_config={},
+        source={"effective_source": "personal"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_images"
+    assert classified["detection_method"] == "heuristic"
+
+
+def test_volcengine_seededit_prefers_images_endpoint_mode():
+    classified = _classify_openai_image_model(
+        {
+            "id": "doubao-seededit-3-0-i2i-250628",
+            "name": "Doubao SeedEdit 3.0",
+        },
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_config={},
+        source={"effective_source": "personal"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_images"
+    assert classified["detection_method"] == "heuristic"
 
 
 def test_non_image_model_is_filtered_out():
@@ -123,3 +156,19 @@ def test_load_b64_image_data_normalizes_data_url_mime_type():
     loaded = load_b64_image_data("data:image/png;base64,YWJj")
 
     assert loaded == (b"abc", "image/png")
+
+
+def test_openai_response_extracts_markdown_embedded_image_data():
+    images = _extract_generated_images_from_openai_response(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Here is your image: ![Generated](data:image/png;base64,YWJj)"
+                    }
+                }
+            ]
+        }
+    )
+
+    assert images == [(b"abc", "image/png")]

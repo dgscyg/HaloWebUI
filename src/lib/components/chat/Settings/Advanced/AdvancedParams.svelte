@@ -1,17 +1,22 @@
 <script lang="ts">
+	import Plus from '$lib/components/icons/Plus.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import XMark from '$lib/components/icons/XMark.svelte';
 	import { getContext, createEventDispatcher } from 'svelte';
 	import type { Writable } from 'svelte/store';
 
 	const dispatch = createEventDispatcher();
 
 	const i18n: Writable<any> = getContext('i18n');
+	type ToolCallingMode = 'default' | 'native' | 'off';
+	const TOOL_CALLING_MODE_ORDER: ToolCallingMode[] = ['default', 'native', 'off'];
 
 	export let admin = false;
-	export let globalToolCallingMode: 'default' | 'native' | null = null;
+	export let globalToolCallingMode: ToolCallingMode | null = null;
 	// Chat-level advanced menu should follow the global Tools setting (no separate "auto/admin" label).
 	export let followGlobalToolCallingMode = false;
+	export let enableCustomParams = false;
 
 	// NOTE: This component binds a large "bag of optional params" into multiple
 	// settings UIs. Use a loose type to avoid TS inferring every field as `null`.
@@ -41,26 +46,50 @@
 		use_mlock: null,
 		num_thread: null,
 		num_gpu: null,
+		custom_params: null,
 		template: null
 	};
 
 	let customFieldName = '';
 	let customFieldValue = '';
+	let customParamEntries: [string, any][] = [];
+	let customParamsExpanded = false;
 
 	$: if (params) {
 		dispatch('change', params);
 	}
 
-	const normalizeToolCallingMode = (v: any): 'default' | 'native' | null => {
+	const normalizeToolCallingMode = (v: any): ToolCallingMode | null => {
 		const s = (v ?? null) as any;
-		return s === 'default' || s === 'native' ? s : null;
+		return s === 'default' || s === 'native' || s === 'off' ? s : null;
 	};
 
-	let effectiveToolCallingMode: 'default' | 'native' = 'default';
+	const getNextToolCallingMode = (mode: ToolCallingMode): ToolCallingMode => {
+		const currentIndex = TOOL_CALLING_MODE_ORDER.indexOf(mode);
+		return TOOL_CALLING_MODE_ORDER[(currentIndex + 1) % TOOL_CALLING_MODE_ORDER.length];
+	};
+
+	const getToolCallingLabel = (mode: ToolCallingMode): string => {
+		switch (mode) {
+			case 'native':
+				return $i18n.t('Native');
+			case 'off':
+				return $i18n.t('Off');
+			default:
+				return $i18n.t('Compatibility');
+		}
+	};
+
+	const getToolCallingValueClasses = (mode: ToolCallingMode): string =>
+		mode === 'native'
+			? 'text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300'
+			: 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300';
+
+	let effectiveToolCallingMode: ToolCallingMode = 'default';
 	$: {
 		const local = normalizeToolCallingMode(params?.function_calling);
 		const global = normalizeToolCallingMode(globalToolCallingMode);
-		effectiveToolCallingMode = (local ?? global ?? 'default') as 'default' | 'native';
+		effectiveToolCallingMode = (local ?? global ?? 'default') as ToolCallingMode;
 
 		// When enabled, do not persist per-chat overrides; always follow the global setting.
 		if (followGlobalToolCallingMode && params) {
@@ -68,7 +97,7 @@
 		}
 	}
 
-	const setToolCallingMode = (mode: 'default' | 'native') => {
+	const setToolCallingMode = (mode: ToolCallingMode) => {
 		if (!params) return;
 		const global = normalizeToolCallingMode(globalToolCallingMode);
 
@@ -81,12 +110,107 @@
 		params.function_calling = mode;
 	};
 
-	const onToolCallingModeChange = (e: Event) => {
-		if (followGlobalToolCallingMode) return;
-		const select = e.currentTarget as HTMLSelectElement | null;
-		const v = (select?.value ?? 'default') as 'default' | 'native';
-		setToolCallingMode(v);
+	const cycleToolCallingMode = () => {
+		const next = getNextToolCallingMode(effectiveToolCallingMode);
+		if (followGlobalToolCallingMode) {
+			dispatch('updateGlobalToolCallingMode', next);
+			return;
+		}
+		setToolCallingMode(next);
 	};
+
+	const isPlainObject = (value: unknown): value is Record<string, any> =>
+		typeof value === 'object' && value !== null && !Array.isArray(value);
+
+	const getCustomParams = (): Record<string, any> =>
+		isPlainObject(params?.custom_params) ? params.custom_params : {};
+
+	const setCustomParams = (nextCustomParams: Record<string, any>) => {
+		if (!params) return;
+		params = {
+			...params,
+			custom_params: Object.keys(nextCustomParams).length > 0 ? nextCustomParams : null
+		};
+	};
+
+	const parseCustomParamValue = (value: string) => {
+		const trimmed = value.trim();
+
+		if (trimmed === '') {
+			return '';
+		}
+
+		if (trimmed === 'true') return true;
+		if (trimmed === 'false') return false;
+		if (trimmed === 'null') return null;
+
+		if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(trimmed)) {
+			return Number(trimmed);
+		}
+
+		if (
+			((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+				(trimmed.startsWith('[') && trimmed.endsWith(']')) ||
+				(trimmed.startsWith('"') && trimmed.endsWith('"'))) &&
+			trimmed.length >= 2
+		) {
+			try {
+				return JSON.parse(trimmed);
+			} catch {
+				return value;
+			}
+		}
+
+		return value;
+	};
+
+	const formatCustomParamValue = (value: unknown): string => {
+		if (typeof value === 'string') return value;
+		if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+		if (value === null) return 'null';
+
+		try {
+			return JSON.stringify(value);
+		} catch {
+			return String(value);
+		}
+	};
+
+	const addCustomParam = () => {
+		const key = customFieldName.trim();
+		if (!key) return;
+
+		setCustomParams({
+			...getCustomParams(),
+			[key]: parseCustomParamValue(customFieldValue)
+		});
+
+		customFieldName = '';
+		customFieldValue = '';
+	};
+
+	const removeCustomParam = (key: string) => {
+		const nextCustomParams = { ...getCustomParams() };
+		delete nextCustomParams[key];
+		setCustomParams(nextCustomParams);
+	};
+
+	const clearCustomParams = () => {
+		if (!params) return;
+		customFieldName = '';
+		customFieldValue = '';
+		params = {
+			...params,
+			custom_params: null
+		};
+	};
+
+	const toggleCustomParamsPanel = () => {
+		customParamsExpanded = !customParamsExpanded;
+	};
+
+	$: customParamEntries = Object.entries(getCustomParams());
+	$: hasCustomParams = customParamEntries.length > 0;
 </script>
 
 <div class="space-y-1.5 text-xs pb-safe-bottom">
@@ -140,8 +264,9 @@
 	<div>
 		<Tooltip
 			content={$i18n.t(
-				'Default mode works with a wider range of models by calling tools once before execution. Native mode leverages the model’s built-in tool-calling capabilities, but requires the model to inherently support this feature.'
+				'Compatibility mode works with a wider range of models by calling tools once before execution. Native mode leverages the model’s built-in tool-calling capabilities, but requires the model to inherently support this feature.'
 			) +
+				` ${$i18n.t('Off mode disables tool calling while keeping your selected tools configured.')}` +
 				(followGlobalToolCallingMode
 					? `\n\n${$i18n.t('Clicking here will update the global Tools setting.')}`
 					: '')}
@@ -152,31 +277,16 @@
 				class="py-1.5 px-1 flex w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
 			>
 				<div class=" self-center text-xs font-medium">
-					{$i18n.t('工具调用')}
+					{$i18n.t('Tool Calling')}
 				</div>
 				<button
 					class="text-xs cursor-pointer transition-colors duration-200 shrink-0"
 					type="button"
-					on:click={() => {
-						const next = effectiveToolCallingMode === 'default' ? 'native' : 'default';
-						if (followGlobalToolCallingMode) {
-							dispatch('updateGlobalToolCallingMode', next);
-						} else {
-							setToolCallingMode(next);
-						}
-					}}
+					on:click={cycleToolCallingMode}
 				>
-					{#if effectiveToolCallingMode === 'native'}
-						<span
-							class="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
-							>{$i18n.t('原生')}</span
-						>
-					{:else}
-						<span
-							class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-							>{$i18n.t('默认')}</span
-						>
-					{/if}
+					<span class={getToolCallingValueClasses(effectiveToolCallingMode)}>
+						{getToolCallingLabel(effectiveToolCallingMode)}
+					</span>
 				</button>
 			</div>
 		</Tooltip>
@@ -1357,6 +1467,109 @@
 			</div>
 		{/if}
 	</div>
+
+	{#if enableCustomParams}
+		<div
+			class="py-1.5 px-1 w-full justify-between rounded-lg hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors duration-150"
+		>
+			<Tooltip
+				content="添加当前模型界面里没直接暴露的请求字段。参数值会自动识别为数字、布尔值、null、JSON，或原始文本。"
+				placement="top-start"
+				className="inline-tooltip"
+			>
+				<button
+					class="flex w-full items-center justify-between gap-3 text-left text-xs cursor-pointer transition-colors duration-200"
+					type="button"
+					on:click={toggleCustomParamsPanel}
+				>
+					<div class="self-center text-xs font-medium">自定义请求参数</div>
+					<div
+						class="shrink-0 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+					>
+						添加
+					</div>
+				</button>
+			</Tooltip>
+
+			{#if customParamsExpanded}
+				<div class="mt-2 rounded-xl border border-dashed border-gray-200/80 dark:border-gray-700/60 bg-gray-50/60 dark:bg-gray-900/25 px-2.5 py-2.5 space-y-2">
+					<div class="flex items-center justify-between gap-3">
+						<div class="text-[11px] leading-5 text-gray-500 dark:text-gray-400">
+							会作为补充字段附加到上游请求，不覆盖系统已有参数。
+						</div>
+						{#if hasCustomParams}
+							<button
+								class="shrink-0 text-[11px] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors duration-200"
+								type="button"
+								on:click={clearCustomParams}
+							>
+								清空
+							</button>
+						{/if}
+					</div>
+
+					<div class="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_auto] gap-1.5">
+						<input
+							class="w-full rounded-lg py-1.5 px-2.5 text-xs dark:text-gray-300 bg-white/80 dark:bg-gray-800/70 border border-gray-200/70 dark:border-gray-700/50 outline-hidden focus:border-blue-300/50 dark:focus:border-blue-500/30 transition-colors duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+							type="text"
+							placeholder="参数名，如 top_k"
+							bind:value={customFieldName}
+							autocomplete="off"
+						/>
+						<input
+							class="w-full rounded-lg py-1.5 px-2.5 text-xs dark:text-gray-300 bg-white/80 dark:bg-gray-800/70 border border-gray-200/70 dark:border-gray-700/50 outline-hidden focus:border-blue-300/50 dark:focus:border-blue-500/30 transition-colors duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+							type="text"
+							placeholder='参数值，支持 JSON / true / 123 / null'
+							bind:value={customFieldValue}
+							autocomplete="off"
+							on:keydown={(event) => {
+								if (event.key === 'Enter') {
+									event.preventDefault();
+									addCustomParam();
+								}
+							}}
+						/>
+						<button
+							class="inline-flex size-8 items-center justify-center rounded-lg border border-gray-200/70 dark:border-gray-700/50 bg-white/90 dark:bg-gray-800/70 text-gray-500 hover:text-blue-600 hover:border-blue-300/60 dark:text-gray-400 dark:hover:text-blue-300 dark:hover:border-blue-500/40 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+							type="button"
+							on:click={addCustomParam}
+							disabled={!customFieldName.trim()}
+							title="添加参数"
+						>
+							<Plus className="size-3.5" strokeWidth="2.5" />
+						</button>
+					</div>
+
+					{#if hasCustomParams}
+						<div class="space-y-1.5">
+							{#each customParamEntries as [key, value]}
+								<div
+									class="flex items-start justify-between gap-2 rounded-lg border border-gray-200/60 dark:border-gray-700/40 bg-white/80 dark:bg-gray-900/35 px-2.5 py-2"
+								>
+									<div class="min-w-0 flex-1">
+										<div class="inline-flex max-w-full items-center rounded-md bg-gray-100/90 dark:bg-gray-800/80 px-1.5 py-0.5 text-[11px] font-medium text-gray-700 dark:text-gray-200 break-all">
+											{key}
+										</div>
+										<div class="mt-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400 break-all">
+											{formatCustomParamValue(value)}
+										</div>
+									</div>
+									<button
+										class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100/80 hover:text-red-500 dark:text-gray-500 dark:hover:bg-gray-800/70 dark:hover:text-red-400 transition-colors duration-200"
+										type="button"
+										on:click={() => removeCustomParam(key)}
+										title={$i18n.t('Remove')}
+									>
+										<XMark className="size-3" strokeWidth="2.25" />
+									</button>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</div>
+	{/if}
 
 	{#if admin}
 		<div

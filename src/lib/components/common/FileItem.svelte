@@ -38,6 +38,7 @@
 	};
 
 	$: failed = item?.status === 'failed';
+	$: uploading = loading || item?.status === 'uploading';
 	$: failureTitle = item?.errorTitle ?? item?.diagnostic?.title ?? $i18n.t('Upload failed');
 	$: failureMessage = item?.error ?? item?.diagnostic?.message ?? '';
 	$: failureHint = item?.errorHint ?? item?.diagnostic?.hint ?? '';
@@ -60,6 +61,10 @@
 		: 'rounded-2xl'} text-left"
 	type="button"
 	on:click={async () => {
+		if (uploading) {
+			return;
+		}
+
 		if (edit || item?.file?.data?.content || item?.processing_mode || item?.file?.meta?.processing_mode) {
 			showModal = !showModal;
 		} else {

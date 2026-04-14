@@ -9,6 +9,7 @@
 		label: string;
 		disabled?: boolean;
 		description?: string;
+		descriptionTone?: 'default' | 'info' | 'warning';
 		badge?: string;
 	};
 
@@ -19,11 +20,14 @@
 	export let disabled: boolean = false;
 	export let placeholder: string = '';
 	export let className: string = '';
+	export let contentClassName: string = '';
 	export let searchEnabled: boolean = false;
 	export let searchPlaceholder: string = 'Search';
 	export let noResultsText: string = 'No results found';
 	export let allowCustomValue: boolean = false;
 	export let customValueLabel: string = 'Use custom value';
+	export let contentAlign: 'start' | 'center' | 'end' = 'center';
+	export let matchTriggerMinWidth: boolean = true;
 
 	const DEFAULT_MIN_TRIGGER_WIDTH = '8.5rem';
 	const DEFAULT_MAX_TRIGGER_WIDTH = '14rem';
@@ -91,7 +95,18 @@
 		? undefined
 		: `min-width: min(100%, ${DEFAULT_MIN_TRIGGER_WIDTH}); max-width: min(100%, ${DEFAULT_MAX_TRIGGER_WIDTH});`;
 	$: triggerTextContainerClass = hasExplicitWidthClass ? 'min-w-0 flex-1' : 'min-w-0';
-	$: contentMinWidth = triggerWidth > 0 ? `${triggerWidth}px` : undefined;
+	$: contentMinWidth = matchTriggerMinWidth && triggerWidth > 0 ? `${triggerWidth}px` : undefined;
+
+	const getDescriptionClasses = (tone?: Option['descriptionTone']) => {
+		switch (tone) {
+			case 'warning':
+				return 'mt-0.5 text-xs leading-4 text-amber-600/90 dark:text-amber-400/80';
+			case 'info':
+				return 'mt-0.5 text-xs leading-4 text-sky-600/80 dark:text-sky-400/80';
+			default:
+				return 'mt-0.5 text-xs leading-4 text-gray-500 dark:text-gray-400';
+		}
+	};
 
 	onMount(async () => {
 		if (typeof ResizeObserver !== 'undefined') {
@@ -189,11 +204,12 @@
 		class="z-[10000] overflow-hidden rounded-xl
 				border border-gray-200/80 dark:border-gray-700/60
 				bg-white dark:bg-gray-900 dark:text-white
-				shadow-lg outline-none p-1 !max-w-[20rem]"
+				shadow-lg outline-none p-1 !max-w-[20rem] {contentClassName}"
 		style={contentMinWidth ? `min-width: ${contentMinWidth}` : undefined}
 		transition={flyAndScale}
 		transitionConfig={{ y: -4, start: 0.97, duration: 150 }}
 		sideOffset={4}
+		align={contentAlign}
 		sameWidth={false}
 		fitViewport={true}
 	>
@@ -256,7 +272,7 @@
 									{/if}
 								</div>
 								{#if option.description}
-									<div class="mt-0.5 text-xs leading-4 text-gray-500 dark:text-gray-400">
+									<div class={getDescriptionClasses(option.descriptionTone)}>
 										{option.description}
 									</div>
 								{/if}

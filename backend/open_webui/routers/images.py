@@ -8,6 +8,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import aiohttp
 import requests
@@ -49,8 +50,11 @@ COMFYUI_WORKFLOW_NODE_MAPPING_INVALID = (
 IMAGE_MODEL_DISCOVERY_CACHE_TTL_SECONDS = 60.0
 IMAGE_MODEL_DISCOVERY_CACHE_MAX_ENTRIES = 64
 IMAGE_MODEL_DISCOVERY_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+MARKDOWN_IMAGE_URL_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+DATA_IMAGE_URL_RE = re.compile(r"data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+", re.IGNORECASE)
 
 OPENAI_IMAGE_FAMILY_PREFIXES = ("dall-e", "dalle", "gpt-image")
+VOLCENGINE_IMAGES_ENDPOINT_HINTS = ("seedream", "seededit")
 OPENAI_CHAT_IMAGE_HINTS = (
     "chatgpt-image",
     "image-preview",
@@ -362,12 +366,7 @@ def _get_user_provider_urls_keys(user, provider: str) -> tuple[list[str], list[s
 def _pick_personal_connection(
     base_urls: list[str], keys: list[str], preferred_index: Optional[int] = None
 ) -> Optional[tuple[int, str, str]]:
-    usable: list[tuple[int, str, str]] = []
-    for idx, (url, key) in enumerate(zip(base_urls or [], keys or [])):
-        u = str(url or "").strip()
-        k = str(key or "").strip()
-        if u and k:
-            usable.append((idx, u, k))
+    usable = _list_personal_connections(base_urls, keys)
 
     if not usable:
         return None
@@ -378,6 +377,18 @@ def _pick_personal_connection(
                 return item
 
     return usable[0]
+
+
+def _list_personal_connections(
+    base_urls: list[str], keys: list[str]
+) -> list[tuple[int, str, str]]:
+    usable: list[tuple[int, str, str]] = []
+    for idx, (url, key) in enumerate(zip(base_urls or [], keys or [])):
+        u = str(url or "").strip()
+        k = str(key or "").strip()
+        if u and k:
+            usable.append((idx, u, k))
+    return usable
 
 
 def _get_personal_connection_exact(
@@ -644,6 +655,15 @@ def _model_text_blob(model: dict) -> str:
     return "\n".join(str(part).lower() for part in parts if part)
 
 
+def _is_volcengine_ark_connection(url: str) -> bool:
+    try:
+        hostname = (urlparse(_normalize_base_url(url)).hostname or "").strip().lower()
+    except Exception:
+        hostname = ""
+
+    return hostname.endswith(".volces.com") or hostname.endswith(".volcengineapi.com")
+
+
 def _has_image_modality(tokens: set[str]) -> bool:
     for token in tokens:
         if token == "image" or token.startswith("image/"):
@@ -747,6 +767,29 @@ def _resolve_image_provider_source(
     connection_index: Optional[int] = None,
     strict: bool = False,
 ) -> Optional[dict[str, Any]]:
+    sources = _list_image_provider_sources(
+        request,
+        user,
+        provider,
+        context=context,
+        credential_source=credential_source,
+        connection_index=connection_index,
+        strict=strict,
+    )
+    return sources[0] if sources else None
+
+
+def _list_image_provider_sources(
+    request: Request,
+    user,
+    provider: str,
+    *,
+    context: str = "runtime",
+    credential_source: Optional[str] = None,
+    connection_index: Optional[int] = None,
+    strict: bool = False,
+    prefer_shared: bool = False,
+) -> list[dict[str, Any]]:
     _sync_image_provider_config_state(request)
 
     context = _normalize_context(context)
@@ -773,19 +816,21 @@ def _resolve_image_provider_source(
         if persisted_force_mode:
             image_api_config["force_mode"] = True
     else:
-        return None
+        return []
 
     shared_global_index, shared_global_key, shared_api_config = _match_global_provider_connection(
         request, provider, shared_base_url
     )
 
-    def _build_shared_source(*, for_settings: bool = False) -> Optional[dict[str, Any]]:
+    def _build_shared_source(
+        *, for_settings: bool = False, fallback_to_global_key: bool = False
+    ) -> Optional[dict[str, Any]]:
         if not shared_base_url:
             return None
 
         resolved_key = shared_key
         resolved_api_config = dict(image_api_config)
-        if for_settings and not resolved_key and shared_global_key:
+        if (for_settings or fallback_to_global_key) and not resolved_key and shared_global_key:
             resolved_key = shared_global_key
             if isinstance(shared_api_config, dict):
                 resolved_api_config = {**shared_api_config, **resolved_api_config}
@@ -803,7 +848,8 @@ def _resolve_image_provider_source(
         }
 
     if context == "settings":
-        return _build_shared_source(for_settings=True)
+        settings_source = _build_shared_source(for_settings=True, fallback_to_global_key=True)
+        return [settings_source] if settings_source is not None else []
 
     personal_urls, personal_keys, personal_cfgs = _get_provider_user_connection_bundle(
         user, provider
@@ -834,33 +880,34 @@ def _resolve_image_provider_source(
             "cache_scope": f"{provider}:{context}:personal:{getattr(user, 'id', 'anon')}:{idx}",
         }
 
-    if credential_source == "shared":
-        if not shared_enabled:
-            if strict:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Workspace shared key is disabled by the administrator.",
-                )
-            return None
+    def _list_personal_sources() -> list[dict[str, Any]]:
+        sources: list[dict[str, Any]] = []
+        for idx, _base_url, _api_key in _list_personal_connections(personal_urls, personal_keys):
+            source = _resolve_personal_source(idx)
+            if source is not None:
+                sources.append(source)
+        return sources
 
-        shared_source = _build_shared_source()
-        if shared_source is None or not shared_available:
+    if credential_source == "shared":
+        shared_source = _build_shared_source(fallback_to_global_key=True)
+        if shared_source is None or not str(shared_source.get("key") or "").strip():
             if strict:
                 raise HTTPException(
                     status_code=400,
                     detail="Workspace shared key is not configured. Please contact your administrator.",
                 )
-            return None
-        return shared_source
+            return []
+        return [shared_source]
 
     if credential_source == "personal":
-        chosen = (
-            _resolve_personal_source(connection_index)
+        personal_sources = (
+            [_resolve_personal_source(connection_index)]
             if connection_index is not None
-            else _resolve_personal_source()
+            else _list_personal_sources()
         )
-        if chosen is not None:
-            return chosen
+        personal_sources = [source for source in personal_sources if source is not None]
+        if personal_sources:
+            return personal_sources
 
         if strict:
             raise HTTPException(
@@ -871,19 +918,36 @@ def _resolve_image_provider_source(
                     else "No personal connection found. Go to Settings > Connections to add your key."
                 ),
             )
-        return None
+        return []
 
-    chosen = (
-        _resolve_personal_source(connection_index)
-        if connection_index is not None
-        else None
-    ) or _resolve_personal_source()
-    if chosen is not None:
-        return chosen
+    personal_sources = _list_personal_sources()
+    if connection_index is not None:
+        preferred = _resolve_personal_source(connection_index)
+        if preferred is not None:
+            personal_sources = [
+                preferred,
+                *[
+                    source
+                    for source in personal_sources
+                    if source.get("connection_index") != preferred.get("connection_index")
+                ],
+            ]
 
     shared_source = _build_shared_source()
-    if shared_enabled and shared_available and shared_source is not None:
-        return shared_source
+    sources: list[dict[str, Any]] = []
+    if prefer_shared and shared_enabled and shared_available and shared_source is not None:
+        sources.append(shared_source)
+    sources.extend(personal_sources)
+    if (
+        not prefer_shared
+        and shared_enabled
+        and shared_available
+        and shared_source is not None
+    ):
+        sources.append(shared_source)
+
+    if sources:
+        return sources
 
     if strict:
         if shared_enabled and not shared_available:
@@ -896,7 +960,7 @@ def _resolve_image_provider_source(
             detail="No image generation connection configured. Go to Settings > Connections to add your key.",
         )
 
-    return None
+    return []
 
 
 def _build_image_model_cache_key(engine: str, source: Optional[dict[str, Any]]) -> str:
@@ -1004,10 +1068,13 @@ def _classify_openai_image_model(
         (api_config or {}).get("azure")
     )
     uses_images_endpoint_family = base_name.startswith(OPENAI_IMAGE_FAMILY_PREFIXES)
+    prefers_volcengine_images_endpoint = _is_volcengine_ark_connection(base_url) and any(
+        hint in base_name or hint in text_blob for hint in VOLCENGINE_IMAGES_ENDPOINT_HINTS
+    )
 
-    if images_endpoint_hint:
+    if images_endpoint_hint or prefers_volcengine_images_endpoint:
         generation_mode = "openai_images"
-        detection_method = "metadata"
+        detection_method = "metadata" if images_endpoint_hint else "heuristic"
     elif uses_images_endpoint_family and not is_force_mode and (
         is_official_openai or not output_has_image
     ):
@@ -1390,6 +1457,63 @@ async def _discover_image_models(
         return []
 
     return await _discover_image_models_for_source(request, user, engine, source)
+
+
+async def _select_runtime_image_provider_source(
+    request: Request,
+    user,
+    engine: str,
+    *,
+    selected_model: str = "",
+    prefer_shared: bool = False,
+) -> tuple[Optional[dict[str, Any]], Optional[list[dict[str, Any]]]]:
+    candidate_sources = _list_image_provider_sources(
+        request,
+        user,
+        engine,
+        context="runtime",
+        credential_source="auto",
+        strict=False,
+        prefer_shared=prefer_shared,
+    )
+    if not candidate_sources:
+        return None, None
+
+    normalized_model = str(selected_model or "").strip()
+    first_success: Optional[tuple[dict[str, Any], list[dict[str, Any]]]] = None
+    first_error: Optional[HTTPException] = None
+
+    for source in candidate_sources:
+        try:
+            discovered_models = await _discover_image_models_for_source(
+                request, user, engine, source
+            )
+        except HTTPException as error:
+            if first_error is None:
+                first_error = error
+            continue
+
+        if first_success is None:
+            first_success = (source, discovered_models)
+
+        if normalized_model:
+            if any(
+                str(model.get("id") or "").strip() == normalized_model
+                for model in discovered_models
+            ):
+                return source, discovered_models
+            continue
+
+        if discovered_models:
+            return source, discovered_models
+
+    if first_success is not None:
+        return first_success
+
+    if first_error is not None:
+        raise first_error
+
+    return candidate_sources[0], None
 
 
 def _apply_image_model_regex_filter(request: Request, models: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2039,6 +2163,33 @@ def _load_generated_image_from_value(
     return loaded
 
 
+def _extract_generated_image_values_from_text(text: str) -> list[str]:
+    raw_text = str(text or "").strip()
+    if not raw_text:
+        return []
+
+    values: list[str] = []
+    seen: set[str] = set()
+
+    def _append(value: Optional[str]) -> None:
+        normalized = str(value or "").strip()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        values.append(normalized)
+
+    for match in MARKDOWN_IMAGE_URL_RE.findall(raw_text):
+        _append(match)
+
+    for match in DATA_IMAGE_URL_RE.findall(raw_text):
+        _append(match)
+
+    if raw_text.startswith(("http://", "https://", "data:image/")):
+        _append(raw_text)
+
+    return values
+
+
 def _extract_generated_image_payload(
     item: Any,
     *,
@@ -2113,6 +2264,20 @@ def _extract_generated_image_payload(
         if loaded:
             return loaded
 
+    for text_key in ("text", "output_text", "content"):
+        text_value = item.get(text_key)
+        if not isinstance(text_value, str):
+            continue
+        for candidate in _extract_generated_image_values_from_text(text_value):
+            loaded = _load_generated_image_from_value(
+                candidate,
+                headers=headers,
+                allowed_base_urls=allowed_base_urls,
+                mime_type_hint=mime_type_hint,
+            )
+            if loaded:
+                return loaded
+
     return None
 
 
@@ -2129,6 +2294,13 @@ def _extract_generated_images_from_openai_response(
             value = body.get(key)
             if isinstance(value, list):
                 items.extend(value)
+            elif isinstance(value, dict):
+                items.append(value)
+
+        for key in ("output_text", "text", "content"):
+            value = body.get(key)
+            if isinstance(value, str):
+                items.append({"text": value})
 
         choices = body.get("choices")
         if isinstance(choices, list):
@@ -2144,6 +2316,8 @@ def _extract_generated_images_from_openai_response(
                         items.extend(content)
                     elif isinstance(content, dict):
                         items.append(content)
+                    elif isinstance(content, str):
+                        items.append({"text": content})
 
     images: list[tuple[bytes, str]] = []
     for item in items:
@@ -2390,6 +2564,23 @@ async def _generate_via_openai_chat_image(
             used_payload = candidate_payload
             break
 
+    if (
+        (response is None or response.status_code >= 400)
+        and _is_volcengine_ark_connection(base_url)
+        and response is not None
+        and response.status_code in {400, 404, 405, 415, 422, 429}
+    ):
+        return await _generate_via_openai_images_endpoint(
+            request,
+            user,
+            model_id=model_id,
+            prompt=prompt,
+            n=max(1, min(int(n or 1), 4)),
+            size=size,
+            background=background,
+            source=source,
+        )
+
     if response is None or response.status_code >= 400:
         raise HTTPException(
             status_code=response.status_code if response is not None else 500,
@@ -2588,26 +2779,39 @@ async def image_generations(
     try:
         if request.app.state.config.IMAGE_GENERATION_ENGINE == "openai":
             credential_source = _normalize_credential_source(form_data.credential_source)
-            source = _resolve_image_provider_source(
-                request,
-                user,
-                "openai",
-                context="runtime",
-                credential_source=credential_source,
-                connection_index=form_data.connection_index,
-                strict=True,
-            )
-            assert source is not None
-
-            try:
-                discovered_models = await _discover_image_models_for_source(
-                    request, user, "openai", source
+            source: Optional[dict[str, Any]] = None
+            discovered_models: Optional[list[dict[str, Any]]] = None
+            if credential_source == "auto" and form_data.connection_index is None:
+                source, discovered_models = await _select_runtime_image_provider_source(
+                    request,
+                    user,
+                    "openai",
+                    selected_model=selected_model,
+                    prefer_shared=not bool(form_data.model) and bool(selected_model),
                 )
-            except HTTPException:
-                if selected_model:
-                    discovered_models = []
-                else:
-                    raise
+
+            if source is None:
+                source = _resolve_image_provider_source(
+                    request,
+                    user,
+                    "openai",
+                    context="runtime",
+                    credential_source=credential_source,
+                    connection_index=form_data.connection_index,
+                    strict=True,
+                )
+                assert source is not None
+
+            if discovered_models is None:
+                try:
+                    discovered_models = await _discover_image_models_for_source(
+                        request, user, "openai", source
+                    )
+                except HTTPException:
+                    if selected_model:
+                        discovered_models = []
+                    else:
+                        raise
 
             filtered_models = _apply_image_model_regex_filter(request, discovered_models)
             selected_model_meta = next(
@@ -2683,26 +2887,38 @@ async def image_generations(
 
         elif request.app.state.config.IMAGE_GENERATION_ENGINE == "gemini":
             credential_source = _normalize_credential_source(form_data.credential_source)
-            source = _resolve_image_provider_source(
-                request,
-                user,
-                "gemini",
-                context="runtime",
-                credential_source=credential_source,
-                connection_index=form_data.connection_index,
-                strict=True,
-            )
-            assert source is not None
-
-            try:
-                discovered_models = await _discover_image_models_for_source(
-                    request, user, "gemini", source
+            source: Optional[dict[str, Any]] = None
+            discovered_models: Optional[list[dict[str, Any]]] = None
+            if credential_source == "auto" and form_data.connection_index is None:
+                source, discovered_models = await _select_runtime_image_provider_source(
+                    request,
+                    user,
+                    "gemini",
+                    selected_model=selected_model,
+                    prefer_shared=not bool(form_data.model) and bool(selected_model),
                 )
-            except HTTPException:
-                if selected_model:
-                    discovered_models = []
-                else:
-                    raise
+            if source is None:
+                source = _resolve_image_provider_source(
+                    request,
+                    user,
+                    "gemini",
+                    context="runtime",
+                    credential_source=credential_source,
+                    connection_index=form_data.connection_index,
+                    strict=True,
+                )
+                assert source is not None
+
+            if discovered_models is None:
+                try:
+                    discovered_models = await _discover_image_models_for_source(
+                        request, user, "gemini", source
+                    )
+                except HTTPException:
+                    if selected_model:
+                        discovered_models = []
+                    else:
+                        raise
 
             filtered_models = _apply_image_model_regex_filter(request, discovered_models)
             selected_model_meta = next(
