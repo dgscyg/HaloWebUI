@@ -103,13 +103,18 @@
 </script>
 
 {#if mcpLoading}
-	<div class="flex items-center justify-center rounded-xl border border-gray-200 p-4 text-gray-500 dark:border-gray-700">
+	<div
+		class="flex items-center justify-center rounded-xl border border-gray-200 p-4 text-gray-500 dark:border-gray-700"
+	>
 		<div class="mr-2 h-4 w-4 animate-spin rounded-full border-b-2 border-gray-500"></div>
 		<span>Loading MCP App...</span>
 	</div>
 {:else if mcpError}
-	<div class="rounded-xl border border-red-200 bg-red-50 p-4 text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400">
-		<strong>Failed to load app:</strong> {mcpError}
+	<div
+		class="rounded-xl border border-red-200 bg-red-50 p-4 text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400"
+	>
+		<strong>Failed to load app:</strong>
+		{mcpError}
 	</div>
 {:else if mcpResource && mcpInstanceId}
 	<MCPAppView

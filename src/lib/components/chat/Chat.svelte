@@ -10,7 +10,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
-	import { get, type Unsubscriber, type Writable } from 'svelte/store';
+	import { get, writable, type Unsubscriber, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -37,7 +37,9 @@
 		showArtifacts,
 		tools,
 		toolServers,
-		activeChatIds
+		activeChatIds,
+		overviewFocusedMessageId,
+		selectedAssistantScene
 	} from '$lib/stores';
 	import {
 		convertMessagesToHistory,
@@ -52,6 +54,11 @@
 		getPromptVariables,
 		processDetails
 	} from '$lib/utils';
+	import {
+		createEmptySelectionThreads,
+		normalizeSelectionThreads,
+		type PersistedSelectionThreads
+	} from '$lib/utils/selection-threads';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import {
 		type ChatAssistantSnapshot,
@@ -84,6 +91,7 @@
 		getChatList,
 		updateChatById
 	} from '$lib/apis/chats';
+	import { getModelById as getWorkspaceModelById } from '$lib/apis/models';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import { processWeb, processWebSearch, processYoutubeVideo } from '$lib/apis/retrieval';
 	import { createOpenAITextStream } from '$lib/apis/streaming';
@@ -167,6 +175,10 @@
 	let userHasScrolled = false;
 	let isAutoScrolling = false;
 	let _scrollResetRafId: number | null = null;
+	let _overviewFocusRafId: number | null = null;
+	let overviewPinnedMessageId: string | null = null;
+	let overviewNavigationInFlight = false;
+	let _overviewNavigationTimer: ReturnType<typeof setTimeout> | null = null;
 
 	let navbarElement;
 
@@ -179,6 +191,7 @@
 	let eventCallback = null;
 
 	let chatIdUnsubscriber: Unsubscriber | undefined;
+	let selectedAssistantSceneUnsubscriber: Unsubscriber | undefined;
 
 	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
@@ -203,6 +216,11 @@
 		messages: {},
 		currentId: null
 	};
+	let selectionThreads: PersistedSelectionThreads = createEmptySelectionThreads();
+	const selectionThreadsStore = writable<PersistedSelectionThreads>(selectionThreads);
+	const expandedSelectionThreadId = writable<string | null>(null);
+	let selectionThreadsPersistTimeout: ReturnType<typeof setTimeout> | null = null;
+	let pendingChatSave: Promise<void> = Promise.resolve();
 
 	// J-3-01: O(1) model lookup map — rebuilt reactively when $models changes
 	let modelsMap: Map<string, Model> = new Map();
@@ -251,6 +269,22 @@
 	// J-3-01: Reactive flag to avoid calling createMessagesList just for emptiness check in template
 	let hasMessages = false;
 	$: hasMessages = history.currentId !== null;
+	$: {
+		const messageIds = new Set(Object.keys(history?.messages ?? {}));
+		const nextItems = selectionThreads.items.filter((thread) =>
+			messageIds.has(thread.sourceMessageId)
+		);
+
+		if (nextItems.length !== selectionThreads.items.length) {
+			updateSelectionThreads(
+				{
+					version: 1,
+					items: nextItems
+				},
+				{ immediate: true }
+			);
+		}
+	}
 
 	let taskIds = null;
 	let messageQueue: { id: string; prompt: string; files: any[] }[] = [];
@@ -856,13 +890,98 @@
 		localStorage.removeItem(fromKey);
 	};
 
-	const buildPersistedChatData = (historyState, messages = createMessagesList(historyState, historyState.currentId)) => ({
+	const setSelectionThreadsState = (nextState: PersistedSelectionThreads) => {
+		selectionThreads = normalizeSelectionThreads(nextState);
+		selectionThreadsStore.set(selectionThreads);
+	};
+
+	const normalizeSelectionThreadsForRuntime = (nextState: PersistedSelectionThreads) =>
+		normalizeSelectionThreads(nextState, {
+			coerceStreamingToInterrupted: true
+		});
+
+	const setRuntimeSelectionThreadsState = (nextState: PersistedSelectionThreads) => {
+		selectionThreads = normalizeSelectionThreadsForRuntime(nextState);
+		selectionThreadsStore.set(selectionThreads);
+	};
+
+	const persistSelectionThreads = async () => {
+		if (selectionThreadsPersistTimeout) {
+			clearTimeout(selectionThreadsPersistTimeout);
+			selectionThreadsPersistTimeout = null;
+		}
+
+		if (!$chatId || $temporaryChatEnabled) {
+			return;
+		}
+
+		await saveChatHandler($chatId, history, {
+			selectionThreads
+		});
+	};
+
+	const scheduleSelectionThreadsPersist = (delay = 250) => {
+		if (selectionThreadsPersistTimeout) {
+			clearTimeout(selectionThreadsPersistTimeout);
+			selectionThreadsPersistTimeout = null;
+		}
+
+		if ($temporaryChatEnabled || !$chatId) {
+			return;
+		}
+
+		selectionThreadsPersistTimeout = setTimeout(() => {
+			void persistSelectionThreads();
+		}, delay);
+	};
+
+	const updateSelectionThreads = (
+		nextStateOrUpdater:
+			| PersistedSelectionThreads
+			| ((current: PersistedSelectionThreads) => PersistedSelectionThreads),
+		options: {
+			persist?: boolean;
+			immediate?: boolean;
+		} = {}
+	) => {
+		const { persist = true, immediate = false } = options;
+		const nextState =
+			typeof nextStateOrUpdater === 'function'
+				? nextStateOrUpdater(selectionThreads)
+				: nextStateOrUpdater;
+
+		setSelectionThreadsState(nextState);
+
+		if (!persist) {
+			return;
+		}
+
+		if (immediate) {
+			void persistSelectionThreads();
+		} else {
+			scheduleSelectionThreadsPersist();
+		}
+	};
+
+	setContext('selectionThreadManager', {
+		selectionThreadsStore,
+		expandedSelectionThreadId,
+		updateSelectionThreads,
+		persistSelectionThreads
+	});
+
+	const buildPersistedChatData = (
+		historyState,
+		messages = createMessagesList(historyState, historyState.currentId),
+		persistedSelectionThreads: PersistedSelectionThreads = selectionThreads
+	) => ({
 		models: selectedModels,
 		history: historyState,
 		messages,
 		params,
 		files: chatFiles,
-		assistant: activeAssistant ?? undefined
+		assistant: activeAssistant ?? undefined,
+		selectionThreads: persistedSelectionThreads
 	});
 
 	$: {
@@ -890,7 +1009,12 @@
 			} else {
 				syncReasoningUiState(null, null);
 			}
-		} else if (hasSingleModelSelection && defaultEffort !== null && paramEffort === null && paramTokens === null) {
+		} else if (
+			hasSingleModelSelection &&
+			defaultEffort !== null &&
+			paramEffort === null &&
+			paramTokens === null
+		) {
 			setSharedReasoningState({ effort: defaultEffort, tokens: null });
 		} else if (paramTokens !== null && paramTokens > 0) {
 			setSharedReasoningState({ effort: null, tokens: paramTokens, syncParams: false });
@@ -1012,9 +1136,26 @@
 		}
 	};
 
-	const showMessage = async (message) => {
+	const armOverviewNavigationEnd = (delay = 450) => {
+		if (_overviewNavigationTimer !== null) {
+			clearTimeout(_overviewNavigationTimer);
+		}
+
+		_overviewNavigationTimer = setTimeout(() => {
+			overviewNavigationInFlight = false;
+			_overviewNavigationTimer = null;
+		}, delay);
+	};
+
+	const showMessage = async (
+		message,
+		options: {
+			source?: 'overview' | 'default';
+		} = {}
+	) => {
 		const _chatId = $chatId;
 		let _messageId = message.id;
+		const isOverviewSource = options.source === 'overview';
 
 		let messageChildrenIds = [];
 		if (_messageId === null) {
@@ -1031,6 +1172,14 @@
 		}
 
 		history.currentId = _messageId;
+		if (isOverviewSource) {
+			overviewPinnedMessageId = message.id;
+			overviewNavigationInFlight = true;
+			armOverviewNavigationEnd();
+		} else {
+			overviewPinnedMessageId = null;
+		}
+		overviewFocusedMessageId.set(message.id);
 
 		await tick();
 		await tick();
@@ -1275,6 +1424,21 @@
 			}
 		});
 
+		selectedAssistantSceneUnsubscriber = selectedAssistantScene.subscribe((assistantScene) => {
+			if (assistantScene && activeAssistant) {
+				deactivateAssistant();
+			}
+
+			if (
+				assistantScene?.id &&
+				!chatIdProp &&
+				!$chatId &&
+				JSON.stringify(selectedModels) !== JSON.stringify([assistantScene.id])
+			) {
+				selectedModels = [assistantScene.id];
+			}
+		});
+
 		const chatInput = document.getElementById('chat-input');
 		chatInput?.focus();
 
@@ -1312,13 +1476,37 @@
 
 	onDestroy(() => {
 		chatIdUnsubscriber?.();
+		selectedAssistantSceneUnsubscriber?.();
+		if (selectionThreadsPersistTimeout) {
+			clearTimeout(selectionThreadsPersistTimeout);
+			selectionThreadsPersistTimeout = null;
+		}
 		scrollObserver?.disconnect();
 		cancelScheduledScrollToBottom();
 		clearResponseAnimationControllers();
+		overviewPinnedMessageId = null;
+		overviewNavigationInFlight = false;
+		overviewFocusedMessageId.set(null);
 		window.removeEventListener('message', onMessageHandler);
 		window.removeEventListener('chat:set-input', onSetInputHandler as EventListener);
 		$socket?.off('chat-events', chatEventHandler);
 	});
+
+	$: if ($showOverview) {
+		void tick().then(() => {
+			scheduleOverviewFocusedMessageSync();
+		});
+	} else {
+		overviewPinnedMessageId = null;
+		overviewNavigationInFlight = false;
+		overviewFocusedMessageId.set(null);
+	}
+
+	$: if ($showOverview && history.currentId) {
+		void tick().then(() => {
+			scheduleOverviewFocusedMessageSync();
+		});
+	}
 
 	// File upload functions
 
@@ -1589,6 +1777,8 @@
 			} else {
 				selectedModels = urlModels;
 			}
+		} else if (!fresh && $selectedAssistantScene?.id) {
+			selectedModels = [$selectedAssistantScene.id];
 		} else if (!fresh) {
 			const scopedKey = getSelectedModelsStorageKey();
 			const legacyKey = getLegacySelectedModelsStorageKey();
@@ -1665,6 +1855,8 @@
 			messages: {},
 			currentId: null
 		};
+		setSelectionThreadsState(createEmptySelectionThreads());
+		expandedSelectionThreadId.set(null);
 		clearResponseAnimationControllers();
 
 		if (fresh) {
@@ -1775,6 +1967,7 @@
 			sessionStorage.removeItem(PENDING_ASSISTANT_STORAGE_KEY);
 
 			if (pendingAssistant) {
+				selectedAssistantScene.set(null);
 				activateAssistant(pendingAssistant);
 			}
 		}
@@ -1858,6 +2051,25 @@
 				params = chatContent?.params ?? {};
 				activeAssistant = toChatAssistantSnapshot(chatContent?.assistant ?? null);
 				chatFiles = chatContent?.files ?? [];
+				setRuntimeSelectionThreadsState(normalizeSelectionThreads(chatContent?.selectionThreads));
+				expandedSelectionThreadId.set(null);
+
+				if (chat.assistant_id) {
+					if ($models.length === 0) {
+						await ensureModels(localStorage.token, { reason: 'chat-assistant-scene' }).catch(
+							() => {}
+						);
+						await tick();
+					}
+
+					const assistantScene =
+						getModelById(chat.assistant_id) ??
+						(await getWorkspaceModelById(localStorage.token, chat.assistant_id).catch(() => null));
+
+					selectedAssistantScene.set(assistantScene ?? null);
+				} else {
+					selectedAssistantScene.set(null);
+				}
 
 				void (async () => {
 					const nextContext = await chatContextPromise;
@@ -2081,6 +2293,93 @@
 		autoScroll = true;
 	};
 
+	const resolveOverviewFocusedMessageId = () => {
+		if (
+			overviewPinnedMessageId &&
+			history.messages?.[overviewPinnedMessageId] &&
+			(overviewNavigationInFlight || !messagesContainerElement)
+		) {
+			return overviewPinnedMessageId;
+		}
+
+		if (!messagesContainerElement) {
+			return history.currentId ?? null;
+		}
+
+		const containerRect = messagesContainerElement.getBoundingClientRect();
+		const visibleMessages = Array.from(
+			messagesContainerElement.querySelectorAll<HTMLElement>('[id^="message-"]')
+		)
+			.map((element) => {
+				const messageId = element.id.replace(/^message-/, '');
+				return {
+					messageId,
+					rect: element.getBoundingClientRect()
+				};
+			})
+			.filter(
+				({ messageId, rect }) =>
+					Boolean(history.messages?.[messageId]) &&
+					rect.bottom >= containerRect.top + 8 &&
+					rect.top <= containerRect.bottom - 8
+			);
+
+		if (visibleMessages.length === 0) {
+			if (overviewPinnedMessageId && history.messages?.[overviewPinnedMessageId]) {
+				return overviewPinnedMessageId;
+			}
+			return history.currentId ?? null;
+		}
+
+		if (
+			overviewPinnedMessageId &&
+			visibleMessages.some(({ messageId }) => messageId === overviewPinnedMessageId)
+		) {
+			return overviewPinnedMessageId;
+		}
+
+		const anchorPadding = Math.min(72, containerRect.height / 2);
+		const anchorY =
+			containerRect.top +
+			Math.min(
+				Math.max(containerRect.height * 0.32, anchorPadding),
+				containerRect.height - anchorPadding
+			);
+
+		const containingMessage = visibleMessages.find(
+			({ rect }) => rect.top <= anchorY && rect.bottom >= anchorY
+		);
+
+		if (containingMessage) {
+			return containingMessage.messageId;
+		}
+
+		return visibleMessages.reduce((closest, current) => {
+			const currentDistance = Math.abs((current.rect.top + current.rect.bottom) / 2 - anchorY);
+			const closestDistance = Math.abs((closest.rect.top + closest.rect.bottom) / 2 - anchorY);
+			return currentDistance < closestDistance ? current : closest;
+		}).messageId;
+	};
+
+	const syncOverviewFocusedMessage = () => {
+		if (!$showOverview) {
+			return;
+		}
+
+		overviewFocusedMessageId.set(resolveOverviewFocusedMessageId());
+	};
+
+	const scheduleOverviewFocusedMessageSync = () => {
+		if (!$showOverview || _overviewFocusRafId !== null) {
+			return;
+		}
+
+		_overviewFocusRafId = requestAnimationFrame(() => {
+			_overviewFocusRafId = null;
+			syncOverviewFocusedMessage();
+		});
+	};
+
 	const cancelScheduledScrollToBottom = () => {
 		if (_scrollRafId !== null) {
 			cancelAnimationFrame(_scrollRafId);
@@ -2090,6 +2389,14 @@
 			cancelAnimationFrame(_scrollResetRafId);
 			_scrollResetRafId = null;
 		}
+		if (_overviewFocusRafId !== null) {
+			cancelAnimationFrame(_overviewFocusRafId);
+			_overviewFocusRafId = null;
+		}
+		if (_overviewNavigationTimer !== null) {
+			clearTimeout(_overviewNavigationTimer);
+			_overviewNavigationTimer = null;
+		}
 	};
 
 	const handleMessagesScroll = () => {
@@ -2097,14 +2404,29 @@
 			return;
 		}
 
+		if (overviewNavigationInFlight) {
+			autoScroll = isNearBottom();
+			if (autoScroll) {
+				userHasScrolled = false;
+			}
+			armOverviewNavigationEnd(120);
+			return;
+		}
+
+		if (overviewPinnedMessageId) {
+			overviewPinnedMessageId = null;
+		}
+
 		if (isNearBottom()) {
 			userHasScrolled = false;
 			autoScroll = true;
+			scheduleOverviewFocusedMessageSync();
 			return;
 		}
 
 		userHasScrolled = true;
 		autoScroll = false;
+		scheduleOverviewFocusedMessageSync();
 	};
 
 	let _scrollRafId: number | null = null;
@@ -2123,6 +2445,7 @@
 					_scrollResetRafId = null;
 					isAutoScrolling = false;
 					autoScroll = isNearBottom();
+					scheduleOverviewFocusedMessageSync();
 				});
 			}
 		});
@@ -2170,14 +2493,9 @@
 
 		if ($chatId == chatId) {
 			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(
-					localStorage.token,
-					chatId,
-					buildPersistedChatData(history, messages)
-				);
-
-				currentChatPage.set(1);
-				await chats.set(await getChatList(localStorage.token, $currentChatPage));
+				await saveChatHandler(chatId, history, {
+					messages
+				});
 			}
 		}
 
@@ -2239,14 +2557,9 @@
 
 		if ($chatId == chatId) {
 			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(
-					localStorage.token,
-					chatId,
-					buildPersistedChatData(history, messages)
-				);
-
-				currentChatPage.set(1);
-				await chats.set(await getChatList(localStorage.token, $currentChatPage));
+				await saveChatHandler(chatId, history, {
+					messages
+				});
 			}
 		}
 	};
@@ -3564,14 +3877,19 @@
 		let _chatId = $chatId;
 
 		if (!$temporaryChatEnabled) {
-			chat = await createNewChat(localStorage.token, {
-				id: _chatId,
-				title: $i18n.t('New Chat'),
-				system: $settings.system ?? undefined,
-				tags: [],
-				timestamp: Date.now(),
-				...buildPersistedChatData(history)
-			});
+			chat = await createNewChat(
+				localStorage.token,
+				{
+					id: _chatId,
+					title: $i18n.t('New Chat'),
+					system: $settings.system ?? undefined,
+					tags: [],
+					timestamp: Date.now(),
+					...buildPersistedChatData(history)
+				},
+				null,
+				$selectedAssistantScene?.id ?? null
+			);
 
 			_chatId = chat.id;
 			await chatId.set(_chatId);
@@ -3591,12 +3909,30 @@
 		return _chatId;
 	};
 
-	const saveChatHandler = async (_chatId, history) => {
+	const saveChatHandler = async (
+		_chatId,
+		history,
+		options: { selectionThreads?: PersistedSelectionThreads; messages?: any[] } = {}
+	) => {
 		if ($chatId == _chatId) {
 			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, _chatId, buildPersistedChatData(history));
-				currentChatPage.set(1);
-				await chats.set(await getChatList(localStorage.token, $currentChatPage));
+				const persistedSelectionThreads = options.selectionThreads ?? selectionThreads;
+				const persistedMessages = options.messages;
+				const payload = buildPersistedChatData(
+					history,
+					persistedMessages ?? createMessagesList(history, history.currentId),
+					persistedSelectionThreads
+				);
+
+				pendingChatSave = pendingChatSave
+					.catch(() => undefined)
+					.then(async () => {
+						chat = await updateChatById(localStorage.token, _chatId, payload);
+						currentChatPage.set(1);
+						await chats.set(await getChatList(localStorage.token, $currentChatPage));
+					});
+
+				await pendingChatSave;
 			}
 		}
 	};
@@ -3674,7 +4010,7 @@
 				/>
 
 				<div class="flex flex-col flex-auto z-10 w-full min-w-0 @container">
-					{#if $settings?.landingPageMode === 'chat' || hasMessages}
+					{#if ($settings?.landingPageMode === 'chat' && !$selectedAssistantScene) || hasMessages}
 						<div
 							class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
 							id="messages-container"

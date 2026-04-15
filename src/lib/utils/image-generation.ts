@@ -45,15 +45,21 @@ const LEGACY_SIZE_TO_ASPECT_RATIO: Record<string, string> = {
 
 export const normalizeGeminiImageSize = (value: unknown): string | null => {
 	const normalized = `${value ?? ''}`.trim().toUpperCase();
-	return GEMINI_IMAGE_SIZE_OPTIONS.some((option) => option.value === normalized) ? normalized : null;
+	return GEMINI_IMAGE_SIZE_OPTIONS.some((option) => option.value === normalized)
+		? normalized
+		: null;
 };
 
 export const normalizeAspectRatio = (value: unknown): string | null => {
 	const normalized = `${value ?? ''}`.trim();
-	return IMAGE_ASPECT_RATIO_OPTIONS.some((option) => option.value === normalized) ? normalized : null;
+	return IMAGE_ASPECT_RATIO_OPTIONS.some((option) => option.value === normalized)
+		? normalized
+		: null;
 };
 
-export const mapLegacySizeToGeminiParams = (size: unknown): {
+export const mapLegacySizeToGeminiParams = (
+	size: unknown
+): {
 	imageSize: string | null;
 	aspectRatio: string | null;
 } => {

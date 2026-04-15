@@ -7,6 +7,16 @@
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import SvgPanZoom from '$lib/components/common/SVGPanZoom.svelte';
 	import {
+		Check,
+		ChevronsUpDown,
+		Copy,
+		LoaderCircle,
+		PanelRightOpen,
+		Play,
+		Save
+	} from 'lucide-svelte';
+	import {
+		artifactAutoOpenDismissedMessageId,
 		artifactPreviewTarget,
 		config,
 		settings,
@@ -16,7 +26,6 @@
 	} from '$lib/stores';
 	import { executeCode } from '$lib/apis/utils';
 	import { toast } from 'svelte-sonner';
-	import ChevronUpDown from '$lib/components/icons/ChevronUpDown.svelte';
 	import {
 		approvePyodideConsent,
 		canUsePyodideRuntime,
@@ -99,10 +108,29 @@
 		return normalizedLang === 'svg' || (normalizedLang === 'xml' && code.includes('<svg'));
 	};
 
+	const isIframePreviewable = (lang: string) => {
+		const normalizedLang = String(lang ?? '').toLowerCase();
+		return ['html', 'css', 'javascript', 'js'].includes(normalizedLang);
+	};
+
+	const openIframePreview = () => {
+		if (!messageId) return;
+
+		artifactAutoOpenDismissedMessageId.set(null);
+		artifactPreviewTarget.set({
+			messageId,
+			type: 'iframe'
+		});
+		showOverview.set(false);
+		showArtifacts.set(true);
+		showControls.set(true);
+	};
+
 	const previewSvg = () => {
 		const previewContent = (_code || code || '').trim();
 		if (!previewContent) return;
 
+		artifactAutoOpenDismissedMessageId.set(null);
 		artifactPreviewTarget.set({
 			messageId,
 			type: 'svg',
@@ -365,11 +393,11 @@
 				isDark: document.documentElement.classList.contains('dark'),
 				themeId: mermaidThemeId
 			});
-			} catch (error) {
-				console.error('Error:', error);
-				mermaidHtml = null;
-			}
-		};
+		} catch (error) {
+			console.error('Error:', error);
+			mermaidHtml = null;
+		}
+	};
 
 	const render = async () => {
 		if (lang === 'mermaid' && (token?.raw ?? '').slice(-4).includes('```')) {
@@ -486,36 +514,14 @@
 						{langIcon.label}
 					</span>
 				</div>
-				<div
-					class="flex items-center gap-1 opacity-0 group-hover/codeblock:opacity-100 transition-opacity duration-200"
-					on:click|stopPropagation
-				>
+				<div class="flex items-center gap-1" on:click|stopPropagation>
 					{#if ($config?.features?.enable_code_execution ?? true) && (lang.toLowerCase() === 'python' || lang.toLowerCase() === 'py' || (lang === '' && checkPythonCode(code)))}
 						{#if executing}
 							<div
 								class="inline-flex items-center text-gray-400 dark:text-gray-500 p-1.5 rounded-md"
 								title={$i18n.t('Running')}
 							>
-								<svg
-									class="animate-spin size-4"
-									xmlns="http://www.w3.org/2000/svg"
-									fill="none"
-									viewBox="0 0 24 24"
-								>
-									<circle
-										class="opacity-25"
-										cx="12"
-										cy="12"
-										r="10"
-										stroke="currentColor"
-										stroke-width="4"
-									></circle>
-									<path
-										class="opacity-75"
-										fill="currentColor"
-										d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-									></path>
-								</svg>
+								<LoaderCircle class="size-4 animate-spin" size={16} strokeWidth={2.1} />
 							</div>
 						{:else if run}
 							<button
@@ -527,18 +533,19 @@
 								}}
 								title={$i18n.t('Run')}
 							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 20 20"
-									fill="currentColor"
-									class="size-4"
-								>
-									<path
-										d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z"
-									/>
-								</svg>
+								<Play class="size-4" size={16} strokeWidth={2.1} />
 							</button>
 						{/if}
+					{/if}
+
+					{#if messageId && isIframePreviewable(lang)}
+						<button
+							class="inline-flex items-center text-gray-400 dark:text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+							on:click={openIframePreview}
+							title={$i18n.t('Open preview')}
+						>
+							<PanelRightOpen class="size-[17.5px]" size={17.5} strokeWidth={1.8} />
+						</button>
 					{/if}
 
 					{#if isSvgPreviewable(lang, code)}
@@ -547,14 +554,7 @@
 							on:click={previewSvg}
 							title={`${$i18n.t('Preview')} SVG`}
 						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								class="size-4"
-							>
-								<path d="M10 4c4.478 0 8.268 2.943 9.543 7-.33 1.05-.84 2.026-1.498 2.889C16.37 16.083 13.35 18 10 18s-6.37-1.917-8.045-5.111A9.963 9.963 0 0 1 .457 11C1.732 6.943 5.522 4 10 4Zm0 2c-3.182 0-5.92 2.07-7.05 5 1.13 2.93 3.868 5 7.05 5s5.92-2.07 7.05-5c-1.13-2.93-3.868-5-7.05-5Zm0 1.75a3.25 3.25 0 1 1 0 6.5 3.25 3.25 0 0 1 0-6.5Z" />
-							</svg>
+							<PanelRightOpen class="size-[17.5px]" size={17.5} strokeWidth={1.8} />
 						</button>
 					{/if}
 
@@ -565,32 +565,9 @@
 							title={$i18n.t('Save')}
 						>
 							{#if saved}
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 20 20"
-									fill="currentColor"
-									class="size-4 text-green-500"
-								>
-									<path
-										fill-rule="evenodd"
-										d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
-										clip-rule="evenodd"
-									/>
-								</svg>
+								<Check class="size-[17.5px] text-green-500" size={17.5} strokeWidth={2.15} />
 							{:else}
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 20 20"
-									fill="currentColor"
-									class="size-4"
-								>
-									<path
-										d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z"
-									/>
-									<path
-										d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z"
-									/>
-								</svg>
+								<Save class="size-[17.5px]" size={17.5} strokeWidth={1.95} />
 							{/if}
 						</button>
 					{/if}
@@ -601,32 +578,9 @@
 						title={$i18n.t('Copy')}
 					>
 						{#if copied}
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								class="size-4 text-green-500"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
-									clip-rule="evenodd"
-								/>
-							</svg>
+							<Check class="size-4 text-green-500" size={16} strokeWidth={2.3} />
 						{:else}
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								class="size-4"
-							>
-								<path
-									d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z"
-								/>
-								<path
-									d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.439A1.5 1.5 0 0 0 8.378 6H4.5Z"
-								/>
-							</svg>
+							<Copy class="size-4" size={16} strokeWidth={2.1} />
 						{/if}
 					</button>
 
@@ -635,13 +589,15 @@
 						on:click={collapseCodeBlock}
 						title={collapsed ? $i18n.t('Expand') : $i18n.t('Collapse')}
 					>
-						<ChevronUpDown className="size-4" />
+						<ChevronsUpDown class="size-4" size={16} strokeWidth={2.1} />
 					</button>
 				</div>
 			</div>
 
 			{#if showPyodideConsent}
-				<div class="border-b border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+				<div
+					class="border-b border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+				>
 					<div class="font-medium">浏览器 Python 运行时未准备就绪</div>
 					<div class="mt-1 text-xs leading-relaxed">
 						{getPyodideDownloadSummary(pyodideConsentPackages)}
@@ -685,7 +641,9 @@
 					: executing || stdout || stderr || result
 						? ''
 						: ''} font-mono"
-				style={collapsed && needsCollapse ? `max-height: ${MAX_COLLAPSED_HEIGHT}px; overflow-y: auto;` : ''}
+				style={collapsed && needsCollapse
+					? `max-height: ${MAX_COLLAPSED_HEIGHT}px; overflow-y: auto;`
+					: ''}
 			>
 				{#if !collapsed}
 					<CodeEditor
@@ -719,13 +677,31 @@
 					on:click={collapseCodeBlock}
 				>
 					{#if collapsed}
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-							<path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-3.5"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
+								clip-rule="evenodd"
+							/>
 						</svg>
-							{$i18n.t('Expand')} ({code.split('\n').length})
+						{$i18n.t('Expand')} ({code.split('\n').length})
 					{:else}
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-							<path fill-rule="evenodd" d="M14.78 11.78a.75.75 0 0 1-1.06 0L10 8.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06l4.25-4.25a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06Z" clip-rule="evenodd" />
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-3.5"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M14.78 11.78a.75.75 0 0 1-1.06 0L10 8.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06l4.25-4.25a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06Z"
+								clip-rule="evenodd"
+							/>
 						</svg>
 						{$i18n.t('Collapse')}
 					{/if}

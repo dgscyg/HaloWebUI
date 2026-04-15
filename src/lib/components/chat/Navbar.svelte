@@ -8,6 +8,7 @@
 		chatId,
 		config,
 		mobile,
+		selectedAssistantScene,
 		settings,
 		showArchivedChats,
 		showControls,
@@ -140,6 +141,7 @@
 								? 'md:hidden'
 								: ''} cursor-pointer px-2 py-2 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-850 transition"
 							on:click={() => {
+								selectedAssistantScene.set(null);
 								initNewChat();
 							}}
 							aria-label="New Chat"

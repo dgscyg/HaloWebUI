@@ -534,7 +534,7 @@
 
 						{#if ($config?.features?.enable_guest_access ?? false) && $config?.features?.guest_access_mode !== 'auto'}
 							<div class="mt-4">
-								{#if ($config?.features.enable_login_form || $config?.features.enable_ldap) || Object.keys($config?.oauth?.providers ?? {}).length > 0}
+								{#if $config?.features.enable_login_form || $config?.features.enable_ldap || Object.keys($config?.oauth?.providers ?? {}).length > 0}
 									<div class="inline-flex items-center justify-center w-full mb-4">
 										<hr class="w-32 h-px border-0 dark:bg-gray-100/10 bg-gray-700/10" />
 										<span

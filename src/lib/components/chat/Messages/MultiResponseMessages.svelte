@@ -346,8 +346,8 @@
 							groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]]}
 
 						<div
-							class="snap-center w-full max-w-full m-1 rounded-2xl p-5 transition-all duration-200 {history.messages[messageId]
-								?.modelIdx == modelIdx
+							class="snap-center w-full max-w-full m-1 rounded-2xl p-5 transition-all duration-200 {history
+								.messages[messageId]?.modelIdx == modelIdx
 								? `border-[1.5px] border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-md ${
 										$mobile ? 'min-w-full' : 'min-w-80'
 									}`

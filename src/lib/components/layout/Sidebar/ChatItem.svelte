@@ -23,6 +23,7 @@
 		chats,
 		mobile,
 		pinnedChats,
+		selectedAssistantScene,
 		showSidebar,
 		currentChatPage,
 		tags,
@@ -45,6 +46,7 @@
 
 	export let id;
 	export let title;
+	export let assistantId: string | null = null;
 
 	export let selected = false;
 	export let shiftKey = false;
@@ -307,6 +309,10 @@
 			href="/c/{id}"
 			on:click={() => {
 				dispatch('select');
+
+				if ($selectedAssistantScene && $selectedAssistantScene.id !== assistantId) {
+					selectedAssistantScene.set(null);
+				}
 
 				if ($mobile) {
 					showSidebar.set(false);

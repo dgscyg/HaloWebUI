@@ -116,21 +116,21 @@ sequenceDiagram
 
 ## 5. JSON-RPC 方法映射
 
-| MCP 操作 | JSON-RPC 方法 | 说明 |
-|----------|---------------|------|
-| 初始化 | `initialize` | 协商协议版本和能力 |
+| MCP 操作   | JSON-RPC 方法               | 说明                   |
+| ---------- | --------------------------- | ---------------------- |
+| 初始化     | `initialize`                | 协商协议版本和能力     |
 | 初始化通知 | `notifications/initialized` | 通知服务器客户端已就绪 |
-| 工具列表 | `tools/list` | 获取可用工具及参数规格 |
-| 工具调用 | `tools/call` | 执行指定工具 |
+| 工具列表   | `tools/list`                | 获取可用工具及参数规格 |
+| 工具调用   | `tools/call`                | 执行指定工具           |
 
 ## 6. SSE 进度通知
 
 MCP 服务器可通过 SSE 流发送进度通知:
 
-| 通知类型 | 说明 |
-|----------|------|
+| 通知类型                 | 说明                      |
+| ------------------------ | ------------------------- |
 | `notifications/progress` | 执行进度 (progress/total) |
-| `notifications/message` | 日志消息 (level/data) |
+| `notifications/message`  | 日志消息 (level/data)     |
 
 前端通过 `__event_emitter__` 回调接收并展示进度状态。
 

@@ -52,11 +52,7 @@ export interface SkillImportResult {
 	status: SkillImportStatus;
 }
 
-const requestJson = async <T>(
-	path: string,
-	token: string,
-	init: RequestInit = {}
-): Promise<T> => {
+const requestJson = async <T>(path: string, token: string, init: RequestInit = {}): Promise<T> => {
 	let error = null;
 	const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
 
@@ -86,6 +82,21 @@ const requestJson = async <T>(
 
 export const getSkills = async (token: string = '') => {
 	return requestJson<SkillModel[]>('/', token);
+};
+
+export const getSkillItems = async (
+	token: string = '',
+	query: string | null = null,
+	viewOption: string | null = null,
+	page: number | null = null
+) => {
+	const searchParams = new URLSearchParams();
+	if (query) searchParams.append('query', query);
+	if (viewOption) searchParams.append('view_option', viewOption);
+	if (page) searchParams.append('page', page.toString());
+
+	const suffix = searchParams.toString() ? `/list?${searchParams.toString()}` : '/list';
+	return requestJson<{ items: SkillModel[]; total: number }>(suffix, token);
 };
 
 export const getSkillCatalog = async (token: string = '') => {

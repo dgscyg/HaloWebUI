@@ -25,8 +25,8 @@ describe('file upload errors', () => {
 		);
 
 		expect(localized.title).toBe('Archive not supported');
-		expect(localized.message).toContain('Compressed archives cannot be uploaded directly');
-		expect(localized.hint).toContain('Extract the archive');
+		expect(localized.message).toContain('This model does not support archive files');
+		expect(localized.hint).toBe('');
 	});
 
 	it('uses role-specific hints for embedding configuration failures', () => {
@@ -87,10 +87,7 @@ describe('file upload errors', () => {
 	});
 
 	it('builds a single warning message for ignored failed files', () => {
-		const message = buildIgnoredFailedFilesMessage(
-			[{ name: 'a.rar' }, { name: 'b.html' }],
-			t
-		);
+		const message = buildIgnoredFailedFilesMessage([{ name: 'a.rar' }, { name: 'b.html' }], t);
 
 		expect(message).toBe('Ignored failed file(s) for this message: a.rar, b.html');
 	});

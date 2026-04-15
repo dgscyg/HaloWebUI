@@ -57,7 +57,11 @@ def _strip_common_root_prefix(paths: list[str]) -> list[tuple[str, str]]:
 
     normalized: list[tuple[str, str]] = []
     for original in cleaned:
-        relative = original[len(root_prefix) :] if root_prefix and original.startswith(root_prefix) else original
+        relative = (
+            original[len(root_prefix) :]
+            if root_prefix and original.startswith(root_prefix)
+            else original
+        )
         normalized.append((relative, original))
     return normalized
 
@@ -129,7 +133,9 @@ def parse_skill_markdown(
             manifest.get("description") or "",
             content,
             "\n".join(normalized_files),
-        ).__repr__().encode("utf-8")
+        )
+        .__repr__()
+        .encode("utf-8")
     )
 
     meta = {
@@ -168,7 +174,9 @@ def parse_skill_zip(
 
     with zip_file:
         file_infos = [info for info in zip_file.infolist() if not info.is_dir()]
-        normalized_paths = _strip_common_root_prefix([info.filename for info in file_infos])
+        normalized_paths = _strip_common_root_prefix(
+            [info.filename for info in file_infos]
+        )
         normalized_map = {relative: original for relative, original in normalized_paths}
 
         target_path = None
@@ -242,7 +250,9 @@ async def _fetch_text(url: str) -> str:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url) as response:
                 if response.status != 200:
-                    raise SkillImportError(f"Failed to fetch SKILL.md ({response.status}).")
+                    raise SkillImportError(
+                        f"Failed to fetch SKILL.md ({response.status})."
+                    )
                 return await response.text()
     except aiohttp.ClientError as exc:
         raise SkillImportError(f"Failed to fetch SKILL.md: {exc}") from exc
@@ -254,13 +264,17 @@ async def _fetch_bytes(url: str) -> bytes:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url) as response:
                 if response.status != 200:
-                    raise SkillImportError(f"Failed to fetch ZIP package ({response.status}).")
+                    raise SkillImportError(
+                        f"Failed to fetch ZIP package ({response.status})."
+                    )
                 return await response.read()
     except aiohttp.ClientError as exc:
         raise SkillImportError(f"Failed to fetch ZIP package: {exc}") from exc
 
 
-def _parse_github_url(url: str) -> tuple[str, str, Optional[str], Optional[str], Optional[str]]:
+def _parse_github_url(
+    url: str,
+) -> tuple[str, str, Optional[str], Optional[str], Optional[str]]:
     parsed = urlparse(url)
     if parsed.netloc not in {"github.com", "www.github.com"}:
         raise SkillImportError("GitHub import only supports github.com URLs.")
@@ -295,7 +309,10 @@ def _parse_github_url(url: str) -> tuple[str, str, Optional[str], Optional[str],
 
 async def _fetch_github_default_branch(owner: str, repo: str) -> str:
     api_url = f"https://api.github.com/repos/{owner}/{repo}"
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "HaloWebUI-Skill-Importer"}
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "HaloWebUI-Skill-Importer",
+    }
 
     try:
         timeout = aiohttp.ClientTimeout(total=20)
@@ -320,9 +337,9 @@ async def _fetch_github_default_branch(owner: str, repo: str) -> str:
 async def import_skill_from_url(url: str) -> ImportedSkillPayload:
     normalized_url = _normalize_source_url(url)
     parsed = urlparse(normalized_url)
-    fallback_name = (parsed.path.rstrip("/").split("/")[-1] or "imported-skill").replace(
-        ".md", ""
-    )
+    fallback_name = (
+        parsed.path.rstrip("/").split("/")[-1] or "imported-skill"
+    ).replace(".md", "")
     raw_text = await _fetch_text(normalized_url)
     return parse_skill_markdown(
         raw_text,

@@ -3,7 +3,14 @@
 	import { Pane, PaneResizer } from 'paneforge';
 
 	import { onDestroy, onMount, tick } from 'svelte';
-	import { showControls, showCallOverlay, showOverview, showArtifacts } from '$lib/stores';
+	import {
+		artifactAutoOpenDismissedMessageId,
+		artifactPreviewTarget,
+		showControls,
+		showCallOverlay,
+		showOverview,
+		showArtifacts
+	} from '$lib/stores';
 
 	import Controls from './Controls/Controls.svelte';
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
@@ -93,9 +100,7 @@
 
 	const getDesktopDefaultWidth = (maxWidth: number, mode: DesktopPaneMode) =>
 		clamp(
-			mode === 'immersive'
-				? DESKTOP_IMMERSIVE_DEFAULT_WIDTH
-				: DESKTOP_STANDARD_DEFAULT_WIDTH,
+			mode === 'immersive' ? DESKTOP_IMMERSIVE_DEFAULT_WIDTH : DESKTOP_STANDARD_DEFAULT_WIDTH,
 			DESKTOP_MIN_WIDTH,
 			maxWidth
 		);
@@ -143,8 +148,8 @@
 	const getDesktopPaneTargetSize = (mode: DesktopPaneMode, fallbackSize: number | null = null) => {
 		const rememberedSize =
 			mode === 'immersive'
-				? immersivePaneSize ?? Math.max(fallbackSize ?? 0, desktopDefaultSize)
-				: getRememberedDesktopPaneSize(mode) ?? desktopDefaultSize;
+				? (immersivePaneSize ?? Math.max(fallbackSize ?? 0, desktopDefaultSize))
+				: (getRememberedDesktopPaneSize(mode) ?? desktopDefaultSize);
 
 		return clamp(rememberedSize, desktopMinSize, desktopMaxSize);
 	};
@@ -300,6 +305,11 @@
 	});
 
 	const closeHandler = () => {
+		if ($showArtifacts && $artifactPreviewTarget?.messageId) {
+			artifactAutoOpenDismissedMessageId.set($artifactPreviewTarget.messageId);
+		}
+
+		artifactPreviewTarget.set(null);
 		showControls.set(false);
 		showOverview.set(false);
 		showArtifacts.set(false);
@@ -334,9 +344,7 @@
 				placement={drawerPlacement}
 				className={drawerClassName}
 				show={$showControls}
-				on:close={() => {
-					showControls.set(false);
-				}}
+				on:close={closeHandler}
 			>
 				<div
 					class=" {$showCallOverlay || $showOverview || $showArtifacts
@@ -365,7 +373,7 @@
 						<Overview
 							{history}
 							on:nodeclick={(e) => {
-								showMessage(e.detail.node.data.message);
+								showMessage(e.detail.node.data.message, { source: 'overview' });
 							}}
 							on:close={() => {
 								showControls.set(false);
@@ -420,7 +428,7 @@
 						return;
 					}
 
-					showControls.set(false);
+					closeHandler();
 				}}
 				collapsible={true}
 				class=" z-10 "
@@ -458,7 +466,7 @@
 											history.messages[e.detail.node.data.message.id].favorite = null;
 										}
 
-										showMessage(e.detail.node.data.message);
+										showMessage(e.detail.node.data.message, { source: 'overview' });
 									}}
 									on:close={() => {
 										showControls.set(false);

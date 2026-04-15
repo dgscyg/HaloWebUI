@@ -7,17 +7,17 @@
 
 ## 2. 技术栈
 
-| 层级 | 技术 | 说明 |
-|------|------|------|
-| 框架 | FastAPI | 异步 ASGI 框架，支持 OpenAPI 文档 |
-| 语言 | Python 3.10+ | 类型注解支持 |
-| ORM | SQLAlchemy 2.0 | 异步数据库访问 |
-| 验证 | Pydantic v2 | 数据验证和序列化 |
-| 认证 | JWT (HS256) | 用户会话令牌 |
-| 实时通信 | Socket.IO | WebSocket 双向通信 |
-| 数据库 | SQLite / PostgreSQL | 默认 SQLite，支持 PostgreSQL |
-| 缓存 | Redis (可选) | 配置同步、速率限制 |
-| 容器构建 | Docker 多阶段构建 | `Dockerfile` 支持 `NPM_REGISTRY`、`DEBIAN_MIRROR`、`DEBIAN_SECURITY_MIRROR`、`PIP_INDEX_URL`、`PIP_TRUSTED_HOST` 覆盖镜像源 |
+| 层级     | 技术                | 说明                                                                                                                        |
+| -------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| 框架     | FastAPI             | 异步 ASGI 框架，支持 OpenAPI 文档                                                                                           |
+| 语言     | Python 3.10+        | 类型注解支持                                                                                                                |
+| ORM      | SQLAlchemy 2.0      | 异步数据库访问                                                                                                              |
+| 验证     | Pydantic v2         | 数据验证和序列化                                                                                                            |
+| 认证     | JWT (HS256)         | 用户会话令牌                                                                                                                |
+| 实时通信 | Socket.IO           | WebSocket 双向通信                                                                                                          |
+| 数据库   | SQLite / PostgreSQL | 默认 SQLite，支持 PostgreSQL                                                                                                |
+| 缓存     | Redis (可选)        | 配置同步、速率限制                                                                                                          |
+| 容器构建 | Docker 多阶段构建   | `Dockerfile` 支持 `NPM_REGISTRY`、`DEBIAN_MIRROR`、`DEBIAN_SECURITY_MIRROR`、`PIP_INDEX_URL`、`PIP_TRUSTED_HOST` 覆盖镜像源 |
 
 ## 3. 核心模块
 
@@ -28,22 +28,22 @@
 
 ### 3.2 路由模块 (`routers/`)
 
-| 路由前缀 | 模块 | 功能 |
-|----------|------|------|
-| `/api/v1/auths` | auths.py | 用户认证、登录、注册、OAuth、LDAP |
-| `/api/v1/chats` | chats.py | 聊天会话 CRUD、搜索、标签 |
-| `/api/v1/models` | models.py | 模型配置管理 |
-| `/api/v1/files` | files.py | 文件上传、元数据管理 |
-| `/api/v1/knowledge` | knowledge.py | 知识库管理 |
-| `/api/v1/retrieval` | retrieval.py | RAG 文档检索 |
-| `/api/v1/utils` | utils.py | 代码格式化、Markdown 转 HTML、聊天 PDF 导出；代码格式化依赖运行时 `black` |
-| `/ollama` | ollama.py | Ollama API 兼容层 |
-| `/openai` | openai.py | OpenAI API 兼容层 |
-| `/gemini` | gemini.py | Google Gemini API |
-| `/anthropic` | anthropic.py | Anthropic Claude API |
-| `/api/v1/images` | images.py | 图像生成 |
-| `/api/v1/audio` | audio.py | 语音转文字/文字转语音 |
-| `/api/v1/haloclaw` | haloclaw/router.py | 消息网关管理 |
+| 路由前缀            | 模块               | 功能                                                                      |
+| ------------------- | ------------------ | ------------------------------------------------------------------------- |
+| `/api/v1/auths`     | auths.py           | 用户认证、登录、注册、OAuth、LDAP                                         |
+| `/api/v1/chats`     | chats.py           | 聊天会话 CRUD、搜索、标签                                                 |
+| `/api/v1/models`    | models.py          | 模型配置管理                                                              |
+| `/api/v1/files`     | files.py           | 文件上传、元数据管理                                                      |
+| `/api/v1/knowledge` | knowledge.py       | 知识库管理                                                                |
+| `/api/v1/retrieval` | retrieval.py       | RAG 文档检索                                                              |
+| `/api/v1/utils`     | utils.py           | 代码格式化、Markdown 转 HTML、聊天 PDF 导出；代码格式化依赖运行时 `black` |
+| `/ollama`           | ollama.py          | Ollama API 兼容层                                                         |
+| `/openai`           | openai.py          | OpenAI API 兼容层                                                         |
+| `/gemini`           | gemini.py          | Google Gemini API                                                         |
+| `/anthropic`        | anthropic.py       | Anthropic Claude API                                                      |
+| `/api/v1/images`    | images.py          | 图像生成                                                                  |
+| `/api/v1/audio`     | audio.py           | 语音转文字/文字转语音                                                     |
+| `/api/v1/haloclaw`  | haloclaw/router.py | 消息网关管理                                                              |
 
 ### 3.3 数据模型 (`models/`)
 

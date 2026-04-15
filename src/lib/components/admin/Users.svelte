@@ -25,7 +25,8 @@
 		},
 		groups: {
 			label: 'Groups',
-			description: 'Organize membership with reusable permission groups and a shared default access policy.'
+			description:
+				'Organize membership with reusable permission groups and a shared default access policy.'
 		}
 	};
 
@@ -60,7 +61,11 @@
 			: [
 					{ label: $i18n.t('Users'), value: totalUsers },
 					{ label: $i18n.t('Active in 30 days'), value: activeUsers },
-					{ label: $i18n.t('Seat usage'), value: seatLabel, attention: seatLimit !== null && totalUsers > seatLimit }
+					{
+						label: $i18n.t('Seat usage'),
+						value: seatLabel,
+						attention: seatLimit !== null && totalUsers > seatLimit
+					}
 				];
 
 	onMount(async () => {
@@ -86,7 +91,9 @@
 					>
 						<span class="leading-none text-gray-400 dark:text-gray-500">{$i18n.t('Settings')}</span>
 						<span class="leading-none text-gray-300 dark:text-gray-600">/</span>
-						<span class="leading-none text-gray-900 dark:text-white">{$i18n.t(activeTabMeta.label)}</span>
+						<span class="leading-none text-gray-900 dark:text-white"
+							>{$i18n.t(activeTabMeta.label)}</span
+						>
 					</div>
 
 					<div class="mt-4 flex items-start gap-4">
@@ -110,26 +117,25 @@
 						</div>
 					</div>
 
-					<div class="mt-6 inline-flex w-full max-w-full overflow-x-auto rounded-2xl bg-gray-100 p-1 dark:bg-gray-850 scrollbar-none sm:w-fit">
-							{#each [
-								{ id: 'overview', label: $i18n.t('Overview'), icon: UsersSolid },
-								{ id: 'groups', label: $i18n.t('Groups'), icon: WrenchSolid }
-							] as tab}
-								<button
-									type="button"
-									class={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all ${
-										selectedTab === tab.id
-											? 'bg-white text-gray-900 shadow-sm dark:bg-gray-800 dark:text-white'
-											: 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
-									}`}
-									on:click={() => {
-										selectedTab = tab.id === 'groups' ? 'groups' : 'overview';
-									}}
-								>
-									<svelte:component this={tab.icon} className="size-4" />
-									<span>{tab.label}</span>
-								</button>
-							{/each}
+					<div
+						class="mt-6 inline-flex w-full max-w-full overflow-x-auto rounded-2xl bg-gray-100 p-1 dark:bg-gray-850 scrollbar-none sm:w-fit"
+					>
+						{#each [{ id: 'overview', label: $i18n.t('Overview'), icon: UsersSolid }, { id: 'groups', label: $i18n.t('Groups'), icon: WrenchSolid }] as tab}
+							<button
+								type="button"
+								class={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all ${
+									selectedTab === tab.id
+										? 'bg-white text-gray-900 shadow-sm dark:bg-gray-800 dark:text-white'
+										: 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
+								}`}
+								on:click={() => {
+									selectedTab = tab.id === 'groups' ? 'groups' : 'overview';
+								}}
+							>
+								<svelte:component this={tab.icon} className="size-4" />
+								<span>{tab.label}</span>
+							</button>
+						{/each}
 					</div>
 				</div>
 

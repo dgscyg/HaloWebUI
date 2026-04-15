@@ -4,7 +4,11 @@
 
 	import type { Model } from '$lib/stores';
 	import { mobile } from '$lib/stores';
-	import { getImageGenerationModels, getImageUsageConfig, type ImageGenerationModel } from '$lib/apis/images';
+	import {
+		getImageGenerationModels,
+		getImageUsageConfig,
+		type ImageGenerationModel
+	} from '$lib/apis/images';
 	import {
 		getUserValvesById as getFunctionUserValvesById,
 		getUserValvesSpecById as getFunctionUserValvesSpecById,
@@ -225,11 +229,7 @@
 
 	$: showCustomPanel = Boolean(customFunctionId) && customHasImageFields;
 	$: showPanel = showCustomPanel || showBuiltinPanel || customLoading || builtinLoading;
-	$: panelTitle = showCustomPanel
-		? '画图参数'
-		: showBuiltinPanel
-			? 'Gemini 绘图参数'
-			: '图片参数';
+	$: panelTitle = showCustomPanel ? '画图参数' : showBuiltinPanel ? 'Gemini 绘图参数' : '图片参数';
 
 	$: builtinImageSizeOptions = GEMINI_IMAGE_SIZE_OPTIONS.map((option) => ({
 		value: option.value,
@@ -252,10 +252,14 @@
 
 {#if showPanel}
 	<div class="px-2.5 pb-1.5 pt-1.5">
-		<div class="rounded-2xl border border-gray-200/70 bg-white/85 shadow-sm backdrop-blur-xl dark:border-gray-700/30 dark:bg-white/[0.04]">
+		<div
+			class="rounded-2xl border border-gray-200/70 bg-white/85 shadow-sm backdrop-blur-xl dark:border-gray-700/30 dark:bg-white/[0.04]"
+		>
 			<div class="flex items-center justify-between gap-3 px-3 py-2.5">
 				<div class="flex min-w-0 items-center gap-2">
-					<div class="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+					<div
+						class="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
+					>
 						{#if showCustomPanel}
 							<Sparkles className="size-4" strokeWidth="2" />
 						{:else}
@@ -302,9 +306,13 @@
 			</div>
 
 			{#if !$mobile || panelExpanded}
-				<div class="grid gap-3 border-t border-gray-200/70 px-3 pb-3 pt-3 dark:border-gray-700/30 md:grid-cols-2">
+				<div
+					class="grid gap-3 border-t border-gray-200/70 px-3 pb-3 pt-3 dark:border-gray-700/30 md:grid-cols-2"
+				>
 					{#if customLoading || builtinLoading}
-						<div class="col-span-full flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+						<div
+							class="col-span-full flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
+						>
 							<Spinner className="size-4" />
 							加载图片参数...
 						</div>

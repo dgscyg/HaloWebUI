@@ -21,7 +21,7 @@ from open_webui.models.users import (
 from open_webui.socket.main import get_active_status_by_user_id
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -34,7 +34,6 @@ from open_webui.utils.auth import (
 from open_webui.utils.user_connections import maybe_migrate_user_connections
 from open_webui.utils.user_tools import maybe_migrate_user_tool_settings
 from open_webui.utils.access_control import get_permissions
-
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -58,6 +57,7 @@ def _get_ui_connections(settings_like: Any) -> dict:
     ui = _as_dict(settings_dict.get("ui"))
     return _as_dict(ui.get("connections"))
 
+
 ############################
 # GetUsers
 ############################
@@ -70,6 +70,36 @@ async def get_users(
     user=Depends(get_admin_user),
 ):
     return Users.get_users(skip, limit)
+
+
+@router.get("/search")
+async def search_users(
+    query: str = Query(default=""),
+    user=Depends(get_verified_user),
+):
+    query_lower = query.strip().lower()
+    users = Users.get_users()
+
+    if query_lower:
+        users = [
+            item
+            for item in users
+            if query_lower in (item.name or "").lower()
+            or query_lower in (item.email or "").lower()
+            or query_lower in (getattr(item, "username", "") or "").lower()
+        ]
+
+    return {
+        "users": [
+            {
+                "id": item.id,
+                "name": item.name,
+                "email": item.email,
+                "profile_image_url": getattr(item, "profile_image_url", ""),
+            }
+            for item in users[:20]
+        ]
+    }
 
 
 ############################
@@ -85,14 +115,16 @@ async def export_users_csv(user=Depends(get_admin_user)):
     writer = csv.writer(buf)
     writer.writerow(["id", "name", "email", "role", "created_at", "last_active_at"])
     for u in all_users:
-        writer.writerow([
-            u.id,
-            u.name,
-            u.email,
-            u.role,
-            u.created_at,
-            u.last_active_at,
-        ])
+        writer.writerow(
+            [
+                u.id,
+                u.name,
+                u.email,
+                u.role,
+                u.created_at,
+                u.last_active_at,
+            ]
+        )
 
     buf.seek(0)
     return StreamingResponse(
@@ -218,7 +250,9 @@ async def update_user_role(form_data: UserRoleUpdateForm, user=Depends(get_admin
 
 
 @router.get("/user/settings", response_model=Optional[UserSettings])
-async def get_user_settings_by_session_user(request: Request, user=Depends(get_verified_user)):
+async def get_user_settings_by_session_user(
+    request: Request, user=Depends(get_verified_user)
+):
     user = Users.get_user_by_id(user.id)
     if user:
         user = maybe_migrate_user_connections(request, user)
@@ -262,9 +296,9 @@ async def update_user_settings_by_session_user(
         return existing_user.settings or UserSettings()
 
     next_settings_dict = _deep_merge_dict(existing_settings_dict, patch_payload)
-    connections_changed = _get_ui_connections(existing_settings_dict) != _get_ui_connections(
-        next_settings_dict
-    )
+    connections_changed = _get_ui_connections(
+        existing_settings_dict
+    ) != _get_ui_connections(next_settings_dict)
 
     try:
         user = Users.patch_user_settings_by_id(

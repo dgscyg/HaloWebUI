@@ -123,7 +123,9 @@ def _format_ollama_error_detail(payload=None, error=None) -> str:
 
 
 async def _read_ollama_aiohttp_error_detail(response=None, error=None) -> str:
-    payload = await read_aiohttp_error_payload(response) if response is not None else None
+    payload = (
+        await read_aiohttp_error_payload(response) if response is not None else None
+    )
     return _format_ollama_error_detail(payload, error)
 
 
@@ -210,7 +212,9 @@ def get_api_key(idx, url, configs):
 router = APIRouter()
 
 
-def _get_ollama_user_config(connection_user: Optional[UserModel]) -> tuple[list[str], dict]:
+def _get_ollama_user_config(
+    connection_user: Optional[UserModel],
+) -> tuple[list[str], dict]:
     """
     Resolve Ollama connection config for a given user.
 
@@ -421,10 +425,16 @@ async def health_check_connection(
                                 break
 
             if not chosen_model:
-                raise HTTPException(status_code=400, detail="Ollama: No compatible model found")
+                raise HTTPException(
+                    status_code=400, detail="Ollama: No compatible model found"
+                )
 
             chosen_model = str(chosen_model)
-            resolved_prefix = (api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or "").strip() or None
+            resolved_prefix = (
+                api_config.get("_resolved_prefix_id")
+                or api_config.get("prefix_id")
+                or ""
+            ).strip() or None
             if resolved_prefix and chosen_model.startswith(f"{resolved_prefix}."):
                 chosen_model = chosen_model[len(resolved_prefix) + 1 :]
             if ":" not in chosen_model and "/" not in chosen_model:
@@ -512,7 +522,11 @@ async def update_config(
             continue
         cfg = prev_cfgs.get(str(idx), prev_cfgs.get(prev_url, {})) or {}
         raw = cfg.get("prefix_id", None)
-        prefix = (raw or "").strip() if isinstance(raw, str) else (str(raw).strip() if raw is not None else "")
+        prefix = (
+            (raw or "").strip()
+            if isinstance(raw, str)
+            else (str(raw).strip() if raw is not None else "")
+        )
         if prefix:
             prev_prefix_by_url.setdefault(url_key, prefix)
         else:
@@ -697,7 +711,9 @@ async def get_all_models(request: Request, user: UserModel = None):
         key = api_config.get("key", None)
 
         if enable:
-            request_tasks.append(send_get_request(f"{url.rstrip('/')}/api/tags", key, user=user))
+            request_tasks.append(
+                send_get_request(f"{url.rstrip('/')}/api/tags", key, user=user)
+            )
         else:
             request_tasks.append(asyncio.ensure_future(asyncio.sleep(0, None)))
 
@@ -741,12 +757,21 @@ async def get_all_models(request: Request, user: UserModel = None):
         if prefix_id and model_ids:
             prefix = f"{prefix_id}."
             model_ids = [
-                (model_id[len(prefix) :] if isinstance(model_id, str) and model_id.startswith(prefix) else model_id)
+                (
+                    model_id[len(prefix) :]
+                    if isinstance(model_id, str) and model_id.startswith(prefix)
+                    else model_id
+                )
                 for model_id in model_ids
             ]
 
         if model_ids and "models" in response:
-            response["models"] = [m for m in (response.get("models", []) or []) if isinstance(m, dict) and (m.get("model") in model_ids or m.get("name") in model_ids)]
+            response["models"] = [
+                m
+                for m in (response.get("models", []) or [])
+                if isinstance(m, dict)
+                and (m.get("model") in model_ids or m.get("name") in model_ids)
+            ]
 
         for model in response.get("models", []) or []:
             if not isinstance(model, dict):
@@ -757,7 +782,9 @@ async def get_all_models(request: Request, user: UserModel = None):
 
             if prefix_id:
                 prefix = f"{prefix_id}."
-                if isinstance(original_model, str) and original_model.startswith(prefix):
+                if isinstance(original_model, str) and original_model.startswith(
+                    prefix
+                ):
                     original_model = original_model[len(prefix) :]
                 if isinstance(display_name, str) and display_name.startswith(prefix):
                     display_name = display_name[len(prefix) :]
@@ -794,11 +821,18 @@ async def get_all_models(request: Request, user: UserModel = None):
 
     models = {
         "models": merge_models_lists(
-            map(lambda r: r.get("models", []) if isinstance(r, dict) else None, responses)
+            map(
+                lambda r: r.get("models", []) if isinstance(r, dict) else None,
+                responses,
+            )
         )
     }
 
-    request.state.OLLAMA_MODELS = {m.get("model"): m for m in models["models"] if isinstance(m, dict) and m.get("model")}
+    request.state.OLLAMA_MODELS = {
+        m.get("model"): m
+        for m in models["models"]
+        if isinstance(m, dict) and m.get("model")
+    }
     return models
 
 
@@ -878,7 +912,9 @@ async def get_ollama_tags(
 
 @router.get("/api/version")
 @router.get("/api/version/{url_idx}")
-async def get_ollama_versions(request: Request, url_idx: Optional[int] = None, user=Depends(get_verified_user)):
+async def get_ollama_versions(
+    request: Request, url_idx: Optional[int] = None, user=Depends(get_verified_user)
+):
     if request.app.state.config.ENABLE_OLLAMA_API:
         base_urls, cfgs = _get_ollama_user_config(user)
         if not base_urls:
@@ -889,10 +925,13 @@ async def get_ollama_versions(request: Request, url_idx: Optional[int] = None, u
             request_tasks = []
 
             for idx, url in enumerate(base_urls):
-                api_config = cfgs.get(
-                    str(idx),
-                    cfgs.get(url, {}),
-                ) or {}
+                api_config = (
+                    cfgs.get(
+                        str(idx),
+                        cfgs.get(url, {}),
+                    )
+                    or {}
+                )
 
                 enable = api_config.get("enable", True)
                 key = api_config.get("key", None)
@@ -1448,7 +1487,9 @@ class GenerateCompletionForm(BaseModel):
         """Allow prompt to be omitted only when keep_alive=0 (model unload)."""
         keep_alive = values.get("keep_alive")
         if v is None and keep_alive not in (0, "0"):
-            raise ValueError("prompt is required (unless keep_alive=0 for model unload)")
+            raise ValueError(
+                "prompt is required (unless keep_alive=0 for model unload)"
+            )
         return v
 
 
@@ -1610,7 +1651,9 @@ async def generate_chat_completion(
         connection_user, payload.get("model", ""), url_idx
     )
 
-    resolved_prefix = (api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or "").strip() or None
+    resolved_prefix = (
+        api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or ""
+    ).strip() or None
     if resolved_prefix and isinstance(payload.get("model"), str):
         prefix = f"{resolved_prefix}."
         if payload["model"].startswith(prefix):
@@ -1621,7 +1664,11 @@ async def generate_chat_completion(
         url=f"{url}/api/chat",
         payload=json.dumps(payload),
         stream=form_data.stream,
-        key=get_api_key(chosen_idx, base_urls[chosen_idx] if chosen_idx < len(base_urls) else url, cfgs),
+        key=get_api_key(
+            chosen_idx,
+            base_urls[chosen_idx] if chosen_idx < len(base_urls) else url,
+            cfgs,
+        ),
         content_type="application/x-ndjson",
         user=user,
     )
@@ -1713,7 +1760,9 @@ async def generate_openai_completion(
         connection_user, payload.get("model", ""), url_idx
     )
 
-    resolved_prefix = (api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or "").strip() or None
+    resolved_prefix = (
+        api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or ""
+    ).strip() or None
     if resolved_prefix and isinstance(payload.get("model"), str):
         prefix = f"{resolved_prefix}."
         if payload["model"].startswith(prefix):
@@ -1724,7 +1773,11 @@ async def generate_openai_completion(
         url=f"{url}/v1/completions",
         payload=json.dumps(payload),
         stream=payload.get("stream", False),
-        key=get_api_key(chosen_idx, base_urls[chosen_idx] if chosen_idx < len(base_urls) else url, cfgs),
+        key=get_api_key(
+            chosen_idx,
+            base_urls[chosen_idx] if chosen_idx < len(base_urls) else url,
+            cfgs,
+        ),
         user=user,
     )
 
@@ -1792,7 +1845,9 @@ async def generate_openai_chat_completion(
         connection_user, payload.get("model", ""), url_idx
     )
 
-    resolved_prefix = (api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or "").strip() or None
+    resolved_prefix = (
+        api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or ""
+    ).strip() or None
     if resolved_prefix and isinstance(payload.get("model"), str):
         prefix = f"{resolved_prefix}."
         if payload["model"].startswith(prefix):
@@ -1803,7 +1858,11 @@ async def generate_openai_chat_completion(
         url=f"{url}/v1/chat/completions",
         payload=json.dumps(payload),
         stream=payload.get("stream", False),
-        key=get_api_key(chosen_idx, base_urls[chosen_idx] if chosen_idx < len(base_urls) else url, cfgs),
+        key=get_api_key(
+            chosen_idx,
+            base_urls[chosen_idx] if chosen_idx < len(base_urls) else url,
+            cfgs,
+        ),
         user=user,
     )
 
@@ -1852,7 +1911,9 @@ async def get_openai_models(
                     "created": int(time.time()),
                     "owned_by": "openai",
                 }
-                for model in (model_list.get("models", []) if isinstance(model_list, dict) else [])
+                for model in (
+                    model_list.get("models", []) if isinstance(model_list, dict) else []
+                )
                 if isinstance(model, dict) and model.get("model")
             ]
         except Exception as e:

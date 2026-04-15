@@ -20,7 +20,11 @@ from open_webui.routers.configs import (
     _pick_mcp_resource_content,
 )
 from open_webui.utils.auth import get_verified_user
-from open_webui.utils.mcp import execute_mcp_tool, get_mcp_server_data, read_mcp_resource
+from open_webui.utils.mcp import (
+    execute_mcp_tool,
+    get_mcp_server_data,
+    read_mcp_resource,
+)
 from open_webui.utils.user_tools import (
     MCP_APPS_GLOBAL_ENABLE_KEY,
     get_user_mcp_apps_config,
@@ -133,7 +137,9 @@ def _normalize_tool_result_structured_content(result: Any) -> Any:
     return {}
 
 
-def _extract_resource_ui_metadata(resource_catalog: dict[str, Any], uri: str) -> tuple[Optional[dict], Optional[dict]]:
+def _extract_resource_ui_metadata(
+    resource_catalog: dict[str, Any], uri: str
+) -> tuple[Optional[dict], Optional[dict]]:
     for resource in resource_catalog.get("resources", []) or []:
         if not isinstance(resource, dict):
             continue
@@ -171,7 +177,9 @@ def _get_mcp_connection(
 
     if check_mcp_apps:
         apps_config = get_user_mcp_apps_config(request, user)
-        global_enabled_default = bool(apps_config.get(MCP_APPS_GLOBAL_ENABLE_KEY, False))
+        global_enabled_default = bool(
+            apps_config.get(MCP_APPS_GLOBAL_ENABLE_KEY, False)
+        )
         base_enabled = _is_mcp_connection_enabled(connection)
         apps_global_enabled, server_apps_enabled = _get_mcp_apps_form_state(
             connection,
@@ -205,7 +213,9 @@ async def read_resource(
             connection,
             session_token=session_token,
         )
-        csp_data, permissions_data = _extract_resource_ui_metadata(resource_catalog, body.uri)
+        csp_data, permissions_data = _extract_resource_ui_metadata(
+            resource_catalog, body.uri
+        )
 
         resource_result = await read_mcp_resource(
             connection,
@@ -222,11 +232,12 @@ async def read_resource(
         elif isinstance(selected.get("blob"), str):
             content = selected.get("blob") or ""
 
-        mime_type = str(
-            selected.get("mimeType")
-            or selected.get("mime_type")
+        mime_type = (
+            str(
+                selected.get("mimeType") or selected.get("mime_type") or "text/html"
+            ).strip()
             or "text/html"
-        ).strip() or "text/html"
+        )
 
         return ReadResourceResponse(
             resource=MCPAppResource(
@@ -234,7 +245,9 @@ async def read_resource(
                 content=content,
                 mimeType=mime_type,
                 csp=McpUiResourceCsp(**csp_data) if csp_data else None,
-                permissions=MCPUIPermissions(**permissions_data) if permissions_data else None,
+                permissions=(
+                    MCPUIPermissions(**permissions_data) if permissions_data else None
+                ),
             )
         )
     except HTTPException:

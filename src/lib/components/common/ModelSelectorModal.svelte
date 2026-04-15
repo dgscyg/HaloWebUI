@@ -146,12 +146,12 @@
 					throw new Error('Gemini: Invalid response (expected models.list format)');
 				}
 
-					availableModels = (data.models || []).map((m: any) => ({
-						id: m.name?.replace('models/', '') || m.name,
-						name: m.displayName || m.name,
-						native_web_search_supported: m.native_web_search_supported,
-						native_web_search_support: m.native_web_search_support
-					}));
+				availableModels = (data.models || []).map((m: any) => ({
+					id: m.name?.replace('models/', '') || m.name,
+					name: m.displayName || m.name,
+					native_web_search_supported: m.native_web_search_supported,
+					native_web_search_support: m.native_web_search_support
+				}));
 			} else if (anthropic) {
 				data = await verifyAnthropicConnection(localStorage.token, {
 					url,
@@ -174,27 +174,26 @@
 				}));
 			} else {
 				// Use backend proxy to avoid CORS issues
-					data = await verifyOpenAIConnection(localStorage.token, {
-						url,
-						key,
-						purpose: 'models',
-						config: {
-							force_mode,
-							...(azure ? { azure: true } : {}),
-							...(api_version ? { api_version } : {}),
-							...(auth_type ? { auth_type } : {}),
-							...(headers ? { headers } : {})
-						}
-					});
-					availableModels = (data?.data || []).map((m: any) => ({
-						id: m.id,
-						name: m.name || m.id,
-						native_web_search_supported: m.native_web_search_supported,
-						native_web_search_support: m.native_web_search_support
-					}));
+				data = await verifyOpenAIConnection(localStorage.token, {
+					url,
+					key,
+					purpose: 'models',
+					config: {
+						force_mode,
+						...(azure ? { azure: true } : {}),
+						...(api_version ? { api_version } : {}),
+						...(auth_type ? { auth_type } : {}),
+						...(headers ? { headers } : {})
+					}
+				});
+				availableModels = (data?.data || []).map((m: any) => ({
+					id: m.id,
+					name: m.name || m.id,
+					native_web_search_supported: m.native_web_search_supported,
+					native_web_search_support: m.native_web_search_support
+				}));
 
-				serverModelListRequiresManualEntry =
-					data?._openwebui?.manual_model_ids_required === true;
+				serverModelListRequiresManualEntry = data?._openwebui?.manual_model_ids_required === true;
 			}
 
 			if (serverModelListRequiresManualEntry) {
@@ -219,21 +218,24 @@
 		}
 	};
 
-		const getNativeWebSearchTooltip = (model: AvailableModel) =>
-			describeNativeWebSearchSupport((key, options) => $i18n.t(key, options), getNativeWebSearchSupport(model));
+	const getNativeWebSearchTooltip = (model: AvailableModel) =>
+		describeNativeWebSearchSupport(
+			(key, options) => $i18n.t(key, options),
+			getNativeWebSearchSupport(model)
+		);
 
-		const getNativeWebSearchIconClass = (model: AvailableModel) => {
-			const support = getNativeWebSearchSupport(model);
-			if (support.status === 'supported') {
-				return 'size-3.5 text-blue-500';
-			}
-			if (support.status === 'unknown') {
-				return 'size-3.5 text-amber-500';
-			}
-			return 'size-3.5 text-gray-400';
-		};
+	const getNativeWebSearchIconClass = (model: AvailableModel) => {
+		const support = getNativeWebSearchSupport(model);
+		if (support.status === 'supported') {
+			return 'size-3.5 text-blue-500';
+		}
+		if (support.status === 'unknown') {
+			return 'size-3.5 text-amber-500';
+		}
+		return 'size-3.5 text-gray-400';
+	};
 
-		const toggleModel = (id: string) => {
+	const toggleModel = (id: string) => {
 		const newSet = new Set(selectedIds);
 		if (newSet.has(id)) {
 			newSet.delete(id);
@@ -278,19 +280,19 @@
 		if (!matchesSearch) return false;
 
 		// 标签过滤
-			if (activeTag === 'all') return true;
-			if (activeTag === 'selected') return selectedIds.has(m.id);
-			if (activeTag === 'webSearch') {
-				if (
-					Object.prototype.hasOwnProperty.call(m ?? {}, 'native_web_search_support') ||
-					Object.prototype.hasOwnProperty.call(m ?? {}, 'native_web_search_supported')
-				) {
-					return getNativeWebSearchSupport(m).status !== 'unsupported';
-				}
+		if (activeTag === 'all') return true;
+		if (activeTag === 'selected') return selectedIds.has(m.id);
+		if (activeTag === 'webSearch') {
+			if (
+				Object.prototype.hasOwnProperty.call(m ?? {}, 'native_web_search_support') ||
+				Object.prototype.hasOwnProperty.call(m ?? {}, 'native_web_search_supported')
+			) {
+				return getNativeWebSearchSupport(m).status !== 'unsupported';
 			}
-			const caps = inferModelCapabilities(m.id);
-			return caps[activeTag as keyof ModelCapabilities];
-		});
+		}
+		const caps = inferModelCapabilities(m.id);
+		return caps[activeTag as keyof ModelCapabilities];
+	});
 
 	// 手动添加的模型（在selectedIds中但不在availableModels中）
 	$: customModels = Array.from(selectedIds).filter(
@@ -299,7 +301,7 @@
 
 	// 按分组组织模型
 	$: groupedModels = (() => {
-			const groups = new Map<string, AvailableModel[]>();
+		const groups = new Map<string, AvailableModel[]>();
 		for (const model of filteredModels) {
 			const group = getModelGroup(model.id);
 			if (!groups.has(group)) {
@@ -501,17 +503,17 @@
 												<Wrench className="size-3.5 text-orange-500" />
 											</Tooltip>
 										{/if}
-											{#if Object.prototype.hasOwnProperty.call(model ?? {}, 'native_web_search_support') || Object.prototype.hasOwnProperty.call(model ?? {}, 'native_web_search_supported')}
-												{#if getNativeWebSearchSupport(model).status !== 'unsupported'}
-													<Tooltip content={getNativeWebSearchTooltip(model)}>
-														<GlobeAlt className={getNativeWebSearchIconClass(model)} />
-													</Tooltip>
-												{/if}
-											{:else if caps.webSearch}
-												<Tooltip content={$i18n.t('Web Search')}>
-													<GlobeAlt className="size-3.5 text-blue-500" />
+										{#if Object.prototype.hasOwnProperty.call(model ?? {}, 'native_web_search_support') || Object.prototype.hasOwnProperty.call(model ?? {}, 'native_web_search_supported')}
+											{#if getNativeWebSearchSupport(model).status !== 'unsupported'}
+												<Tooltip content={getNativeWebSearchTooltip(model)}>
+													<GlobeAlt className={getNativeWebSearchIconClass(model)} />
 												</Tooltip>
 											{/if}
+										{:else if caps.webSearch}
+											<Tooltip content={$i18n.t('Web Search')}>
+												<GlobeAlt className="size-3.5 text-blue-500" />
+											</Tooltip>
+										{/if}
 									</div>
 									{#if model.name && model.name !== model.id}
 										<Tooltip content={model.id}>

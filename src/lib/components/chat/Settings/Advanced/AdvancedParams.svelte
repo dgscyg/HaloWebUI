@@ -1492,7 +1492,9 @@
 			</Tooltip>
 
 			{#if customParamsExpanded}
-				<div class="mt-2 rounded-xl border border-dashed border-gray-200/80 dark:border-gray-700/60 bg-gray-50/60 dark:bg-gray-900/25 px-2.5 py-2.5 space-y-2">
+				<div
+					class="mt-2 rounded-xl border border-dashed border-gray-200/80 dark:border-gray-700/60 bg-gray-50/60 dark:bg-gray-900/25 px-2.5 py-2.5 space-y-2"
+				>
 					<div class="flex items-center justify-between gap-3">
 						<div class="text-[11px] leading-5 text-gray-500 dark:text-gray-400">
 							会作为补充字段附加到上游请求，不覆盖系统已有参数。
@@ -1519,7 +1521,7 @@
 						<input
 							class="w-full rounded-lg py-1.5 px-2.5 text-xs dark:text-gray-300 bg-white/80 dark:bg-gray-800/70 border border-gray-200/70 dark:border-gray-700/50 outline-hidden focus:border-blue-300/50 dark:focus:border-blue-500/30 transition-colors duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
 							type="text"
-							placeholder='参数值，支持 JSON / true / 123 / null'
+							placeholder="参数值，支持 JSON / true / 123 / null"
 							bind:value={customFieldValue}
 							autocomplete="off"
 							on:keydown={(event) => {
@@ -1547,10 +1549,14 @@
 									class="flex items-start justify-between gap-2 rounded-lg border border-gray-200/60 dark:border-gray-700/40 bg-white/80 dark:bg-gray-900/35 px-2.5 py-2"
 								>
 									<div class="min-w-0 flex-1">
-										<div class="inline-flex max-w-full items-center rounded-md bg-gray-100/90 dark:bg-gray-800/80 px-1.5 py-0.5 text-[11px] font-medium text-gray-700 dark:text-gray-200 break-all">
+										<div
+											class="inline-flex max-w-full items-center rounded-md bg-gray-100/90 dark:bg-gray-800/80 px-1.5 py-0.5 text-[11px] font-medium text-gray-700 dark:text-gray-200 break-all"
+										>
 											{key}
 										</div>
-										<div class="mt-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400 break-all">
+										<div
+											class="mt-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400 break-all"
+										>
 											{formatCustomParamValue(value)}
 										</div>
 									</div>

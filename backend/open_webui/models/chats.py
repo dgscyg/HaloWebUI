@@ -39,10 +39,12 @@ class Chat(Base):
 
     meta = Column(JSON, server_default="{}")
     folder_id = Column(Text, nullable=True)
+    assistant_id = Column(Text, nullable=True)
 
     __table_args__ = (
         Index("ix_chat_user_id", "user_id"),
         Index("ix_chat_folder_id", "folder_id"),
+        Index("ix_chat_assistant_id", "assistant_id"),
         Index("ix_chat_updated_at", "updated_at"),
         Index("ix_chat_created_at", "created_at"),
     )
@@ -116,6 +118,7 @@ class ChatModel(BaseModel):
 
     meta: dict = {}
     folder_id: Optional[str] = None
+    assistant_id: Optional[str] = None
 
 
 ####################
@@ -125,12 +128,15 @@ class ChatModel(BaseModel):
 
 class ChatForm(BaseModel):
     chat: dict
+    folder_id: Optional[str] = None
+    assistant_id: Optional[str] = None
 
 
 class ChatImportForm(ChatForm):
     meta: Optional[dict] = {}
     pinned: Optional[bool] = False
     folder_id: Optional[str] = None
+    assistant_id: Optional[str] = None
 
 
 class ChatTitleMessagesForm(BaseModel):
@@ -154,6 +160,7 @@ class ChatResponse(BaseModel):
     pinned: Optional[bool] = False
     meta: dict = {}
     folder_id: Optional[str] = None
+    assistant_id: Optional[str] = None
 
 
 class ChatTitleIdResponse(BaseModel):
@@ -161,6 +168,7 @@ class ChatTitleIdResponse(BaseModel):
     title: str
     updated_at: int
     created_at: int
+    assistant_id: Optional[str] = None
 
 
 ####################
@@ -170,6 +178,7 @@ class ChatTitleIdResponse(BaseModel):
 
 class ChatReaction(Base):
     """Kept for Alembic migration compatibility - do not remove."""
+
     __tablename__ = "chat_reaction"
 
     id = Column(Text, primary_key=True)
@@ -179,9 +188,7 @@ class ChatReaction(Base):
     name = Column(Text, nullable=False)
     created_at = Column(BigInteger, nullable=False)
 
-    __table_args__ = (
-        Index("ix_chat_reaction_chat_message", "chat_id", "message_id"),
-    )
+    __table_args__ = (Index("ix_chat_reaction_chat_message", "chat_id", "message_id"),)
 
 
 # [REACTION_FEATURE] Commented out - reaction feature disabled for now
@@ -217,26 +224,43 @@ def normalize_chat_payload(chat: Optional[dict]) -> dict:
 
 
 class ChatTable:
+    def _build_chat_row(
+        self,
+        *,
+        user_id: str,
+        chat_payload: dict,
+        meta: Optional[dict] = None,
+        pinned: Optional[bool] = False,
+        folder_id: Optional[str] = None,
+        assistant_id: Optional[str] = None,
+    ) -> Chat:
+        normalized_chat = normalize_chat_payload(chat_payload)
+        now = int(time.time())
+        title = normalized_chat["title"] if "title" in normalized_chat else "New Chat"
+
+        return Chat(
+            **{
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "title": title,
+                "chat": normalized_chat,
+                "meta": meta or {},
+                "pinned": pinned,
+                "folder_id": folder_id,
+                "assistant_id": assistant_id,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+
     def insert_new_chat(self, user_id: str, form_data: ChatForm) -> Optional[ChatModel]:
         with get_db() as db:
-            normalized_chat = normalize_chat_payload(form_data.chat)
-            id = str(uuid.uuid4())
-            chat = ChatModel(
-                **{
-                    "id": id,
-                    "user_id": user_id,
-                    "title": (
-                        normalized_chat["title"]
-                        if "title" in normalized_chat
-                        else "New Chat"
-                    ),
-                    "chat": normalized_chat,
-                    "created_at": int(time.time()),
-                    "updated_at": int(time.time()),
-                }
+            result = self._build_chat_row(
+                user_id=user_id,
+                chat_payload=form_data.chat,
+                folder_id=form_data.folder_id,
+                assistant_id=form_data.assistant_id,
             )
-
-            result = Chat(**chat.model_dump())
             db.add(result)
             db.commit()
             db.refresh(result)
@@ -246,35 +270,63 @@ class ChatTable:
         self, user_id: str, form_data: ChatImportForm
     ) -> Optional[ChatModel]:
         with get_db() as db:
-            normalized_chat = normalize_chat_payload(form_data.chat)
-            id = str(uuid.uuid4())
-            chat = ChatModel(
-                **{
-                    "id": id,
-                    "user_id": user_id,
-                    "title": (
-                        normalized_chat["title"]
-                        if "title" in normalized_chat
-                        else "New Chat"
-                    ),
-                    "chat": normalized_chat,
-                    "meta": form_data.meta,
-                    "pinned": form_data.pinned,
-                    "folder_id": form_data.folder_id,
-                    "created_at": int(time.time()),
-                    "updated_at": int(time.time()),
-                }
+            result = self._build_chat_row(
+                user_id=user_id,
+                chat_payload=form_data.chat,
+                meta=form_data.meta,
+                pinned=form_data.pinned,
+                folder_id=form_data.folder_id,
+                assistant_id=form_data.assistant_id,
             )
-
-            result = Chat(**chat.model_dump())
             db.add(result)
             db.commit()
             db.refresh(result)
             return ChatModel.model_validate(result) if result else None
 
-    def update_chat_by_id(
-        self, id: str, chat: dict
-    ) -> Optional[ChatModel]:
+    def replace_chats_by_user_id(
+        self, user_id: str, import_forms: list[ChatImportForm]
+    ) -> list[ChatModel]:
+        with get_db() as db:
+            rows = [
+                self._build_chat_row(
+                    user_id=user_id,
+                    chat_payload=form_data.chat,
+                    meta=form_data.meta,
+                    pinned=form_data.pinned,
+                    folder_id=form_data.folder_id,
+                    assistant_id=form_data.assistant_id,
+                )
+                for form_data in import_forms
+            ]
+
+            existing_chat_ids = [
+                chat_id
+                for (chat_id,) in db.query(Chat.id).filter_by(user_id=user_id).all()
+            ]
+            shared_chat_ids = [f"shared-{chat_id}" for chat_id in existing_chat_ids]
+
+            if shared_chat_ids:
+                db.query(Chat).filter(Chat.user_id.in_(shared_chat_ids)).delete(
+                    synchronize_session=False
+                )
+
+            db.query(ChatMessage).filter_by(user_id=user_id).delete(
+                synchronize_session=False
+            )
+            db.query(Tag).filter_by(user_id=user_id).delete(synchronize_session=False)
+            db.query(Chat).filter_by(user_id=user_id).delete(synchronize_session=False)
+
+            if rows:
+                db.add_all(rows)
+
+            db.commit()
+
+            for row in rows:
+                db.refresh(row)
+
+            return [ChatModel.model_validate(row) for row in rows]
+
+    def update_chat_by_id(self, id: str, chat: dict) -> Optional[ChatModel]:
         try:
             with get_db() as db:
                 normalized_chat = normalize_chat_payload(chat)
@@ -282,7 +334,9 @@ class ChatTable:
                 chat_item.chat = normalized_chat
                 flag_modified(chat_item, "chat")
                 chat_item.title = (
-                    normalized_chat["title"] if "title" in normalized_chat else "New Chat"
+                    normalized_chat["title"]
+                    if "title" in normalized_chat
+                    else "New Chat"
                 )
                 chat_item.updated_at = int(time.time())
                 db.commit()
@@ -416,6 +470,7 @@ class ChatTable:
                     "user_id": f"shared-{chat_id}",
                     "title": chat.title,
                     "chat": normalized_chat,
+                    "assistant_id": chat.assistant_id,
                     "created_at": chat.created_at,
                     "updated_at": int(time.time()),
                 }
@@ -555,14 +610,14 @@ class ChatTable:
         limit: Optional[int] = None,
     ) -> list[ChatTitleIdResponse]:
         with get_db() as db:
-            query = db.query(Chat).filter_by(user_id=user_id).filter_by(folder_id=None)
+            query = db.query(Chat).filter_by(user_id=user_id)
             query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
 
             if not include_archived:
                 query = query.filter_by(archived=False)
 
             query = query.order_by(Chat.updated_at.desc()).with_entities(
-                Chat.id, Chat.title, Chat.updated_at, Chat.created_at
+                Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.assistant_id
             )
 
             if skip:
@@ -580,6 +635,7 @@ class ChatTable:
                         "title": chat[1],
                         "updated_at": chat[2],
                         "created_at": chat[3],
+                        "assistant_id": chat[4],
                     }
                 )
                 for chat in all_chats
@@ -733,12 +789,7 @@ class ChatTable:
             if dialect_name == "sqlite":
                 # SQLite case: using JSON1 extension for JSON searching
                 query = query.filter(
-                    (
-                        Chat.title.ilike(
-                            f"%{search_text}%"
-                        )  # Case-insensitive search in title
-                        | text(
-                            """
+                    (Chat.title.ilike(f"%{search_text}%") | text("""
                             EXISTS (
                                 SELECT 1
                                 FROM json_each(Chat.chat, '$.history.messages') AS message
@@ -749,36 +800,30 @@ class ChatTable:
                                 FROM json_each(Chat.chat, '$.messages') AS message
                                 WHERE LOWER(COALESCE(message.value->>'content', '')) LIKE '%' || :search_text || '%'
                             )
-                            """
-                        )
-                    ).params(search_text=search_text)
+                            """)).params(  # Case-insensitive search in title
+                        search_text=search_text
+                    )
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
-                    query = query.filter(
-                        text(
-                            """
+                    query = query.filter(text("""
                             NOT EXISTS (
                                 SELECT 1
                                 FROM json_each(Chat.meta, '$.tags') AS tag
                             )
-                            """
-                        )
-                    )
+                            """))
                 elif tag_ids:
                     query = query.filter(
                         and_(
                             *[
-                                text(
-                                    f"""
+                                text(f"""
                                     EXISTS (
                                         SELECT 1
                                         FROM json_each(Chat.meta, '$.tags') AS tag
                                         WHERE tag.value = :tag_id_{tag_idx}
                                     )
-                                    """
-                                ).params(**{f"tag_id_{tag_idx}": tag_id})
+                                    """).params(**{f"tag_id_{tag_idx}": tag_id})
                                 for tag_idx, tag_id in enumerate(tag_ids)
                             ]
                         )
@@ -787,12 +832,7 @@ class ChatTable:
             elif dialect_name == "postgresql":
                 # PostgreSQL relies on proper JSON query for search
                 query = query.filter(
-                    (
-                        Chat.title.ilike(
-                            f"%{search_text}%"
-                        )  # Case-insensitive search in title
-                        | text(
-                            """
+                    (Chat.title.ilike(f"%{search_text}%") | text("""
                             EXISTS (
                                 SELECT 1
                                 FROM json_each(COALESCE(Chat.chat->'history'->'messages', '{}'::json)) AS message(key, value)
@@ -803,36 +843,30 @@ class ChatTable:
                                 FROM json_array_elements(COALESCE(Chat.chat->'messages', '[]'::json)) AS message
                                 WHERE LOWER(COALESCE(message->>'content', '')) LIKE '%' || :search_text || '%'
                             )
-                            """
-                        )
-                    ).params(search_text=search_text)
+                            """)).params(  # Case-insensitive search in title
+                        search_text=search_text
+                    )
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
-                    query = query.filter(
-                        text(
-                            """
+                    query = query.filter(text("""
                             NOT EXISTS (
                                 SELECT 1
                                 FROM json_array_elements_text(Chat.meta->'tags') AS tag
                             )
-                            """
-                        )
-                    )
+                            """))
                 elif tag_ids:
                     query = query.filter(
                         and_(
                             *[
-                                text(
-                                    f"""
+                                text(f"""
                                     EXISTS (
                                         SELECT 1
                                         FROM json_array_elements_text(Chat.meta->'tags') AS tag
                                         WHERE tag = :tag_id_{tag_idx}
                                     )
-                                    """
-                                ).params(**{f"tag_id_{tag_idx}": tag_id})
+                                    """).params(**{f"tag_id_{tag_idx}": tag_id})
                                 for tag_idx, tag_id in enumerate(tag_ids)
                             ]
                         )
@@ -851,7 +885,11 @@ class ChatTable:
             return [ChatModel.model_validate(chat) for chat in all_chats]
 
     def get_chats_by_folder_id_and_user_id(
-        self, folder_id: str, user_id: str
+        self,
+        folder_id: str,
+        user_id: str,
+        skip: Optional[int] = None,
+        limit: Optional[int] = None,
     ) -> list[ChatModel]:
         with get_db() as db:
             query = db.query(Chat).filter_by(folder_id=folder_id, user_id=user_id)
@@ -859,6 +897,11 @@ class ChatTable:
             query = query.filter_by(archived=False)
 
             query = query.order_by(Chat.updated_at.desc())
+
+            if skip is not None:
+                query = query.offset(skip)
+            if limit is not None:
+                query = query.limit(limit)
 
             all_chats = query.all()
             return [ChatModel.model_validate(chat) for chat in all_chats]
@@ -878,8 +921,32 @@ class ChatTable:
             all_chats = query.all()
             return [ChatModel.model_validate(chat) for chat in all_chats]
 
+    def get_chats_by_assistant_id_and_user_id(
+        self,
+        assistant_id: str,
+        user_id: str,
+        skip: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> list[ChatModel]:
+        with get_db() as db:
+            query = db.query(Chat).filter_by(
+                assistant_id=assistant_id,
+                user_id=user_id,
+            )
+            query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
+            query = query.filter_by(archived=False)
+            query = query.order_by(Chat.updated_at.desc())
+
+            if skip is not None:
+                query = query.offset(skip)
+            if limit is not None:
+                query = query.limit(limit)
+
+            all_chats = query.all()
+            return [ChatModel.model_validate(chat) for chat in all_chats]
+
     def update_chat_folder_id_by_id_and_user_id(
-        self, id: str, user_id: str, folder_id: str
+        self, id: str, user_id: str, folder_id: Optional[str]
     ) -> Optional[ChatModel]:
         try:
             with get_db() as db:
@@ -892,6 +959,17 @@ class ChatTable:
                 return ChatModel.model_validate(chat)
         except Exception:
             return None
+
+    def count_chats_by_folder_id_and_user_id(self, folder_id: str, user_id: str) -> int:
+        try:
+            with get_db() as db:
+                return (
+                    db.query(Chat)
+                    .filter_by(folder_id=folder_id, user_id=user_id)
+                    .count()
+                )
+        except Exception:
+            return 0
 
     def get_chat_tags_by_id_and_user_id(self, id: str, user_id: str) -> list[TagModel]:
         with get_db() as db:
@@ -1088,6 +1166,19 @@ class ChatTable:
         except Exception:
             return False
 
+    def move_chats_by_user_id_and_folder_id(
+        self, user_id: str, folder_id: str, new_folder_id: Optional[str]
+    ) -> bool:
+        try:
+            with get_db() as db:
+                db.query(Chat).filter_by(user_id=user_id, folder_id=folder_id).update(
+                    {"folder_id": new_folder_id}
+                )
+                db.commit()
+                return True
+        except Exception:
+            return False
+
     def delete_shared_chats_by_user_id(self, user_id: str) -> bool:
         try:
             with get_db() as db:
@@ -1151,12 +1242,26 @@ class ChatMessageTable:
 
             # Collect non-core fields into meta
             meta_keys = {
-                "files", "sources", "code_executions", "statusHistory",
-                "childrenIds", "models", "modelName", "modelIdx",
-                "done", "error", "info", "completedAt", "userContext",
-                "merged", "lastSentence", "originalContent",
+                "files",
+                "sources",
+                "code_executions",
+                "statusHistory",
+                "childrenIds",
+                "models",
+                "modelName",
+                "modelIdx",
+                "done",
+                "error",
+                "info",
+                "completedAt",
+                "userContext",
+                "merged",
+                "lastSentence",
+                "originalContent",
             }
-            meta = {k: v for k, v in message.items() if k in meta_keys and v is not None}
+            meta = {
+                k: v for k, v in message.items() if k in meta_keys and v is not None
+            }
 
             created_at = message.get("timestamp", now)
 
@@ -1220,15 +1325,15 @@ class ChatMessageTable:
             )
             return [ChatMessageModel.model_validate(m) for m in messages]
 
-    def get_usage_by_model(
-        self, model: str, user_id: Optional[str] = None
-    ) -> dict:
+    def get_usage_by_model(self, model: str, user_id: Optional[str] = None) -> dict:
         """Get aggregate token usage for analytics."""
         with get_db() as db:
             query = db.query(
                 func.count(ChatMessage.id).label("message_count"),
                 func.sum(ChatMessage.prompt_tokens).label("total_prompt_tokens"),
-                func.sum(ChatMessage.completion_tokens).label("total_completion_tokens"),
+                func.sum(ChatMessage.completion_tokens).label(
+                    "total_completion_tokens"
+                ),
             ).filter(
                 ChatMessage.model == model,
                 ChatMessage.role == "assistant",
@@ -1250,7 +1355,9 @@ class ChatMessageTable:
                     ChatMessage.model,
                     func.count(ChatMessage.id).label("message_count"),
                     func.sum(ChatMessage.prompt_tokens).label("total_prompt_tokens"),
-                    func.sum(ChatMessage.completion_tokens).label("total_completion_tokens"),
+                    func.sum(ChatMessage.completion_tokens).label(
+                        "total_completion_tokens"
+                    ),
                 )
                 .filter(
                     ChatMessage.role == "assistant",

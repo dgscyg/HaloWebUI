@@ -2,7 +2,11 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type { Banner } from '$lib/types';
 import { parseJsonResponse } from '../response';
 
-export const importConfig = async (token: string, config) => {
+export const importConfig = async (
+	token: string,
+	config,
+	mode: 'merge' | 'replace' = 'replace'
+) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/import`, {
@@ -12,18 +16,19 @@ export const importConfig = async (token: string, config) => {
 			Authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify({
-			config: config
+			config: config,
+			mode
 		})
 	})
 		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
-			error = err.detail;
+			error = err;
 			return null;
 		});
 
 	if (error) {
-		throw error;
+		throw error?.detail ?? error;
 	}
 
 	return res;

@@ -56,7 +56,8 @@
 							placeholder={$i18n.t('Select a model')}
 							items={selectorItems}
 							showSetDefaultAction={showSetDefault && selectedModelIdx === 0}
-							showTemporaryChatControl={temporaryChatAccess.allowed && !temporaryChatAccess.enforced}
+							showTemporaryChatControl={temporaryChatAccess.allowed &&
+								!temporaryChatAccess.enforced}
 							bind:value={selectedModel}
 						/>
 					</div>
@@ -112,7 +113,9 @@
 							placeholder={$i18n.t('Select a model')}
 							items={selectorItems}
 							showSetDefaultAction={showSetDefault && selectedModelIdx === 0}
-							showTemporaryChatControl={selectedModelIdx === 0 && temporaryChatAccess.allowed && !temporaryChatAccess.enforced}
+							showTemporaryChatControl={selectedModelIdx === 0 &&
+								temporaryChatAccess.allowed &&
+								!temporaryChatAccess.enforced}
 							triggerClassName="text-sm"
 							bind:value={selectedModel}
 						/>

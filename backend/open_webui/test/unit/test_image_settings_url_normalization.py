@@ -3,7 +3,6 @@ import sys
 import asyncio
 from types import SimpleNamespace
 
-
 _BACKEND_DIR = pathlib.Path(__file__).resolve().parents[3]
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
@@ -11,7 +10,9 @@ if str(_BACKEND_DIR) not in sys.path:
 from open_webui.routers import images as images_router  # noqa: E402
 from open_webui.routers.images import _normalize_image_provider_base_url  # noqa: E402
 from open_webui.routers.images import _resolve_image_provider_source  # noqa: E402
-from open_webui.routers.images import _select_runtime_image_provider_source  # noqa: E402
+from open_webui.routers.images import (
+    _select_runtime_image_provider_source,
+)  # noqa: E402
 from open_webui.routers.images import _sync_image_provider_config_state  # noqa: E402
 
 
@@ -237,11 +238,16 @@ def test_sync_image_provider_config_state_persists_normalized_legacy_urls():
 
     assert cfg.IMAGES_OPENAI_API_BASE_URL == "https://api.example.com/v1"
     assert cfg.IMAGES_OPENAI_API_FORCE_MODE is False
-    assert cfg.IMAGES_GEMINI_API_BASE_URL == "https://generativelanguage.googleapis.com/v1beta"
+    assert (
+        cfg.IMAGES_GEMINI_API_BASE_URL
+        == "https://generativelanguage.googleapis.com/v1beta"
+    )
     assert cfg.IMAGES_GEMINI_API_FORCE_MODE is False
 
 
-def test_auto_runtime_source_matches_selected_model_across_personal_connections(monkeypatch):
+def test_auto_runtime_source_matches_selected_model_across_personal_connections(
+    monkeypatch,
+):
     cfg = SimpleNamespace(
         IMAGES_OPENAI_API_BASE_URL="https://shared.example.com/v1",
         IMAGES_OPENAI_API_KEY="shared-key",
@@ -279,7 +285,9 @@ def test_auto_runtime_source_matches_selected_model_across_personal_connections(
             return [{"id": "doubao-seedream-4-5-251128"}]
         return [{"id": "wanx2.1-t2i-turbo"}]
 
-    monkeypatch.setattr(images_router, "_discover_image_models_for_source", fake_discover)
+    monkeypatch.setattr(
+        images_router, "_discover_image_models_for_source", fake_discover
+    )
 
     source, discovered_models = asyncio.run(
         _select_runtime_image_provider_source(
@@ -300,12 +308,16 @@ def test_volcengine_chat_image_falls_back_to_images_endpoint(monkeypatch):
     request = SimpleNamespace()
     user = SimpleNamespace(id="user-1")
 
-    monkeypatch.setattr(images_router, "_build_openai_image_headers", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        images_router, "_build_openai_image_headers", lambda *_args, **_kwargs: {}
+    )
 
     class FakeResponse:
         status_code = 429
 
-    monkeypatch.setattr(images_router.requests, "post", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr(
+        images_router.requests, "post", lambda *args, **kwargs: FakeResponse()
+    )
 
     async def fake_images_endpoint(_request, _user, **kwargs):
         assert kwargs["model_id"] == "doubao-seedream-4-5-251128"

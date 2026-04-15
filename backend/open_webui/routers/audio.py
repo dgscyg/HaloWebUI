@@ -51,7 +51,6 @@ from open_webui.utils.error_handling import (
     read_requests_error_payload,
 )
 
-
 router = APIRouter()
 
 # Constants
@@ -75,7 +74,6 @@ SPEECH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 from pydub import AudioSegment
 from pydub.utils import mediainfo
-
 
 FFMPEG_MISSING_ERROR = (
     "ffmpeg is not installed on the server. "
@@ -143,12 +141,18 @@ def set_faster_whisper_model(model: str, auto_update: bool = False):
     return whisper_model
 
 
-async def _read_audio_aiohttp_error_detail(response=None, error=None, prefix: str | None = None) -> str:
-    payload = await read_aiohttp_error_payload(response) if response is not None else None
+async def _read_audio_aiohttp_error_detail(
+    response=None, error=None, prefix: str | None = None
+) -> str:
+    payload = (
+        await read_aiohttp_error_payload(response) if response is not None else None
+    )
     return build_error_detail(payload, error, prefix=prefix)
 
 
-def _read_audio_requests_error_detail(response=None, error=None, prefix: str | None = None) -> str:
+def _read_audio_requests_error_detail(
+    response=None, error=None, prefix: str | None = None
+) -> str:
     payload = read_requests_error_payload(response)
     return build_error_detail(payload, error, prefix=prefix)
 

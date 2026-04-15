@@ -36,6 +36,7 @@ def _invalidate_model_list_cache(request: Request) -> None:
     request.app.state.MODELS = {}
     invalidate_base_model_cache()
 
+
 ############################
 # GetFunctions
 ############################

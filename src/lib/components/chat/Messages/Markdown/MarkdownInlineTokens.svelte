@@ -14,11 +14,7 @@
 	import KatexRenderer from './KatexRenderer.svelte';
 	import Source from './Source.svelte';
 	import SourceToken from './SourceToken.svelte';
-	import {
-		isSvgMarkup,
-		mergeSvgMarkupTokens,
-		type RenderableHtmlToken
-	} from './svgMarkupTokens';
+	import { isSvgMarkup, mergeSvgMarkupTokens, type RenderableHtmlToken } from './svgMarkupTokens';
 
 	export let id: string;
 	export let tokens: Token[] = [];
@@ -53,12 +49,7 @@
 	{:else if token.type === 'link'}
 		{#if token.tokens}
 			<a href={token.href} target="_blank" rel="nofollow" title={token.title}>
-				<svelte:self
-					id={`${id}-a`}
-					tokens={token.tokens}
-					{charAnimation}
-					{onSourceClick}
-				/>
+				<svelte:self id={`${id}-a`} tokens={token.tokens} {charAnimation} {onSourceClick} />
 			</a>
 		{:else}
 			<a href={token.href} target="_blank" rel="nofollow" title={token.title}>{token.text}</a>
@@ -67,21 +58,11 @@
 		<Image src={token.href} alt={token.text} />
 	{:else if token.type === 'strong'}
 		<strong>
-			<svelte:self
-				id={`${id}-strong`}
-				tokens={token.tokens}
-				{charAnimation}
-				{onSourceClick}
-			/>
+			<svelte:self id={`${id}-strong`} tokens={token.tokens} {charAnimation} {onSourceClick} />
 		</strong>
 	{:else if token.type === 'em'}
 		<em>
-			<svelte:self
-				id={`${id}-em`}
-				tokens={token.tokens}
-				{charAnimation}
-				{onSourceClick}
-			/>
+			<svelte:self id={`${id}-em`} tokens={token.tokens} {charAnimation} {onSourceClick} />
 		</em>
 	{:else if token.type === 'codespan'}
 		<!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -97,12 +78,7 @@
 		<br />
 	{:else if token.type === 'del'}
 		<del>
-			<svelte:self
-				id={`${id}-del`}
-				tokens={token.tokens}
-				{charAnimation}
-				{onSourceClick}
-			/>
+			<svelte:self id={`${id}-del`} tokens={token.tokens} {charAnimation} {onSourceClick} />
 		</del>
 	{:else if token.type === 'inlineKatex'}
 		{#if token.text}

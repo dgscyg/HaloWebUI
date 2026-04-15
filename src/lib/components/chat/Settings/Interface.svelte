@@ -285,8 +285,10 @@
 		$config,
 		$models ?? []
 	);
-	$: currentWebSearchOption = webSearchModeOptions.find((option) => option.value === webSearchMode) ?? null;
-	$: currentWebSearchModeLabel = currentWebSearchOption?.label ?? getWebSearchModeLabel(webSearchMode);
+	$: currentWebSearchOption =
+		webSearchModeOptions.find((option) => option.value === webSearchMode) ?? null;
+	$: currentWebSearchModeLabel =
+		currentWebSearchOption?.label ?? getWebSearchModeLabel(webSearchMode);
 	$: currentWebSearchModeDescription = currentWebSearchOption?.description ?? '';
 	$: webSearchAvailabilityNote = getNativeWebSearchAvailabilityNote(
 		(key, options) => $i18n.t(key, options),
@@ -295,7 +297,9 @@
 	);
 	$: if (
 		(($models ?? []).length > 0 || !$config?.features?.enable_native_web_search) &&
-		!webSearchModeOptions.some((option) => option.value === webSearchMode && option.disabled !== true)
+		!webSearchModeOptions.some(
+			(option) => option.value === webSearchMode && option.disabled !== true
+		)
 	) {
 		webSearchMode =
 			(['auto', 'halo', 'native', 'off'] as WebSearchMode[]).find((mode) =>
@@ -323,7 +327,7 @@
 		autoTags = $settings.autoTags ?? true;
 
 		detectArtifacts = $settings.detectArtifacts ?? true;
-		svgPreviewAutoOpen = $settings.svgPreviewAutoOpen ?? ($settings.detectArtifacts ?? true);
+		svgPreviewAutoOpen = $settings.svgPreviewAutoOpen ?? $settings.detectArtifacts ?? true;
 		responseAutoCopy = $settings.responseAutoCopy ?? false;
 
 		showUsername = $settings.showUsername ?? false;
@@ -997,34 +1001,34 @@
 				<div class=" py-0.5 flex w-full justify-between">
 					<div class=" self-center text-xs">{$i18n.t('Web Search in Chat')}</div>
 
-						<div class="min-w-[10rem]">
-							<HaloSelect
-								value={webSearchMode}
-								options={webSearchModeOptions.map((option) => ({
-									value: option.value,
-									label: option.label,
-									description: option.description,
-									descriptionTone: option.descriptionTone,
-									disabled: option.disabled,
-									badge: option.badge
-								}))}
-								className="w-full"
-								on:change={(e) => {
-									updateWebSearchMode(e.detail?.value);
-								}}
-							/>
-						</div>
-					</div>
-					<div class="pt-1 text-right text-[11px] text-gray-400 space-y-1">
-						<div>{$i18n.t('Current mode')}: {currentWebSearchModeLabel}</div>
-						{#if currentWebSearchModeDescription}
-							<div>{currentWebSearchModeDescription}</div>
-						{/if}
-						{#if webSearchAvailabilityNote}
-							<div>{webSearchAvailabilityNote}</div>
-						{/if}
+					<div class="min-w-[10rem]">
+						<HaloSelect
+							value={webSearchMode}
+							options={webSearchModeOptions.map((option) => ({
+								value: option.value,
+								label: option.label,
+								description: option.description,
+								descriptionTone: option.descriptionTone,
+								disabled: option.disabled,
+								badge: option.badge
+							}))}
+							className="w-full"
+							on:change={(e) => {
+								updateWebSearchMode(e.detail?.value);
+							}}
+						/>
 					</div>
 				</div>
+				<div class="pt-1 text-right text-[11px] text-gray-400 space-y-1">
+					<div>{$i18n.t('Current mode')}: {currentWebSearchModeLabel}</div>
+					{#if currentWebSearchModeDescription}
+						<div>{currentWebSearchModeDescription}</div>
+					{/if}
+					{#if webSearchAvailabilityNote}
+						<div>{webSearchAvailabilityNote}</div>
+					{/if}
+				</div>
+			</div>
 
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">

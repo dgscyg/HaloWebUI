@@ -1,8 +1,18 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 
-	import { callTool, listPrompts, listResources, readResource as readMcpResource } from '$lib/apis/mcp';
-	import { updateAppDisplayMode, updateAppHeight, updateAppModelContext, updateAppState } from '$lib/stores/mcpApps';
+	import {
+		callTool,
+		listPrompts,
+		listResources,
+		readResource as readMcpResource
+	} from '$lib/apis/mcp';
+	import {
+		updateAppDisplayMode,
+		updateAppHeight,
+		updateAppModelContext,
+		updateAppState
+	} from '$lib/stores/mcpApps';
 	import type { MCPAppDisplayMode, MCPAppResource } from '$lib/types/mcpApps';
 	import { buildAllowAttribute } from '$lib/types/mcpApps';
 
@@ -447,9 +457,7 @@ window.parent.postMessage({
 					params.structuredContent && Object.keys(params.structuredContent).length > 0
 						? JSON.stringify(params.structuredContent, null, 2)
 						: '';
-				const contextText = [textParts.join('\n'), structuredContext]
-					.filter(Boolean)
-					.join('\n');
+				const contextText = [textParts.join('\n'), structuredContext].filter(Boolean).join('\n');
 				if (contextText) {
 					updateAppModelContext(instanceId, contextText);
 				}
@@ -490,7 +498,9 @@ window.parent.postMessage({
 
 <div
 	id="mcp-app-container-{instanceId}"
-	class="mcp-app-container {displayMode === 'fullscreen' ? 'mcp-app-fullscreen' : ''} {displayMode === 'pip' ? 'mcp-app-pip' : ''}"
+	class="mcp-app-container {displayMode === 'fullscreen'
+		? 'mcp-app-fullscreen'
+		: ''} {displayMode === 'pip' ? 'mcp-app-pip' : ''}"
 	class:mcp-app-inline={displayMode === 'inline'}
 >
 	{#if state === 'loading' || state === 'initializing'}
@@ -501,13 +511,18 @@ window.parent.postMessage({
 	{/if}
 
 	{#if state === 'error'}
-		<div class="mcp-app-error rounded-lg bg-red-100 p-4 text-red-700 dark:bg-red-900 dark:text-red-200">
-			<strong>Error:</strong> {error}
+		<div
+			class="mcp-app-error rounded-lg bg-red-100 p-4 text-red-700 dark:bg-red-900 dark:text-red-200"
+		>
+			<strong>Error:</strong>
+			{error}
 		</div>
 	{/if}
 
 	{#if displayMode === 'fullscreen'}
-		<div class="mcp-app-fullscreen-header flex items-center justify-between bg-gray-800 p-2 text-white">
+		<div
+			class="mcp-app-fullscreen-header flex items-center justify-between bg-gray-800 p-2 text-white"
+		>
 			<span class="font-semibold">{title}</span>
 			<button
 				type="button"
@@ -525,7 +540,12 @@ window.parent.postMessage({
 				}}
 			>
 				<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M6 18L18 6M6 6l12 12"
+					/>
 				</svg>
 			</button>
 		</div>

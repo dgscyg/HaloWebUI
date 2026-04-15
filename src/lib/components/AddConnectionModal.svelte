@@ -338,9 +338,7 @@
 		(inputUrl || '').trim().replace(/\/+$/, '').endsWith(OPENAI_CHAT_COMPLETIONS_SUFFIX);
 
 	const describeConnectionErrorToast = (error: unknown) =>
-		formatConnectionErrorToast(error, (key, options) =>
-			$i18n.t(key, options)
-		);
+		formatConnectionErrorToast(error, (key, options) => $i18n.t(key, options));
 
 	const showConnectionErrorToast = (error: unknown) => {
 		const { title, description } = describeConnectionErrorToast(error);
@@ -355,7 +353,9 @@
 		const trimmed = (inputUrl || '').trim().replace(/#$/, '');
 		if (!trimmed) return '';
 
-		const candidates = trimmed.match(/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//) ? [trimmed] : [`https://${trimmed}`];
+		const candidates = trimmed.match(/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//)
+			? [trimmed]
+			: [`https://${trimmed}`];
 		for (const candidate of candidates) {
 			try {
 				return new URL(candidate).hostname.toLowerCase();
@@ -463,9 +463,10 @@
 		}
 	})();
 
-	$: isOfficialOpenAIConnection = !gemini && !anthropic && !ollama && !direct && !azure
-		? isOfficialOpenAIHostname(getHostname(url || 'https://api.openai.com/v1'))
-		: false;
+	$: isOfficialOpenAIConnection =
+		!gemini && !anthropic && !ollama && !direct && !azure
+			? isOfficialOpenAIHostname(getHostname(url || 'https://api.openai.com/v1'))
+			: false;
 	$: showNativeFileInputsToggle =
 		!ollama && !direct && !gemini && !anthropic && !azure && !isForceMode && useResponsesApi;
 	$: if (show && !nativeFileInputsTouched) {
@@ -583,9 +584,7 @@
 				files_auto_attach: filesAutoAttach,
 				files_cache_ttl: filesCacheTtl,
 				files_citations: filesCitations,
-				...(parsedAnthropicExtraBody
-					? { anthropic_extra_body: parsedAnthropicExtraBody }
-					: {}),
+				...(parsedAnthropicExtraBody ? { anthropic_extra_body: parsedAnthropicExtraBody } : {}),
 				...(parsedAnthropicHeaders ? { headers: parsedAnthropicHeaders } : {})
 			}
 		};
@@ -744,9 +743,12 @@
 		batchHealthProgress = { current: 0, total: modelIds.length };
 
 		if (modelIds.length > 5) {
-			toast.info($i18n.t('Selected model batch tests run sequentially to reduce rate-limit risk.'), {
-				duration: 4000
-			});
+			toast.info(
+				$i18n.t('Selected model batch tests run sequentially to reduce rate-limit risk.'),
+				{
+					duration: 4000
+				}
+			);
 		}
 
 		let passed = 0;
@@ -1041,8 +1043,16 @@
 									: {})
 							}
 						: {}),
-					...(!ollama && azure ? { azure: true, ...(apiVersion ? { api_version: apiVersion } : {}) } : {}),
-					...(!ollama && !gemini && !anthropic && !direct && !azure && !isForceMode && useResponsesApi
+					...(!ollama && azure
+						? { azure: true, ...(apiVersion ? { api_version: apiVersion } : {}) }
+						: {}),
+					...(!ollama &&
+					!gemini &&
+					!anthropic &&
+					!direct &&
+					!azure &&
+					!isForceMode &&
+					useResponsesApi
 						? {
 								native_file_inputs_enabled: nativeFileInputsEnabled
 							}
@@ -1422,7 +1432,12 @@
 										bind:value={url}
 										on:blur={() => {
 											// Keep provider-specific URLs normalized unless user explicitly disables normalization via '#'.
-											if ((gemini || azure) && !isForceMode && url && url.trim() !== normalizedUrl) {
+											if (
+												(gemini || azure) &&
+												!isForceMode &&
+												url &&
+												url.trim() !== normalizedUrl
+											) {
 												url = normalizedUrl;
 											}
 										}}
@@ -1492,7 +1507,6 @@
 									inputClassName="w-full text-sm bg-transparent outline-none"
 								/>
 							</div>
-
 						</div>
 					</CollapsibleSection>
 
@@ -1527,7 +1541,10 @@
 												{#if batchHealthChecking}
 													<Spinner className="size-3.5" />
 													<span>
-														{$i18n.t('Testing selected models: {{current}}/{{total}}', batchHealthProgress)}
+														{$i18n.t(
+															'Testing selected models: {{current}}/{{total}}',
+															batchHealthProgress
+														)}
 													</span>
 												{:else}
 													<ArrowPath className="size-3.5" />
@@ -1551,7 +1568,8 @@
 									{#each modelIds as modelId}
 										{@const state = getModelHealthState(modelId)}
 										<div
-											class="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs max-w-44 {state.status === 'success'
+											class="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs max-w-44 {state.status ===
+											'success'
 												? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300'
 												: state.status === 'error'
 													? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-300'
@@ -1586,7 +1604,9 @@
 								</div>
 								{#if !direct}
 									<div class="text-xs text-gray-400">
-										{$i18n.t('Single model tests use the chip action. Batch tests run sequentially to reduce rate-limit risk.')}
+										{$i18n.t(
+											'Single model tests use the chip action. Batch tests run sequentially to reduce rate-limit risk.'
+										)}
 									</div>
 								{/if}
 							{:else if azure}
@@ -1706,7 +1726,28 @@
 												<HaloSelect
 													value=""
 													options={[
-														...['files-api-2025-04-14', 'extended-cache-ttl-2025-04-11', 'prompt-caching-2024-07-31', 'interleaved-thinking-2025-05-14', 'computer-use-2024-10-22', 'computer-use-2025-01-24', 'code-execution-2025-05-22', 'mcp-client-2025-04-04', 'mcp-client-2025-11-20', 'token-counting-2024-11-01', 'token-efficient-tools-2025-02-19', 'message-batches-2024-09-24', 'output-128k-2025-02-19', 'pdfs-2024-09-25', 'dev-full-thinking-2025-05-14', 'context-1m-2025-08-07', 'context-management-2025-06-27', 'model-context-window-exceeded-2025-08-26', 'skills-2025-10-02', 'fast-mode-2026-02-01'].map((preset) => ({
+														...[
+															'files-api-2025-04-14',
+															'extended-cache-ttl-2025-04-11',
+															'prompt-caching-2024-07-31',
+															'interleaved-thinking-2025-05-14',
+															'computer-use-2024-10-22',
+															'computer-use-2025-01-24',
+															'code-execution-2025-05-22',
+															'mcp-client-2025-04-04',
+															'mcp-client-2025-11-20',
+															'token-counting-2024-11-01',
+															'token-efficient-tools-2025-02-19',
+															'message-batches-2024-09-24',
+															'output-128k-2025-02-19',
+															'pdfs-2024-09-25',
+															'dev-full-thinking-2025-05-14',
+															'context-1m-2025-08-07',
+															'context-management-2025-06-27',
+															'model-context-window-exceeded-2025-08-26',
+															'skills-2025-10-02',
+															'fast-mode-2026-02-01'
+														].map((preset) => ({
 															value: preset,
 															label: `${anthropicBetas.some((b) => b.name === preset) ? '✓ ' : ''}${preset}`
 														})),
@@ -1903,14 +1944,11 @@
 											options={[
 												{
 													value: AZURE_API_VERSION_AUTO,
-													label: `${$i18n.t('Auto')} (${ $i18n.t('Recommended') })`
+													label: `${$i18n.t('Auto')} (${$i18n.t('Recommended')})`
 												},
 												...AZURE_API_VERSION_PRESETS.map((version, idx) => ({
 													value: version,
-													label:
-														idx === 0
-															? `${version} (${ $i18n.t('Latest') })`
-															: version
+													label: idx === 0 ? `${version} (${$i18n.t('Latest')})` : version
 												})),
 												{
 													value: AZURE_API_VERSION_CUSTOM,

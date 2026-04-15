@@ -84,8 +84,9 @@ function normalizeModelLookupValue(value?: string | null): string {
 }
 
 function getProviderRules(provider?: string | null): NativeWebSearchProviderRules {
-	const providers = (nativeWebSearchRules as { providers?: Record<string, NativeWebSearchProviderRules> })
-		.providers;
+	const providers = (
+		nativeWebSearchRules as { providers?: Record<string, NativeWebSearchProviderRules> }
+	).providers;
 	if (!providers || typeof providers !== 'object') {
 		return {};
 	}
@@ -120,7 +121,11 @@ function resolveFallbackModelRule(
 ): NativeWebSearchSupport {
 	const normalizedProvider = normalizeRuleProvider(provider);
 	const providerRules = getProviderRules(normalizedProvider);
-	if (!providerRules.default_status && normalizedProvider !== 'openai' && normalizedProvider !== 'gemini') {
+	if (
+		!providerRules.default_status &&
+		normalizedProvider !== 'openai' &&
+		normalizedProvider !== 'gemini'
+	) {
 		return {
 			status: 'unsupported',
 			reason: normalizedProvider ? 'provider_not_supported' : 'unknown_model',
@@ -199,8 +204,14 @@ export function getNativeWebSearchSupport(model?: ModelLike | null): NativeWebSe
 		return {
 			...fallbackRuleSupport,
 			status: 'unsupported',
-			reason: fallbackRuleSupport.reason === 'model_rule_unknown' ? 'legacy_unsupported' : fallbackRuleSupport.reason,
-			source: fallbackRuleSupport.source === 'model_rules_fallback' ? 'legacy+model_rules_fallback' : 'legacy'
+			reason:
+				fallbackRuleSupport.reason === 'model_rule_unknown'
+					? 'legacy_unsupported'
+					: fallbackRuleSupport.reason,
+			source:
+				fallbackRuleSupport.source === 'model_rules_fallback'
+					? 'legacy+model_rules_fallback'
+					: 'legacy'
 		};
 	}
 
@@ -215,7 +226,9 @@ export function getNativeWebSearchSupport(model?: ModelLike | null): NativeWebSe
 	};
 }
 
-export function summarizeNativeWebSearchSupport(models: Array<ModelLike | null | undefined>): NativeWebSearchSummary {
+export function summarizeNativeWebSearchSupport(
+	models: Array<ModelLike | null | undefined>
+): NativeWebSearchSummary {
 	const validModels = models.filter(Boolean) as ModelLike[];
 	const summary: NativeWebSearchSummary = {
 		total: validModels.length,
@@ -296,8 +309,7 @@ export function getNativeWebSearchAvailabilityNote(
 		return '';
 	}
 
-	const prefix =
-		scope === 'selection' ? t('Current selection') : t('Currently loaded models');
+	const prefix = scope === 'selection' ? t('Current selection') : t('Currently loaded models');
 
 	if (summary.allSupported) {
 		return t('{{scope}}: all {{count}} models support native web search.', {
@@ -312,12 +324,15 @@ export function getNativeWebSearchAvailabilityNote(
 		});
 	}
 
-	return t('{{scope}}: {{supported}} native, {{unknown}} unverified, {{unsupported}} unavailable.', {
-		scope: prefix,
-		supported: summary.supportedCount,
-		unknown: summary.unknownCount,
-		unsupported: summary.unsupportedCount
-	});
+	return t(
+		'{{scope}}: {{supported}} native, {{unknown}} unverified, {{unsupported}} unavailable.',
+		{
+			scope: prefix,
+			supported: summary.supportedCount,
+			unknown: summary.unknownCount,
+			unsupported: summary.unsupportedCount
+		}
+	);
 }
 
 function buildNativeModeDescription(t: Translator, summary: NativeWebSearchSummary): string {
@@ -325,7 +340,9 @@ function buildNativeModeDescription(t: Translator, summary: NativeWebSearchSumma
 		return t('Model-native web search is unavailable for this model.');
 	}
 	if (summary.supportedCount === 0 && summary.unknownCount > 0) {
-		return t('Current model has not been verified for built-in web search yet. You can still try it manually.');
+		return t(
+			'Current model has not been verified for built-in web search yet. You can still try it manually.'
+		);
 	}
 
 	return t('Use model-native web search directly for all selected models.');
@@ -343,7 +360,9 @@ function buildAutoModeDescription(
 	}
 	if (summary.supportedCount === 0 && summary.unknownCount > 0) {
 		return haloEnabled
-			? t('Current model has not been verified for built-in web search yet. Auto will keep using HaloWebUI.')
+			? t(
+					'Current model has not been verified for built-in web search yet. Auto will keep using HaloWebUI.'
+				)
 			: t('Native web search availability for this model is currently unknown.');
 	}
 
@@ -388,12 +407,11 @@ export function buildWebSearchModeOptions(
 						value: 'native' as WebSearchMode,
 						label: t('模型原生联网'),
 						description: buildNativeModeDescription(t, summary),
-						descriptionTone:
-							summary.allUnsupported
-								? 'warning'
-								: summary.supportedCount === 0 && summary.unknownCount > 0
-									? 'info'
-									: 'default',
+						descriptionTone: summary.allUnsupported
+							? 'warning'
+							: summary.supportedCount === 0 && summary.unknownCount > 0
+								? 'info'
+								: 'default',
 						disabled: nativeImpossible
 					},
 					{

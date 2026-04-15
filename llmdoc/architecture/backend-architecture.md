@@ -45,6 +45,7 @@ backend/open_webui/
 ### 3.1 应用入口
 
 `backend/open_webui/main.py` (FastAPI 实例、中间件、路由注册):
+
 - 创建 FastAPI 应用实例，配置 lifespan 上下文管理器
 - 注册 28 个 API 路由模块
 - 配置中间件: CORS、GZip、安全头、审计日志、速率限制
@@ -53,6 +54,7 @@ backend/open_webui/
 ### 3.2 认证中间件
 
 `backend/open_webui/utils/auth.py` (get_current_user, get_verified_user, get_admin_user):
+
 - JWT 令牌验证 (HS256 算法)
 - 用户缓存 (5 秒 TTL)
 - API Key 认证支持
@@ -60,16 +62,19 @@ backend/open_webui/
 ### 3.3 聊天处理管道
 
 `backend/open_webui/utils/middleware.py` (process_chat_payload, process_chat_response):
+
 - 请求预处理: 文件解析、RAG 检索、工具加载
 - 响应后处理: 流式处理、错误重试、后台任务
 
 `backend/open_webui/utils/chat.py` (generate_chat_completion):
+
 - 多提供商路由: OpenAI、Ollama、Gemini、Anthropic
 - 流式响应处理
 
 ### 3.4 数据库层
 
 `backend/open_webui/internal/db.py` (Session, engine, Base):
+
 - SQLAlchemy 异步会话管理
 - scoped_session 线程安全
 
@@ -111,6 +116,7 @@ sequenceDiagram
 ### 5.1 认证路由
 
 `backend/open_webui/routers/auths.py` (router):
+
 - `POST /signin` - 用户登录
 - `POST /signup` - 用户注册
 - `GET /ldap` - LDAP 认证
@@ -118,16 +124,17 @@ sequenceDiagram
 
 ### 5.2 AI 提供商路由
 
-| 提供商 | 文件 | 兼容 API |
-|--------|------|----------|
-| OpenAI | `routers/openai.py` | Chat Completions + Responses API |
-| Ollama | `routers/ollama.py` | Ollama Native API |
-| Gemini | `routers/gemini.py` | Google Generative AI API |
-| Claude | `routers/anthropic.py` | Anthropic Messages API |
+| 提供商 | 文件                   | 兼容 API                         |
+| ------ | ---------------------- | -------------------------------- |
+| OpenAI | `routers/openai.py`    | Chat Completions + Responses API |
+| Ollama | `routers/ollama.py`    | Ollama Native API                |
+| Gemini | `routers/gemini.py`    | Google Generative AI API         |
+| Claude | `routers/anthropic.py` | Anthropic Messages API           |
 
 ### 5.3 核心业务路由
 
 `backend/open_webui/routers/chats.py` (router):
+
 - `GET /api/v1/chats` - 获取聊天列表
 - `POST /api/v1/chats` - 创建新聊天
 - `GET /api/v1/chats/{id}` - 获取聊天详情
@@ -142,6 +149,7 @@ Request → RedirectMiddleware → SecurityHeadersMiddleware →
 ```
 
 关键中间件:
+
 - `SecurityHeadersMiddleware`: 添加安全响应头
 - `commit_session_after_request`: 请求后提交数据库会话
 - `check_url`: 记录请求开始时间，提取认证令牌
@@ -163,6 +171,7 @@ Request → RedirectMiddleware → SecurityHeadersMiddleware →
 ### 7.3 提供商适配器模式
 
 每个 AI 提供商路由实现统一接口:
+
 - 模型列表获取
 - 聊天完成 (流式/非流式)
 - 文件上传支持 (部分提供商)

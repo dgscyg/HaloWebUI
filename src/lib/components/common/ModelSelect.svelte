@@ -81,7 +81,7 @@
 
 <Select.Root
 	{items}
-	bind:open={open}
+	bind:open
 	{disabled}
 	onOpenChange={async (next) => {
 		searchValue = '';

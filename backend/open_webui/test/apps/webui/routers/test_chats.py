@@ -83,6 +83,64 @@ class TestChats(AbstractPostgresTest):
         assert data["created_at"] is not None
         assert len(self.chats.get_chats()) == 2
 
+    def test_batch_import_merge(self):
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.post(
+                self.create_url("/import/batch"),
+                json={
+                    "mode": "merge",
+                    "items": [
+                        {
+                            "chat": {
+                                "title": "Imported Chat",
+                                "history": {"currentId": "import-1", "messages": {}},
+                            },
+                            "meta": {"tags": ["imported_tag"]},
+                            "pinned": True,
+                        }
+                    ],
+                },
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "merge"
+        assert data["total"] == 1
+        assert data["imported"] == 1
+        assert data["failed"] == 0
+
+        chats = self.chats.get_chats_by_user_id("2")
+        assert len(chats) == 2
+        assert any(chat.title == "Imported Chat" for chat in chats)
+
+    def test_batch_import_replace(self):
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.post(
+                self.create_url("/import/batch"),
+                json={
+                    "mode": "replace",
+                    "items": [
+                        {
+                            "chat": {
+                                "title": "Replacement Chat",
+                                "history": {"currentId": "replace-1", "messages": {}},
+                            }
+                        }
+                    ],
+                },
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "replace"
+        assert data["total"] == 1
+        assert data["imported"] == 1
+        assert data["failed"] == 0
+
+        chats = self.chats.get_chats_by_user_id("2")
+        assert len(chats) == 1
+        assert chats[0].title == "Replacement Chat"
+
     def test_get_user_chats(self):
         self.test_get_session_user_chat_list()
 

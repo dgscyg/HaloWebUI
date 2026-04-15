@@ -183,7 +183,9 @@ class TestAuths(AbstractPostgresTest):
         assert "token=" in set_cookie
         assert "Max-Age=0" in set_cookie or "expires=" in set_cookie.lower()
 
-    def test_signin_without_auth_bootstraps_admin_without_fixed_password(self, monkeypatch):
+    def test_signin_without_auth_bootstraps_admin_without_fixed_password(
+        self, monkeypatch
+    ):
         from open_webui.models.auths import Auth, get_db
         from open_webui.routers import auths as auths_router
 
