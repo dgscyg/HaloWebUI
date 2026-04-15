@@ -5,10 +5,7 @@
 	import Check from '$lib/components/icons/Check.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import agentsData from '$lib/data/agents-zh.json';
-	import {
-		type ChatAssistantSnapshot,
-		toChatAssistantSnapshot
-	} from '$lib/utils/chat-assistants';
+	import { type ChatAssistantSnapshot, toChatAssistantSnapshot } from '$lib/utils/chat-assistants';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher<{
@@ -94,7 +91,9 @@
 
 <Modal bind:show size="lg">
 	<div class="flex max-h-[80dvh] flex-col overflow-hidden">
-		<div class="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-gray-800">
+		<div
+			class="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-gray-800"
+		>
 			<div>
 				<div class="text-lg font-semibold text-gray-900 dark:text-gray-100">
 					{$i18n.t('Select Assistant')}
@@ -152,10 +151,12 @@
 							? 'cursor-not-allowed border-emerald-200 bg-emerald-50/70 dark:border-emerald-800/60 dark:bg-emerald-950/20'
 							: 'border-gray-200/70 bg-white hover:border-primary-200 hover:bg-primary-50/60 dark:border-gray-700/60 dark:bg-gray-900/50 dark:hover:border-primary-700/50 dark:hover:bg-primary-950/20'}"
 						on:click={() => handleSelect(assistant)}
-						disabled={disabled}
+						{disabled}
 					>
 						{#if disabled}
-							<div class="absolute right-3 top-3 flex size-6 items-center justify-center rounded-full bg-emerald-500 text-white">
+							<div
+								class="absolute right-3 top-3 flex size-6 items-center justify-center rounded-full bg-emerald-500 text-white"
+							>
 								<Check className="size-3.5" strokeWidth="2.5" />
 							</div>
 						{/if}
@@ -178,7 +179,9 @@
 			</div>
 
 			{#if filteredAssistants.length === 0}
-				<div class="rounded-2xl border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+				<div
+					class="rounded-2xl border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400"
+				>
 					{$i18n.t('No assistants found')}
 				</div>
 			{/if}

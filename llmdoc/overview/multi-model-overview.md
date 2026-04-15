@@ -11,12 +11,12 @@
 
 ### 支持的提供商
 
-| 提供商 | 路由模块 | API 端点 | 特性 |
-|--------|----------|----------|------|
-| OpenAI | `routers/openai.py` | `/api/chat/completions` | 支持 Chat Completions 和 Responses API，兼容 OpenRouter、Azure 等第三方代理 |
-| Anthropic | `routers/anthropic.py` | `/api/anthropic/chat/completions` | 原生 Claude API，支持工具调用和文件上传 |
-| Gemini | `routers/gemini.py` | `/api/gemini/chat/completions` | 支持 Google Search Grounding 和图像生成 |
-| Ollama | `routers/ollama.py` | `/ollama/api/chat` | 本地模型代理，支持原生和 OpenAI 兼容端点 |
+| 提供商    | 路由模块               | API 端点                          | 特性                                                                        |
+| --------- | ---------------------- | --------------------------------- | --------------------------------------------------------------------------- |
+| OpenAI    | `routers/openai.py`    | `/api/chat/completions`           | 支持 Chat Completions 和 Responses API，兼容 OpenRouter、Azure 等第三方代理 |
+| Anthropic | `routers/anthropic.py` | `/api/anthropic/chat/completions` | 原生 Claude API，支持工具调用和文件上传                                     |
+| Gemini    | `routers/gemini.py`    | `/api/gemini/chat/completions`    | 支持 Google Search Grounding 和图像生成                                     |
+| Ollama    | `routers/ollama.py`    | `/ollama/api/chat`                | 本地模型代理，支持原生和 OpenAI 兼容端点                                    |
 
 ### 核心设计原则
 

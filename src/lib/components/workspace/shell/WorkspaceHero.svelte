@@ -49,23 +49,37 @@
 
 	$: heroTabs = swapWorkspaceHeroTabs(tabs);
 	$: splitIndex = Math.ceil(heroTabs.length / 2);
-	$: tabRows = [heroTabs.slice(0, splitIndex), heroTabs.slice(splitIndex)].filter((row) => row.length > 0);
+	$: tabRows = [heroTabs.slice(0, splitIndex), heroTabs.slice(splitIndex)].filter(
+		(row) => row.length > 0
+	);
 </script>
 
 {#if activeTab}
 	<section class="glass-section p-5 space-y-5">
 		<div class="@container flex flex-col gap-5">
-			<div class="flex flex-col gap-4 @[64rem]:flex-row @[64rem]:items-start @[64rem]:justify-between">
+			<div
+				class="flex flex-col gap-4 @[64rem]:flex-row @[64rem]:items-start @[64rem]:justify-between"
+			>
 				<div class="min-w-0 @[64rem]:flex-1">
-					<div class="inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full border border-gray-200/80 bg-white/80 px-3.5 text-xs font-medium leading-none text-gray-600 dark:border-gray-700/80 dark:bg-gray-900/70 dark:text-gray-300">
-						<span class="leading-none text-gray-400 dark:text-gray-500">{$i18n.t('Workspace')}</span>
+					<div
+						class="inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full border border-gray-200/80 bg-white/80 px-3.5 text-xs font-medium leading-none text-gray-600 dark:border-gray-700/80 dark:bg-gray-900/70 dark:text-gray-300"
+					>
+						<span class="leading-none text-gray-400 dark:text-gray-500">{$i18n.t('Workspace')}</span
+						>
 						<span class="leading-none text-gray-300 dark:text-gray-600">/</span>
-						<span class="leading-none text-gray-900 dark:text-white">{getWorkspaceHeroTabLabel(activeTab)}</span>
+						<span class="leading-none text-gray-900 dark:text-white"
+							>{getWorkspaceHeroTabLabel(activeTab)}</span
+						>
 					</div>
 
 					<div class="mt-3 flex items-start gap-3">
 						<div class="glass-icon-badge shrink-0 {activeTab.badgeColor}">
-							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-[18px] {activeTab.iconColor}">
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								viewBox="0 0 24 24"
+								fill="currentColor"
+								class="size-[18px] {activeTab.iconColor}"
+							>
 								{#each activeTab.iconPaths as pathD}
 									<path fill-rule="evenodd" d={pathD} clip-rule="evenodd" />
 								{/each}
@@ -82,7 +96,9 @@
 					</div>
 				</div>
 
-				<div class="inline-flex max-w-full flex-col gap-2 self-start rounded-2xl bg-gray-100 p-1 dark:bg-gray-850 @[64rem]:ml-auto @[64rem]:mt-11 @[64rem]:shrink-0">
+				<div
+					class="inline-flex max-w-full flex-col gap-2 self-start rounded-2xl bg-gray-100 p-1 dark:bg-gray-850 @[64rem]:ml-auto @[64rem]:mt-11 @[64rem]:shrink-0"
+				>
 					{#each tabRows as row (row[0]?.key ?? 'row')}
 						<div class="flex max-w-full flex-wrap items-center gap-2">
 							{#each row as tab (tab.key)}
@@ -94,16 +110,21 @@
 									}`}
 									href={tab.href}
 								>
-									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-4">
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										viewBox="0 0 24 24"
+										fill="currentColor"
+										class="size-4"
+									>
 										{#each tab.iconPaths as pathD}
 											<path fill-rule="evenodd" d={pathD} clip-rule="evenodd" />
 										{/each}
 									</svg>
 									<span>{getWorkspaceHeroTabLabel(tab)}</span>
 								</a>
-								{/each}
-							</div>
-						{/each}
+							{/each}
+						</div>
+					{/each}
 				</div>
 			</div>
 		</div>

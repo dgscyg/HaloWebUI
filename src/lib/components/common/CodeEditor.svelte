@@ -88,7 +88,9 @@
 
 	const isEditorUpdateInProgressError = (error: unknown) =>
 		error instanceof Error &&
-		error.message.includes('Calls to EditorView.update are not allowed while an update is in progress');
+		error.message.includes(
+			'Calls to EditorView.update are not allowed while an update is in progress'
+		);
 
 	const queueEditorDispatch = (callback: () => void, attempt = 0) => {
 		window.setTimeout(() => {
@@ -147,14 +149,14 @@
 					const changes = findChanges(currentDoc, nextValue);
 					if (changes.length === 0) {
 						return;
-						}
+					}
 
-						suppressDocChangeCallback = true;
-						try {
-							dispatchEditorChanges({ changes });
-						} finally {
-							window.setTimeout(() => {
-								suppressDocChangeCallback = false;
+					suppressDocChangeCallback = true;
+					try {
+						dispatchEditorChanges({ changes });
+					} finally {
+						window.setTimeout(() => {
+							suppressDocChangeCallback = false;
 						}, 0);
 					}
 				});
@@ -231,7 +233,9 @@
 	);
 
 	const getLang = async () => {
-		const normalizedLang = String(lang ?? '').trim().toLowerCase();
+		const normalizedLang = String(lang ?? '')
+			.trim()
+			.toLowerCase();
 		const language = languages.find((l) => {
 			const aliases = l.alias?.map((alias) => alias.toLowerCase()) ?? [];
 			const extensions = l.extensions?.map((extension) => extension.toLowerCase()) ?? [];
@@ -429,13 +433,13 @@
 
 			if (!codeEditor || currentRequestId !== themeApplyRequestId) return;
 
-				queueEditorDispatch(() => {
-					if (!codeEditor || currentRequestId !== themeApplyRequestId) return;
+			queueEditorDispatch(() => {
+				if (!codeEditor || currentRequestId !== themeApplyRequestId) return;
 
-					dispatchEditorChanges({
-						effects: [
-							editorChromeTheme.reconfigure(buildEditorChromeExtension(chromeTheme, darkMode)),
-							editorSyntaxTheme.reconfigure(
+				dispatchEditorChanges({
+					effects: [
+						editorChromeTheme.reconfigure(buildEditorChromeExtension(chromeTheme, darkMode)),
+						editorSyntaxTheme.reconfigure(
 							shikiModule.default({
 								highlighter,
 								language: resolvedLanguage,

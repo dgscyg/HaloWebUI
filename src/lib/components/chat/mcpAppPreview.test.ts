@@ -54,14 +54,14 @@ describe('mcpAppPreview', () => {
 		`);
 
 		expect(payloads).toEqual([
-				expect.objectContaining({
-					toolCallId: 'call_1',
-					appId: 'resource-1',
-					resourceUri: 'resource-1',
-					renderUrl: 'https://apps.example/render/1',
-					toolName: 'mcp_0__lookup'
-				})
-			]);
+			expect.objectContaining({
+				toolCallId: 'call_1',
+				appId: 'resource-1',
+				resourceUri: 'resource-1',
+				renderUrl: 'https://apps.example/render/1',
+				toolName: 'mcp_0__lookup'
+			})
+		]);
 	});
 
 	it('prefers upstream mcp_app attributes and preserves raw tool result payloads', () => {
@@ -109,8 +109,7 @@ describe('mcpAppPreview', () => {
 			attributes: {
 				id: 'call_1',
 				name: 'fetch_url',
-				result:
-					'{"url":"https://example.com","content":"2026-03-27","title":"Example Domain"}'
+				result: '{"url":"https://example.com","content":"2026-03-27","title":"Example Domain"}'
 			}
 		});
 

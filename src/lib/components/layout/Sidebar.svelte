@@ -170,7 +170,9 @@
 		allChatsLoaded = false;
 
 		if (!search && $selectedAssistantScene?.id) {
-			await chats.set(await getChatListByAssistantId(localStorage.token, $selectedAssistantScene.id));
+			await chats.set(
+				await getChatListByAssistantId(localStorage.token, $selectedAssistantScene.id)
+			);
 		} else if (search) {
 			await chats.set(await getChatListBySearchText(localStorage.token, search, $currentChatPage));
 		} else {
@@ -795,8 +797,8 @@
 								{#each assistantScenes as assistant}
 									<button
 										type="button"
-										class="mx-2 flex w-auto items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition {($selectedAssistantScene?.id ?? null) ===
-										assistant.id
+										class="mx-2 flex w-auto items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition {($selectedAssistantScene?.id ??
+											null) === assistant.id
 											? 'bg-gray-200 text-gray-900 dark:bg-gray-800 dark:text-gray-100'
 											: 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-850'}"
 										on:click={() => {
@@ -808,8 +810,8 @@
 												assistant?.info?.meta?.profile_image_url ??
 												`${WEBUI_BASE_URL}/static/favicon.png`}
 											alt={getModelChatDisplayName(assistant)}
-											class="size-7 shrink-0 rounded-lg object-cover {(assistant?.meta?.profile_image_url ??
-											assistant?.info?.meta?.profile_image_url)
+											class="size-7 shrink-0 rounded-lg object-cover {(assistant?.meta
+												?.profile_image_url ?? assistant?.info?.meta?.profile_image_url)
 												? ''
 												: 'dark:invert'}"
 											draggable="false"
@@ -823,8 +825,12 @@
 								{/each}
 							</div>
 						{:else}
-							<div class="mx-2 mt-1 rounded-xl border border-dashed border-gray-200/80 px-3 py-3 text-xs text-gray-500 dark:border-gray-700/70 dark:text-gray-400">
-								<div>{$i18n.t('No assistants yet. Create your first assistant to get started.')}</div>
+							<div
+								class="mx-2 mt-1 rounded-xl border border-dashed border-gray-200/80 px-3 py-3 text-xs text-gray-500 dark:border-gray-700/70 dark:text-gray-400"
+							>
+								<div>
+									{$i18n.t('No assistants yet. Create your first assistant to get started.')}
+								</div>
 								<a
 									class="mt-2 inline-flex rounded-full px-2.5 py-1.5 text-xs font-medium transition hover:bg-gray-100 dark:hover:bg-gray-850"
 									href="/workspace/models/create"

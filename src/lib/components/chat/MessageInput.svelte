@@ -74,9 +74,7 @@
 		normalizeWebSearchMode,
 		type WebSearchMode
 	} from '$lib/utils/web-search-mode';
-	import {
-		buildWebSearchModeOptions
-	} from '$lib/utils/native-web-search';
+	import { buildWebSearchModeOptions } from '$lib/utils/native-web-search';
 
 	import XMark from '../icons/XMark.svelte';
 	import Headphone from '../icons/Headphone.svelte';
@@ -272,17 +270,21 @@
 	$: webSearchFeatureEnabled =
 		Boolean($config?.features?.enable_halo_web_search ?? $config?.features?.enable_web_search) ||
 		Boolean($config?.features?.enable_native_web_search);
-	$: selectedModelLookupIds = selectedModelIds.filter((id) => typeof id === 'string' && id.trim() !== '');
+	$: selectedModelLookupIds = selectedModelIds.filter(
+		(id) => typeof id === 'string' && id.trim() !== ''
+	);
 	$: selectedModelObjects = selectedModelIds
 		.map((id) =>
-			atSelectedModel && atSelectedModel.id === id ? atSelectedModel : $models.find((model) => model.id === id)
+			atSelectedModel && atSelectedModel.id === id
+				? atSelectedModel
+				: $models.find((model) => model.id === id)
 		)
 		.filter(Boolean);
 	$: hasResolvedSelectedModels =
-		selectedModelLookupIds.length === 0 || selectedModelObjects.length === selectedModelLookupIds.length;
+		selectedModelLookupIds.length === 0 ||
+		selectedModelObjects.length === selectedModelLookupIds.length;
 	$: primarySelectedModel =
-		atSelectedModel ??
-		(selectedModelObjects.length === 1 ? selectedModelObjects[0] : null);
+		atSelectedModel ?? (selectedModelObjects.length === 1 ? selectedModelObjects[0] : null);
 	$: webSearchModeOptions = buildWebSearchModeOptions(
 		(key, options) => $i18n.t(key, options),
 		$config,
@@ -551,9 +553,7 @@
 			errorHint: '',
 			diagnostic: null,
 			itemId: tempItemId,
-			...(fullContext
-				? { context: 'full', processing_mode: 'full_context' }
-				: {})
+			...(fullContext ? { context: 'full', processing_mode: 'full_context' } : {})
 		};
 
 		if (fileItem.size == 0) {
@@ -970,11 +970,15 @@
 								/>
 
 								{#if files.length > 0}
-									<div class="px-2.5 mt-0.5 mb-1.5 pt-1.5 flex items-end gap-2 overflow-x-auto scrollbar-none">
+									<div
+										class="px-2.5 mt-0.5 mb-1.5 pt-1.5 flex items-end gap-2 overflow-x-auto scrollbar-none"
+									>
 										{#each files as file, fileIdx}
 											{#if file.type === 'image'}
 												<div class="relative group shrink-0">
-													<div class="relative flex items-center rounded-xl ring-1 ring-gray-200/60 dark:ring-white/10">
+													<div
+														class="relative flex items-center rounded-xl ring-1 ring-gray-200/60 dark:ring-white/10"
+													>
 														<Image
 															src={file.url}
 															alt="input"
@@ -1079,7 +1083,9 @@
 															navigator.maxTouchPoints > 0 ||
 															navigator.msMaxTouchPoints > 0
 														))}
-												placeholder={placeholder ? placeholder : $i18n.t('How can I help you today?')}
+												placeholder={placeholder
+													? placeholder
+													: $i18n.t('How can I help you today?')}
 												largeTextAsFile={$settings?.largeTextAsFile ?? false}
 												autocomplete={$config?.features?.enable_autocomplete_generation &&
 													($settings?.promptAutocomplete ?? false)}
@@ -1441,12 +1447,12 @@
 
 								<div class=" flex justify-between mt-1.5 mb-3 mx-0.5 max-w-full" dir="ltr">
 									<div class="ml-1 self-end flex items-center flex-1 max-w-[80%] gap-0.5">
-														<InputMenu
-															bind:selectedToolIds
-															bind:webSearchMode
-															{webSearchModeOptions}
-															bind:imageGenerationEnabled
-															bind:codeInterpreterEnabled
+										<InputMenu
+											bind:selectedToolIds
+											bind:webSearchMode
+											{webSearchModeOptions}
+											bind:imageGenerationEnabled
+											bind:codeInterpreterEnabled
 											{screenCaptureHandler}
 											{inputFilesHandler}
 											uploadFilesHandler={() => {
@@ -1564,7 +1570,7 @@
 											{/if}
 
 											{#if $_user}
-													{#if webSearchFeatureEnabled && ($_user.role === 'admin' || $_user?.permissions?.features?.web_search) && webSearchActive}
+												{#if webSearchFeatureEnabled && ($_user.role === 'admin' || $_user?.permissions?.features?.web_search) && webSearchActive}
 													<Tooltip content={`${currentWebSearchTooltip}，点击关闭`} placement="top">
 														<button
 															type="button"
@@ -1603,7 +1609,10 @@
 																	className={`${imageGenerationIconClass} ${featureBadgePrimaryIconMotionClass}`}
 																	strokeWidth="1.75"
 																/>
-																<XMark className={imageGenerationCloseIconClass} strokeWidth="2.5" />
+																<XMark
+																	className={imageGenerationCloseIconClass}
+																	strokeWidth="2.5"
+																/>
 															</span>
 														</button>
 													</Tooltip>
@@ -1624,7 +1633,10 @@
 																	className={`${codeInterpreterIconClass} ${featureBadgePrimaryIconMotionClass}`}
 																	strokeWidth="1.75"
 																/>
-																<XMark className={codeInterpreterCloseIconClass} strokeWidth="2.5" />
+																<XMark
+																	className={codeInterpreterCloseIconClass}
+																	strokeWidth="2.5"
+																/>
 															</span>
 														</button>
 													</Tooltip>

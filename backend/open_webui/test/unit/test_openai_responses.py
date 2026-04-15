@@ -5,7 +5,6 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
 # Ensure `open_webui` is importable when running tests from repo root.
 _BACKEND_DIR = pathlib.Path(__file__).resolve().parents[3]
 if str(_BACKEND_DIR) not in sys.path:
@@ -46,11 +45,11 @@ def test_convert_chat_completions_to_responses_payload_basic():
                     {
                         "id": "call_1",
                         "type": "function",
-                        "function": {"name": "do", "arguments": "{\"x\":1}"},
+                        "function": {"name": "do", "arguments": '{"x":1}'},
                     }
                 ],
             },
-            {"role": "tool", "tool_call_id": "call_1", "content": "{\"ok\":true}"},
+            {"role": "tool", "tool_call_id": "call_1", "content": '{"ok":true}'},
         ],
         "tools": [
             {
@@ -58,7 +57,10 @@ def test_convert_chat_completions_to_responses_payload_basic():
                 "function": {
                     "name": "do",
                     "description": "does things",
-                    "parameters": {"type": "object", "properties": {"x": {"type": "integer"}}},
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"x": {"type": "integer"}},
+                    },
                 },
             }
         ],
@@ -66,7 +68,9 @@ def test_convert_chat_completions_to_responses_payload_basic():
         "max_tokens": 123,
     }
 
-    r = convert_chat_completions_to_responses_payload(chat, native_web_search_tool_type=None)
+    r = convert_chat_completions_to_responses_payload(
+        chat, native_web_search_tool_type=None
+    )
     assert r["model"] == "gpt-test"
     assert r["stream"] is True
     assert r["instructions"] == "You are helpful."
@@ -92,9 +96,15 @@ def test_convert_chat_completions_to_responses_payload_basic():
         for i in r["input"]
     )
     # tool output preserved
-    assert any(i.get("type") == "function_call_output" and i.get("call_id") == "call_1" for i in r["input"])
+    assert any(
+        i.get("type") == "function_call_output" and i.get("call_id") == "call_1"
+        for i in r["input"]
+    )
     # tool call carried as input item
-    assert any(i.get("type") == "function_call" and i.get("call_id") == "call_1" for i in r["input"])
+    assert any(
+        i.get("type") == "function_call" and i.get("call_id") == "call_1"
+        for i in r["input"]
+    )
 
     # tools converted to Responses function tool format
     assert r["tools"][0]["type"] == "function"
@@ -127,7 +137,7 @@ def test_convert_responses_to_chat_completions_preserves_function_call_outputs_f
                 "type": "function_call",
                 "call_id": "call_1",
                 "name": "lookup",
-                "arguments": "{\"query\":\"halo\"}",
+                "arguments": '{"query":"halo"}',
             },
             {
                 "type": "function_call_output",
@@ -149,13 +159,13 @@ def test_convert_responses_to_chat_completions_preserves_function_call_outputs_f
             "index": 0,
             "id": "call_1",
             "type": "function",
-            "function": {"name": "lookup", "arguments": "{\"query\":\"halo\"}"},
+            "function": {"name": "lookup", "arguments": '{"query":"halo"}'},
         }
     ]
     assert cc["choices"][0]["messages"][1] == {
         "role": "tool",
         "tool_call_id": "call_1",
-        "content": "{\"app_id\": \"resource-1\", \"render_url\": \"https://apps.example/render/1\", \"metadata\": {\"tool_call_id\": \"call_1\"}}",
+        "content": '{"app_id": "resource-1", "render_url": "https://apps.example/render/1", "metadata": {"tool_call_id": "call_1"}}',
         "files": [{"type": "image", "url": "data:image/png;base64,abc"}],
     }
 
@@ -194,7 +204,7 @@ def test_generate_chat_completion_one_shot_sse_preserves_tool_output_lineage():
                 "type": "function_call",
                 "call_id": "call_1",
                 "name": "lookup",
-                "arguments": "{\"query\":\"halo\"}",
+                "arguments": '{"query":"halo"}',
             },
             {
                 "type": "function_call_output",
@@ -240,7 +250,11 @@ def test_generate_chat_completion_one_shot_sse_preserves_tool_output_lineage():
         ),
         patch.object(openai_router, "_should_use_responses_api", return_value=True),
         patch.object(openai_router, "_build_upstream_headers", return_value={}),
-        patch.object(openai_router.aiohttp, "ClientSession", return_value=FakeSession(FakeResponse(response_payload))),
+        patch.object(
+            openai_router.aiohttp,
+            "ClientSession",
+            return_value=FakeSession(FakeResponse(response_payload)),
+        ),
     ):
         chunks = asyncio.run(collect_body())
 
@@ -255,13 +269,13 @@ def test_generate_chat_completion_one_shot_sse_preserves_tool_output_lineage():
             "index": 0,
             "id": "call_1",
             "type": "function",
-            "function": {"name": "lookup", "arguments": "{\"query\":\"halo\"}"},
+            "function": {"name": "lookup", "arguments": '{"query":"halo"}'},
         }
     ]
     assert payloads[1]["choices"][0]["delta"] == {
         "role": "tool",
         "tool_call_id": "call_1",
-        "content": "{\"app_id\": \"resource-1\", \"render_url\": \"https://apps.example/render/1\", \"metadata\": {\"tool_call_id\": \"call_1\"}}",
+        "content": '{"app_id": "resource-1", "render_url": "https://apps.example/render/1", "metadata": {"tool_call_id": "call_1"}}',
         "files": [{"type": "image", "url": "data:image/png;base64,abc"}],
     }
     assert payloads[-1]["choices"][0]["finish_reason"] == "tool_calls"
@@ -325,7 +339,10 @@ def test_convert_chat_completions_to_responses_payload_preserves_input_files():
                 "content": [
                     {"type": "text", "text": "Read these files"},
                     {"type": "input_file", "file_id": "file_123"},
-                    {"type": "image_url", "image_url": {"url": "https://example.com/a.png"}},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://example.com/a.png"},
+                    },
                     {"type": "file", "file_id": "file_456"},
                 ],
             }
@@ -347,12 +364,12 @@ def test_convert_chat_completions_to_responses_payload_preserves_input_files():
 
 def test_iter_responses_events_sse_fragmented():
     event1 = json.dumps({"type": "response.output_text.delta", "delta": "Hi"})
-    event2 = json.dumps({"type": "response.completed", "response": {"usage": {"output_tokens": 2}}})
-    payload = (
-        f"data: {event1}\n\n"
-        f"data: {event2}\n\n"
-        "data: [DONE]\n\n"
-    ).encode("utf-8")
+    event2 = json.dumps(
+        {"type": "response.completed", "response": {"usage": {"output_tokens": 2}}}
+    )
+    payload = (f"data: {event1}\n\n" f"data: {event2}\n\n" "data: [DONE]\n\n").encode(
+        "utf-8"
+    )
 
     # Fragment across chunks to ensure buffer stitching works.
     chunks = [payload[:10], payload[10:35], payload[35:]]
@@ -376,7 +393,10 @@ def test_iter_responses_events_ndjson():
         return await _collect_async(evs)
 
     events = asyncio.run(run())
-    assert [e["type"] for e in events] == ["response.output_text.delta", "response.completed"]
+    assert [e["type"] for e in events] == [
+        "response.output_text.delta",
+        "response.completed",
+    ]
 
 
 def test_responses_events_to_chat_sse_text_and_done():
@@ -386,7 +406,9 @@ def test_responses_events_to_chat_sse_text_and_done():
     ]
 
     async def run():
-        sse = responses_events_to_chat_completions_sse(_aiter(events), model_id="gpt-test")
+        sse = responses_events_to_chat_completions_sse(
+            _aiter(events), model_id="gpt-test"
+        )
         return await _collect_async(sse)
 
     lines = asyncio.run(run())
@@ -427,7 +449,9 @@ def test_responses_events_to_chat_sse_reasoning_summary_part_done():
     ]
 
     async def run():
-        sse = responses_events_to_chat_completions_sse(_aiter(events), model_id="gpt-test")
+        sse = responses_events_to_chat_completions_sse(
+            _aiter(events), model_id="gpt-test"
+        )
         return await _collect_async(sse)
 
     lines = asyncio.run(run())
@@ -447,7 +471,9 @@ def test_responses_events_to_chat_sse_reasoning_text_delta():
     ]
 
     async def run():
-        sse = responses_events_to_chat_completions_sse(_aiter(events), model_id="gpt-test")
+        sse = responses_events_to_chat_completions_sse(
+            _aiter(events), model_id="gpt-test"
+        )
         return await _collect_async(sse)
 
     lines = asyncio.run(run())
@@ -456,14 +482,29 @@ def test_responses_events_to_chat_sse_reasoning_text_delta():
 
 def test_responses_events_to_chat_sse_tool_call_delta_and_name():
     events = [
-        {"type": "response.function_call_arguments.delta", "item_id": "call_x", "delta": "{\"a\":"},
-        {"type": "response.function_call_arguments.delta", "item_id": "call_x", "delta": "1}"},
-        {"type": "response.function_call_arguments.done", "item_id": "call_x", "name": "do", "arguments": "{\"a\":1}"},
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "call_x",
+            "delta": '{"a":',
+        },
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "call_x",
+            "delta": "1}",
+        },
+        {
+            "type": "response.function_call_arguments.done",
+            "item_id": "call_x",
+            "name": "do",
+            "arguments": '{"a":1}',
+        },
         {"type": "response.completed"},
     ]
 
     async def run():
-        sse = responses_events_to_chat_completions_sse(_aiter(events), model_id="gpt-test")
+        sse = responses_events_to_chat_completions_sse(
+            _aiter(events), model_id="gpt-test"
+        )
         return await _collect_async(sse)
 
     lines = asyncio.run(run())

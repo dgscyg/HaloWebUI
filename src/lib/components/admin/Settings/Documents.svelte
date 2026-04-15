@@ -313,12 +313,14 @@
 		}
 	};
 
-	const contentEngineOptions = (Object.keys(contentEngineMeta) as ContentEngineId[]).map((engine) => ({
-		value: engine,
-		label: contentEngineMeta[engine].label,
-		description: contentEngineMeta[engine].description,
-		badge: contentEngineMeta[engine].badge
-	}));
+	const contentEngineOptions = (Object.keys(contentEngineMeta) as ContentEngineId[]).map(
+		(engine) => ({
+			value: engine,
+			label: contentEngineMeta[engine].label,
+			description: contentEngineMeta[engine].description,
+			badge: contentEngineMeta[engine].badge
+		})
+	);
 
 	const getContentEngineMeta = (engine: string) =>
 		contentEngineMeta[(engine as ContentEngineId) || ''] ?? contentEngineMeta[''];
@@ -408,7 +410,8 @@
 		const legacyAzureConfig = mergedConfigs?.azure_document_intelligence ?? {};
 		const externalDocumentLoaderUrlIsFullPath =
 			value?.EXTERNAL_DOCUMENT_LOADER_URL_IS_FULL_PATH ?? false;
-		const normalizedTextSplitter = value?.TEXT_SPLITTER === 'markdown' ? '' : (value?.TEXT_SPLITTER ?? '');
+		const normalizedTextSplitter =
+			value?.TEXT_SPLITTER === 'markdown' ? '' : (value?.TEXT_SPLITTER ?? '');
 		const enableMarkdownHeaderTextSplitter =
 			value?.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER ??
 			(value?.TEXT_SPLITTER === 'markdown' ? true : false);
@@ -464,8 +467,7 @@
 				(legacyProvider === 'mistral' ? (legacyMistralConfig.api_key ?? '') : ''),
 			MINERU_API_MODE:
 				value?.MINERU_API_MODE ??
-				(legacyProvider === 'mineru' &&
-				String(legacyMineruConfig.api_key ?? '').trim() !== ''
+				(legacyProvider === 'mineru' && String(legacyMineruConfig.api_key ?? '').trim() !== ''
 					? 'cloud'
 					: 'local'),
 			MINERU_API_URL:
@@ -558,78 +560,78 @@
 	};
 
 	const buildSnapshot = () => ({
-			general: {
-				FILE_PROCESSING_DEFAULT_MODE: RAGConfig?.FILE_PROCESSING_DEFAULT_MODE,
-				selectedExtractionEngine,
-				DOCUMENT_PROVIDER: RAGConfig?.DOCUMENT_PROVIDER,
-				DOCUMENT_PROVIDER_CONFIGS: RAGConfig?.DOCUMENT_PROVIDER_CONFIGS,
-				CONTENT_EXTRACTION_ENGINE: RAGConfig?.CONTENT_EXTRACTION_ENGINE,
-				DATALAB_MARKER_API_KEY: RAGConfig?.DATALAB_MARKER_API_KEY,
-				DATALAB_MARKER_API_BASE_URL: RAGConfig?.DATALAB_MARKER_API_BASE_URL,
-				DATALAB_MARKER_ADDITIONAL_CONFIG: RAGConfig?.DATALAB_MARKER_ADDITIONAL_CONFIG,
-				DATALAB_MARKER_SKIP_CACHE: RAGConfig?.DATALAB_MARKER_SKIP_CACHE,
-				DATALAB_MARKER_FORCE_OCR: RAGConfig?.DATALAB_MARKER_FORCE_OCR,
-				DATALAB_MARKER_PAGINATE: RAGConfig?.DATALAB_MARKER_PAGINATE,
-				DATALAB_MARKER_STRIP_EXISTING_OCR: RAGConfig?.DATALAB_MARKER_STRIP_EXISTING_OCR,
-				DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION: RAGConfig?.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-				DATALAB_MARKER_FORMAT_LINES: RAGConfig?.DATALAB_MARKER_FORMAT_LINES,
-				DATALAB_MARKER_USE_LLM: RAGConfig?.DATALAB_MARKER_USE_LLM,
-				DATALAB_MARKER_OUTPUT_FORMAT: RAGConfig?.DATALAB_MARKER_OUTPUT_FORMAT,
-				EXTERNAL_DOCUMENT_LOADER_URL: RAGConfig?.EXTERNAL_DOCUMENT_LOADER_URL,
-				EXTERNAL_DOCUMENT_LOADER_URL_IS_FULL_PATH:
-					RAGConfig?.EXTERNAL_DOCUMENT_LOADER_URL_IS_FULL_PATH,
-				EXTERNAL_DOCUMENT_LOADER_API_KEY: RAGConfig?.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-				PDF_EXTRACT_IMAGES: RAGConfig?.PDF_EXTRACT_IMAGES,
-				PDF_LOADING_MODE: RAGConfig?.PDF_LOADING_MODE,
-				TIKA_SERVER_URL: RAGConfig?.TIKA_SERVER_URL,
-				DOCLING_SERVER_URL: RAGConfig?.DOCLING_SERVER_URL,
-				DOCLING_API_KEY: RAGConfig?.DOCLING_API_KEY,
-				DOCLING_PARAMS: RAGConfig?.DOCLING_PARAMS,
-				DOCUMENT_INTELLIGENCE_ENDPOINT: RAGConfig?.DOCUMENT_INTELLIGENCE_ENDPOINT,
-				DOCUMENT_INTELLIGENCE_KEY: RAGConfig?.DOCUMENT_INTELLIGENCE_KEY,
-				DOCUMENT_INTELLIGENCE_MODEL: RAGConfig?.DOCUMENT_INTELLIGENCE_MODEL,
-				MISTRAL_OCR_API_BASE_URL: RAGConfig?.MISTRAL_OCR_API_BASE_URL,
-				MISTRAL_OCR_API_KEY: RAGConfig?.MISTRAL_OCR_API_KEY,
-				MINERU_API_MODE: RAGConfig?.MINERU_API_MODE,
-				MINERU_API_URL: RAGConfig?.MINERU_API_URL,
-				MINERU_API_KEY: RAGConfig?.MINERU_API_KEY,
-				MINERU_API_TIMEOUT: RAGConfig?.MINERU_API_TIMEOUT,
-				MINERU_PARAMS: RAGConfig?.MINERU_PARAMS,
-				TEXT_SPLITTER: RAGConfig?.TEXT_SPLITTER,
-				ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER: RAGConfig?.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER,
-				CHUNK_SIZE: RAGConfig?.CHUNK_SIZE,
-				CHUNK_OVERLAP: RAGConfig?.CHUNK_OVERLAP,
-				CHUNK_MIN_SIZE_TARGET: RAGConfig?.CHUNK_MIN_SIZE_TARGET,
-				CHUNK_MIN_SIZE: RAGConfig?.CHUNK_MIN_SIZE,
-				FILE_MAX_SIZE: RAGConfig?.FILE_MAX_SIZE,
-				FILE_MAX_COUNT: RAGConfig?.FILE_MAX_COUNT,
-				FILE_IMAGE_COMPRESSION_WIDTH: RAGConfig?.FILE_IMAGE_COMPRESSION_WIDTH,
-				FILE_IMAGE_COMPRESSION_HEIGHT: RAGConfig?.FILE_IMAGE_COMPRESSION_HEIGHT,
-				ALLOWED_FILE_EXTENSIONS: RAGConfig?.ALLOWED_FILE_EXTENSIONS,
-				ENABLE_GOOGLE_DRIVE_INTEGRATION: RAGConfig?.ENABLE_GOOGLE_DRIVE_INTEGRATION,
-				ENABLE_ONEDRIVE_INTEGRATION: RAGConfig?.ENABLE_ONEDRIVE_INTEGRATION
-			},
-			embedding: {
-				embeddingEngine,
-				embeddingModel,
-				embeddingBatchSize,
-				OpenAIUrl,
-				OpenAIKey,
-				AzureOpenAIUrl,
-				AzureOpenAIKey,
-				AzureOpenAIVersion,
-				OllamaUrl,
-				OllamaKey,
-				enableAsyncEmbedding,
-				embeddingConcurrentRequests
-			},
-			retrieval: {
-				RAG_FULL_CONTEXT: RAGConfig?.RAG_FULL_CONTEXT,
-				ENABLE_RAG_HYBRID_SEARCH: RAGConfig?.ENABLE_RAG_HYBRID_SEARCH,
-				ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS: RAGConfig?.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
-				TOP_K: RAGConfig?.TOP_K,
-				TOP_K_RERANKER: RAGConfig?.TOP_K_RERANKER,
-				RAG_HYBRID_SEARCH_BM25_WEIGHT: RAGConfig?.RAG_HYBRID_SEARCH_BM25_WEIGHT,
+		general: {
+			FILE_PROCESSING_DEFAULT_MODE: RAGConfig?.FILE_PROCESSING_DEFAULT_MODE,
+			selectedExtractionEngine,
+			DOCUMENT_PROVIDER: RAGConfig?.DOCUMENT_PROVIDER,
+			DOCUMENT_PROVIDER_CONFIGS: RAGConfig?.DOCUMENT_PROVIDER_CONFIGS,
+			CONTENT_EXTRACTION_ENGINE: RAGConfig?.CONTENT_EXTRACTION_ENGINE,
+			DATALAB_MARKER_API_KEY: RAGConfig?.DATALAB_MARKER_API_KEY,
+			DATALAB_MARKER_API_BASE_URL: RAGConfig?.DATALAB_MARKER_API_BASE_URL,
+			DATALAB_MARKER_ADDITIONAL_CONFIG: RAGConfig?.DATALAB_MARKER_ADDITIONAL_CONFIG,
+			DATALAB_MARKER_SKIP_CACHE: RAGConfig?.DATALAB_MARKER_SKIP_CACHE,
+			DATALAB_MARKER_FORCE_OCR: RAGConfig?.DATALAB_MARKER_FORCE_OCR,
+			DATALAB_MARKER_PAGINATE: RAGConfig?.DATALAB_MARKER_PAGINATE,
+			DATALAB_MARKER_STRIP_EXISTING_OCR: RAGConfig?.DATALAB_MARKER_STRIP_EXISTING_OCR,
+			DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION: RAGConfig?.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
+			DATALAB_MARKER_FORMAT_LINES: RAGConfig?.DATALAB_MARKER_FORMAT_LINES,
+			DATALAB_MARKER_USE_LLM: RAGConfig?.DATALAB_MARKER_USE_LLM,
+			DATALAB_MARKER_OUTPUT_FORMAT: RAGConfig?.DATALAB_MARKER_OUTPUT_FORMAT,
+			EXTERNAL_DOCUMENT_LOADER_URL: RAGConfig?.EXTERNAL_DOCUMENT_LOADER_URL,
+			EXTERNAL_DOCUMENT_LOADER_URL_IS_FULL_PATH:
+				RAGConfig?.EXTERNAL_DOCUMENT_LOADER_URL_IS_FULL_PATH,
+			EXTERNAL_DOCUMENT_LOADER_API_KEY: RAGConfig?.EXTERNAL_DOCUMENT_LOADER_API_KEY,
+			PDF_EXTRACT_IMAGES: RAGConfig?.PDF_EXTRACT_IMAGES,
+			PDF_LOADING_MODE: RAGConfig?.PDF_LOADING_MODE,
+			TIKA_SERVER_URL: RAGConfig?.TIKA_SERVER_URL,
+			DOCLING_SERVER_URL: RAGConfig?.DOCLING_SERVER_URL,
+			DOCLING_API_KEY: RAGConfig?.DOCLING_API_KEY,
+			DOCLING_PARAMS: RAGConfig?.DOCLING_PARAMS,
+			DOCUMENT_INTELLIGENCE_ENDPOINT: RAGConfig?.DOCUMENT_INTELLIGENCE_ENDPOINT,
+			DOCUMENT_INTELLIGENCE_KEY: RAGConfig?.DOCUMENT_INTELLIGENCE_KEY,
+			DOCUMENT_INTELLIGENCE_MODEL: RAGConfig?.DOCUMENT_INTELLIGENCE_MODEL,
+			MISTRAL_OCR_API_BASE_URL: RAGConfig?.MISTRAL_OCR_API_BASE_URL,
+			MISTRAL_OCR_API_KEY: RAGConfig?.MISTRAL_OCR_API_KEY,
+			MINERU_API_MODE: RAGConfig?.MINERU_API_MODE,
+			MINERU_API_URL: RAGConfig?.MINERU_API_URL,
+			MINERU_API_KEY: RAGConfig?.MINERU_API_KEY,
+			MINERU_API_TIMEOUT: RAGConfig?.MINERU_API_TIMEOUT,
+			MINERU_PARAMS: RAGConfig?.MINERU_PARAMS,
+			TEXT_SPLITTER: RAGConfig?.TEXT_SPLITTER,
+			ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER: RAGConfig?.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER,
+			CHUNK_SIZE: RAGConfig?.CHUNK_SIZE,
+			CHUNK_OVERLAP: RAGConfig?.CHUNK_OVERLAP,
+			CHUNK_MIN_SIZE_TARGET: RAGConfig?.CHUNK_MIN_SIZE_TARGET,
+			CHUNK_MIN_SIZE: RAGConfig?.CHUNK_MIN_SIZE,
+			FILE_MAX_SIZE: RAGConfig?.FILE_MAX_SIZE,
+			FILE_MAX_COUNT: RAGConfig?.FILE_MAX_COUNT,
+			FILE_IMAGE_COMPRESSION_WIDTH: RAGConfig?.FILE_IMAGE_COMPRESSION_WIDTH,
+			FILE_IMAGE_COMPRESSION_HEIGHT: RAGConfig?.FILE_IMAGE_COMPRESSION_HEIGHT,
+			ALLOWED_FILE_EXTENSIONS: RAGConfig?.ALLOWED_FILE_EXTENSIONS,
+			ENABLE_GOOGLE_DRIVE_INTEGRATION: RAGConfig?.ENABLE_GOOGLE_DRIVE_INTEGRATION,
+			ENABLE_ONEDRIVE_INTEGRATION: RAGConfig?.ENABLE_ONEDRIVE_INTEGRATION
+		},
+		embedding: {
+			embeddingEngine,
+			embeddingModel,
+			embeddingBatchSize,
+			OpenAIUrl,
+			OpenAIKey,
+			AzureOpenAIUrl,
+			AzureOpenAIKey,
+			AzureOpenAIVersion,
+			OllamaUrl,
+			OllamaKey,
+			enableAsyncEmbedding,
+			embeddingConcurrentRequests
+		},
+		retrieval: {
+			RAG_FULL_CONTEXT: RAGConfig?.RAG_FULL_CONTEXT,
+			ENABLE_RAG_HYBRID_SEARCH: RAGConfig?.ENABLE_RAG_HYBRID_SEARCH,
+			ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS: RAGConfig?.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
+			TOP_K: RAGConfig?.TOP_K,
+			TOP_K_RERANKER: RAGConfig?.TOP_K_RERANKER,
+			RAG_HYBRID_SEARCH_BM25_WEIGHT: RAGConfig?.RAG_HYBRID_SEARCH_BM25_WEIGHT,
 			RELEVANCE_THRESHOLD: RAGConfig?.RELEVANCE_THRESHOLD,
 			RAG_SYSTEM_CONTEXT: RAGConfig?.RAG_SYSTEM_CONTEXT,
 			RAG_TEMPLATE: RAGConfig?.RAG_TEMPLATE,
@@ -640,8 +642,8 @@
 		}
 	});
 
-	$: snapshot = (
-		RAGConfig,
+	$: snapshot =
+		(RAGConfig,
 		selectedExtractionEngine,
 		embeddingEngine,
 		embeddingModel,
@@ -659,8 +661,7 @@
 		rerankingEngine,
 		rerankingApiUrl,
 		rerankingApiKey,
-		buildSnapshot()
-	);
+		buildSnapshot());
 	$: dirtySections = initialSnapshot
 		? {
 				general: !isSettingsSnapshotEqual(snapshot.general, initialSnapshot.general),
@@ -827,7 +828,11 @@
 			toast.error(getLocalRerankingMessage());
 			return false;
 		}
-		if (['jina', 'external'].includes(rerankingEngine) && rerankingModel !== '' && rerankingApiUrl === '') {
+		if (
+			['jina', 'external'].includes(rerankingEngine) &&
+			rerankingModel !== '' &&
+			rerankingApiUrl === ''
+		) {
 			toast.error('请填写重排序服务 API 基础 URL。');
 			return false;
 		}
@@ -885,7 +890,10 @@
 			return;
 		}
 
-		if (selectedExtractionEngine === 'paddleocr' && String(selectedProviderConfig.server_url ?? '').trim() === '') {
+		if (
+			selectedExtractionEngine === 'paddleocr' &&
+			String(selectedProviderConfig.server_url ?? '').trim() === ''
+		) {
 			toast.error('请填写 PaddleOCR 服务地址。');
 			return;
 		}
@@ -1135,32 +1143,87 @@
 		<div class="mx-auto max-w-6xl space-y-6">
 			<section class="glass-section p-5 space-y-5">
 				<div class="@container flex flex-col gap-5">
-					<div class="flex flex-col gap-4 @[64rem]:flex-row @[64rem]:items-start @[64rem]:justify-between">
+					<div
+						class="flex flex-col gap-4 @[64rem]:flex-row @[64rem]:items-start @[64rem]:justify-between"
+					>
 						<div class="min-w-0 @[64rem]:flex-1">
-							<div class="inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full border border-gray-200/80 bg-white/80 px-3.5 text-xs font-medium leading-none text-gray-600 dark:border-gray-700/80 dark:bg-gray-900/70 dark:text-gray-300">
-								<span class="leading-none text-gray-400 dark:text-gray-500">{$i18n.t('Settings')}</span>
+							<div
+								class="inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full border border-gray-200/80 bg-white/80 px-3.5 text-xs font-medium leading-none text-gray-600 dark:border-gray-700/80 dark:bg-gray-900/70 dark:text-gray-300"
+							>
+								<span class="leading-none text-gray-400 dark:text-gray-500"
+									>{$i18n.t('Settings')}</span
+								>
 								<span class="leading-none text-gray-300 dark:text-gray-600">/</span>
-								<span class="leading-none text-gray-900 dark:text-white">{$i18n.t('文档处理')}</span>
+								<span class="leading-none text-gray-900 dark:text-white">{$i18n.t('文档处理')}</span
+								>
 							</div>
 
 							<div class="mt-3 flex items-start gap-3">
 								<div class="glass-icon-badge {activeTabMeta.badgeColor}">
 									{#if selectedTab === 'general'}
-										<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px] {activeTabMeta.iconColor}">
-											<path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
-											<path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke-width="1.5"
+											stroke="currentColor"
+											class="size-[18px] {activeTabMeta.iconColor}"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
+											/>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
+											/>
 										</svg>
 									{:else if selectedTab === 'embedding'}
-										<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px] {activeTabMeta.iconColor}">
-											<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke-width="1.5"
+											stroke="currentColor"
+											class="size-[18px] {activeTabMeta.iconColor}"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"
+											/>
 										</svg>
 									{:else if selectedTab === 'retrieval'}
-										<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px] {activeTabMeta.iconColor}">
-											<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke-width="1.5"
+											stroke="currentColor"
+											class="size-[18px] {activeTabMeta.iconColor}"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+											/>
 										</svg>
 									{:else}
-										<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px] {activeTabMeta.iconColor}">
-											<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke-width="1.5"
+											stroke="currentColor"
+											class="size-[18px] {activeTabMeta.iconColor}"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+											/>
 										</svg>
 									{/if}
 								</div>
@@ -1184,7 +1247,9 @@
 							</div>
 						</div>
 
-						<div class="inline-flex max-w-full flex-wrap items-center gap-2 self-start rounded-2xl bg-gray-100 p-1 dark:bg-gray-850 @[64rem]:ml-auto @[64rem]:mt-11 @[64rem]:flex-nowrap @[64rem]:justify-end @[64rem]:shrink-0">
+						<div
+							class="inline-flex max-w-full flex-wrap items-center gap-2 self-start rounded-2xl bg-gray-100 p-1 dark:bg-gray-850 @[64rem]:ml-auto @[64rem]:mt-11 @[64rem]:flex-nowrap @[64rem]:justify-end @[64rem]:shrink-0"
+						>
 							{#each visibleTabs as tab}
 								<button
 									type="button"
@@ -1194,21 +1259,69 @@
 									}}
 								>
 									{#if tab === 'general'}
-										<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-											<path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
-											<path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke-width="1.5"
+											stroke="currentColor"
+											class="size-4"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
+											/>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
+											/>
 										</svg>
 									{:else if tab === 'embedding'}
-										<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-											<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke-width="1.5"
+											stroke="currentColor"
+											class="size-4"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"
+											/>
 										</svg>
 									{:else if tab === 'retrieval'}
-										<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-											<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke-width="1.5"
+											stroke="currentColor"
+											class="size-4"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+											/>
 										</svg>
 									{:else}
-										<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-											<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke-width="1.5"
+											stroke="currentColor"
+											class="size-4"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+											/>
 										</svg>
 									{/if}
 									<span>{$i18n.t(tabMeta[tab].label)}</span>
@@ -1267,16 +1380,24 @@
 								{selectedContentEngineMeta.description}
 							</div>
 							<div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-								<div class="rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
-									<div class="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+								<div
+									class="rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40"
+								>
+									<div
+										class="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500"
+									>
 										接入要求
 									</div>
 									<div class="mt-1 text-sm text-gray-700 dark:text-gray-200">
 										{selectedContentEngineMeta.requirement}
 									</div>
 								</div>
-								<div class="rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
-									<div class="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+								<div
+									class="rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40"
+								>
+									<div
+										class="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500"
+									>
 										能力与限制
 									</div>
 									<div class="mt-1 text-sm text-gray-700 dark:text-gray-200">
@@ -1300,11 +1421,15 @@
 							<div class="mt-4 space-y-3">
 								{#if selectedExtractionEngine === ''}
 									<div class="flex items-center justify-between gap-4">
-										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">PDF 图像提取（OCR）</div>
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+											PDF 图像提取（OCR）
+										</div>
 										<Switch bind:state={RAGConfig.PDF_EXTRACT_IMAGES} />
 									</div>
 									<div>
-										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">PDF 加载模式</div>
+										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+											PDF 加载模式
+										</div>
 										<HaloSelect
 											bind:value={RAGConfig.PDF_LOADING_MODE}
 											options={[
@@ -1317,87 +1442,154 @@
 								{:else if selectedExtractionEngine === 'external'}
 									<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 										<div>
-											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">外部文档加载器 URL</div>
-											<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" bind:value={RAGConfig.EXTERNAL_DOCUMENT_LOADER_URL} placeholder="填写外部文档解析接口完整 URL" />
+											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+												外部文档加载器 URL
+											</div>
+											<input
+												class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+												bind:value={RAGConfig.EXTERNAL_DOCUMENT_LOADER_URL}
+												placeholder="填写外部文档解析接口完整 URL"
+											/>
 											<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-												这里填写完整请求 URL。该接口需兼容外部文档解析协议：接收 `PUT` 文件二进制并返回 `Document JSON`，不适用于 `/v1/chat/completions` 这类聊天补全接口。
+												这里填写完整请求 URL。该接口需兼容外部文档解析协议：接收 `PUT`
+												文件二进制并返回 `Document JSON`，不适用于 `/v1/chat/completions`
+												这类聊天补全接口。
 											</div>
 										</div>
 										<div>
-											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 密钥</div>
-											<SensitiveInput placeholder="填写外部文档加载器 API 密钥" bind:value={RAGConfig.EXTERNAL_DOCUMENT_LOADER_API_KEY} />
+											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+												API 密钥
+											</div>
+											<SensitiveInput
+												placeholder="填写外部文档加载器 API 密钥"
+												bind:value={RAGConfig.EXTERNAL_DOCUMENT_LOADER_API_KEY}
+											/>
 										</div>
 									</div>
 								{:else if selectedExtractionEngine === 'tika'}
 									<div>
-										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">Tika 服务地址</div>
-										<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" placeholder="填写 Tika 服务地址，例如 http://localhost:9998" bind:value={RAGConfig.TIKA_SERVER_URL} />
+										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+											Tika 服务地址
+										</div>
+										<input
+											class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+											placeholder="填写 Tika 服务地址，例如 http://localhost:9998"
+											bind:value={RAGConfig.TIKA_SERVER_URL}
+										/>
 									</div>
 								{:else if selectedExtractionEngine === 'docling'}
 									<div class="space-y-3">
 										<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">Docling 服务地址</div>
-												<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" placeholder="填写 Docling 服务地址，例如 http://localhost:5001" bind:value={RAGConfig.DOCLING_SERVER_URL} />
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													Docling 服务地址
+												</div>
+												<input
+													class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+													placeholder="填写 Docling 服务地址，例如 http://localhost:5001"
+													bind:value={RAGConfig.DOCLING_SERVER_URL}
+												/>
 											</div>
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">Docling API 密钥</div>
-												<SensitiveInput placeholder="填写 Docling API 密钥" bind:value={RAGConfig.DOCLING_API_KEY} />
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													Docling API 密钥
+												</div>
+												<SensitiveInput
+													placeholder="填写 Docling API 密钥"
+													bind:value={RAGConfig.DOCLING_API_KEY}
+												/>
 											</div>
 										</div>
 										<div>
-											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">Docling 高级参数（JSON）</div>
-											<Textarea bind:value={RAGConfig.DOCLING_PARAMS} placeholder={'{\n  "image_export_mode": "placeholder"\n}'} />
+											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+												Docling 高级参数（JSON）
+											</div>
+											<Textarea
+												bind:value={RAGConfig.DOCLING_PARAMS}
+												placeholder={'{\n  "image_export_mode": "placeholder"\n}'}
+											/>
 										</div>
 									</div>
 								{:else if selectedExtractionEngine === 'datalab_marker'}
 									<div class="space-y-3">
 										<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 基础 URL</div>
-												<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" bind:value={RAGConfig.DATALAB_MARKER_API_BASE_URL} placeholder="https://www.datalab.to/api/v1/marker" />
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													API 基础 URL
+												</div>
+												<input
+													class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+													bind:value={RAGConfig.DATALAB_MARKER_API_BASE_URL}
+													placeholder="https://www.datalab.to/api/v1/marker"
+												/>
 											</div>
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 密钥</div>
-												<SensitiveInput placeholder="填写 Datalab Marker API 密钥" bind:value={RAGConfig.DATALAB_MARKER_API_KEY} />
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													API 密钥
+												</div>
+												<SensitiveInput
+													placeholder="填写 Datalab Marker API 密钥"
+													bind:value={RAGConfig.DATALAB_MARKER_API_KEY}
+												/>
 											</div>
 										</div>
 										<div>
-											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">附加配置（JSON）</div>
-											<Textarea bind:value={RAGConfig.DATALAB_MARKER_ADDITIONAL_CONFIG} placeholder={'{"disable_links": true}'} />
+											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+												附加配置（JSON）
+											</div>
+											<Textarea
+												bind:value={RAGConfig.DATALAB_MARKER_ADDITIONAL_CONFIG}
+												placeholder={'{"disable_links": true}'}
+											/>
 										</div>
 										<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-											<div class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
+											<div
+												class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40"
+											>
 												<div class="text-sm font-medium">使用 LLM 增强</div>
 												<Switch bind:state={RAGConfig.DATALAB_MARKER_USE_LLM} />
 											</div>
-											<div class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
+											<div
+												class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40"
+											>
 												<div class="text-sm font-medium">跳过缓存</div>
 												<Switch bind:state={RAGConfig.DATALAB_MARKER_SKIP_CACHE} />
 											</div>
-											<div class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
+											<div
+												class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40"
+											>
 												<div class="text-sm font-medium">强制 OCR</div>
 												<Switch bind:state={RAGConfig.DATALAB_MARKER_FORCE_OCR} />
 											</div>
-											<div class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
+											<div
+												class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40"
+											>
 												<div class="text-sm font-medium">按页输出</div>
 												<Switch bind:state={RAGConfig.DATALAB_MARKER_PAGINATE} />
 											</div>
-											<div class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
+											<div
+												class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40"
+											>
 												<div class="text-sm font-medium">移除已有 OCR</div>
 												<Switch bind:state={RAGConfig.DATALAB_MARKER_STRIP_EXISTING_OCR} />
 											</div>
-											<div class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
+											<div
+												class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40"
+											>
 												<div class="text-sm font-medium">禁用图片提取</div>
 												<Switch bind:state={RAGConfig.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION} />
 											</div>
-											<div class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40 md:col-span-2">
+											<div
+												class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40 md:col-span-2"
+											>
 												<div class="text-sm font-medium">保留行格式</div>
 												<Switch bind:state={RAGConfig.DATALAB_MARKER_FORMAT_LINES} />
 											</div>
 										</div>
 										<div>
-											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">输出格式</div>
+											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+												输出格式
+											</div>
 											<HaloSelect
 												bind:value={RAGConfig.DATALAB_MARKER_OUTPUT_FORMAT}
 												options={[
@@ -1413,35 +1605,65 @@
 									<div class="space-y-3">
 										<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">服务端点</div>
-												<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" placeholder="填写 Azure Document Intelligence 服务端点" bind:value={RAGConfig.DOCUMENT_INTELLIGENCE_ENDPOINT} />
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													服务端点
+												</div>
+												<input
+													class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+													placeholder="填写 Azure Document Intelligence 服务端点"
+													bind:value={RAGConfig.DOCUMENT_INTELLIGENCE_ENDPOINT}
+												/>
 											</div>
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 密钥</div>
-												<SensitiveInput placeholder="填写 Azure Document Intelligence API 密钥" bind:value={RAGConfig.DOCUMENT_INTELLIGENCE_KEY} />
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													API 密钥
+												</div>
+												<SensitiveInput
+													placeholder="填写 Azure Document Intelligence API 密钥"
+													bind:value={RAGConfig.DOCUMENT_INTELLIGENCE_KEY}
+												/>
 											</div>
 										</div>
 										<div>
-											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">模型</div>
-											<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" placeholder="prebuilt-layout" bind:value={RAGConfig.DOCUMENT_INTELLIGENCE_MODEL} />
+											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+												模型
+											</div>
+											<input
+												class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+												placeholder="prebuilt-layout"
+												bind:value={RAGConfig.DOCUMENT_INTELLIGENCE_MODEL}
+											/>
 										</div>
 									</div>
 								{:else if selectedExtractionEngine === 'mistral_ocr'}
 									<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 										<div>
-											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 基础 URL</div>
-											<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" placeholder="https://api.mistral.ai/v1" bind:value={RAGConfig.MISTRAL_OCR_API_BASE_URL} />
+											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+												API 基础 URL
+											</div>
+											<input
+												class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+												placeholder="https://api.mistral.ai/v1"
+												bind:value={RAGConfig.MISTRAL_OCR_API_BASE_URL}
+											/>
 										</div>
 										<div>
-											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 密钥</div>
-											<SensitiveInput placeholder="填写 Mistral API 密钥" bind:value={RAGConfig.MISTRAL_OCR_API_KEY} />
+											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+												API 密钥
+											</div>
+											<SensitiveInput
+												placeholder="填写 Mistral API 密钥"
+												bind:value={RAGConfig.MISTRAL_OCR_API_KEY}
+											/>
 										</div>
 									</div>
 								{:else if selectedExtractionEngine === 'mineru'}
 									<div class="space-y-3">
 										<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 模式</div>
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													API 模式
+												</div>
 												<HaloSelect
 													bind:value={RAGConfig.MINERU_API_MODE}
 													options={[
@@ -1452,66 +1674,128 @@
 													on:change={() => {
 														const cloudUrl = 'https://mineru.net/api/v4';
 														const localUrl = 'http://localhost:8000';
-														if (RAGConfig.MINERU_API_MODE === 'cloud' && (!RAGConfig.MINERU_API_URL || RAGConfig.MINERU_API_URL === localUrl)) {
+														if (
+															RAGConfig.MINERU_API_MODE === 'cloud' &&
+															(!RAGConfig.MINERU_API_URL || RAGConfig.MINERU_API_URL === localUrl)
+														) {
 															RAGConfig.MINERU_API_URL = cloudUrl;
 														}
-														if (RAGConfig.MINERU_API_MODE === 'local' && (!RAGConfig.MINERU_API_URL || RAGConfig.MINERU_API_URL === cloudUrl)) {
+														if (
+															RAGConfig.MINERU_API_MODE === 'local' &&
+															(!RAGConfig.MINERU_API_URL || RAGConfig.MINERU_API_URL === cloudUrl)
+														) {
 															RAGConfig.MINERU_API_URL = localUrl;
 														}
 													}}
 												/>
 											</div>
 											<div class="md:col-span-2">
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 地址</div>
-												<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" bind:value={RAGConfig.MINERU_API_URL} placeholder={RAGConfig.MINERU_API_MODE === 'cloud' ? 'https://mineru.net/api/v4' : 'http://localhost:8000'} />
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													API 地址
+												</div>
+												<input
+													class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+													bind:value={RAGConfig.MINERU_API_URL}
+													placeholder={RAGConfig.MINERU_API_MODE === 'cloud'
+														? 'https://mineru.net/api/v4'
+														: 'http://localhost:8000'}
+												/>
 											</div>
 										</div>
 										<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 密钥</div>
-												<SensitiveInput placeholder="填写 MinerU API 密钥" bind:value={RAGConfig.MINERU_API_KEY} />
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													API 密钥
+												</div>
+												<SensitiveInput
+													placeholder="填写 MinerU API 密钥"
+													bind:value={RAGConfig.MINERU_API_KEY}
+												/>
 											</div>
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">请求超时（秒）</div>
-												<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" type="number" min="1" bind:value={RAGConfig.MINERU_API_TIMEOUT} placeholder="300" />
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													请求超时（秒）
+												</div>
+												<input
+													class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+													type="number"
+													min="1"
+													bind:value={RAGConfig.MINERU_API_TIMEOUT}
+													placeholder="300"
+												/>
 											</div>
 										</div>
 										<div>
-											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">高级参数（JSON）</div>
-											<Textarea bind:value={RAGConfig.MINERU_PARAMS} placeholder={'{\n  "enable_ocr": false,\n  "enable_formula": true,\n  "enable_table": true,\n  "language": "en",\n  "model_version": "pipeline",\n  "page_ranges": ""\n}'} />
+											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+												高级参数（JSON）
+											</div>
+											<Textarea
+												bind:value={RAGConfig.MINERU_PARAMS}
+												placeholder={'{\n  "enable_ocr": false,\n  "enable_formula": true,\n  "enable_table": true,\n  "language": "en",\n  "model_version": "pipeline",\n  "page_ranges": ""\n}'}
+											/>
 										</div>
 									</div>
 								{:else if selectedExtractionEngine === 'open_mineru'}
 									<div>
-										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 基础 URL</div>
-										<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.open_mineru.api_base_url} />
+										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+											API 基础 URL
+										</div>
+										<input
+											class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+											bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.open_mineru.api_base_url}
+										/>
 									</div>
 								{:else if selectedExtractionEngine === 'doc2x'}
 									<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 										<div>
-											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 基础 URL</div>
-											<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.doc2x.api_base_url} />
+											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+												API 基础 URL
+											</div>
+											<input
+												class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+												bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.doc2x.api_base_url}
+											/>
 										</div>
 										<div>
-											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">API 密钥</div>
-											<SensitiveInput placeholder="填写 Doc2x API 密钥" bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.doc2x.api_key} />
+											<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+												API 密钥
+											</div>
+											<SensitiveInput
+												placeholder="填写 Doc2x API 密钥"
+												bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.doc2x.api_key}
+											/>
 										</div>
 									</div>
 								{:else if selectedExtractionEngine === 'paddleocr'}
 									<div class="space-y-3">
 										<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">OCR 接口地址</div>
-												<input class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300" placeholder="https://your-service.aistudio-hub.baidu.com/ocr" bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.paddleocr.server_url} />
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													OCR 接口地址
+												</div>
+												<input
+													class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+													placeholder="https://your-service.aistudio-hub.baidu.com/ocr"
+													bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.paddleocr.server_url}
+												/>
 												<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-													优先填写第三方 PaddleOCR OCR 完整接口地址。按官方文档，常见云端地址形态为 `https://你的服务名.aistudio-hub.baidu.com/ocr`；自建服务常见为 `http://127.0.0.1:8080/ocr`。
+													优先填写第三方 PaddleOCR OCR 完整接口地址。按官方文档，常见云端地址形态为
+													`https://你的服务名.aistudio-hub.baidu.com/ocr`；自建服务常见为
+													`http://127.0.0.1:8080/ocr`。
 												</div>
 											</div>
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">访问令牌 / API 密钥</div>
-												<SensitiveInput placeholder="第三方服务通常需要；留空表示不使用鉴权" bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.paddleocr.api_key} />
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													访问令牌 / API 密钥
+												</div>
+												<SensitiveInput
+													placeholder="第三方服务通常需要；留空表示不使用鉴权"
+													bind:value={RAGConfig.DOCUMENT_PROVIDER_CONFIGS.paddleocr.api_key}
+												/>
 												<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-													若填写裸令牌，系统默认按官方常见格式发送 `Authorization: token &lt;TOKEN&gt;`；如服务商要求其他前缀，可直接填写完整值，例如 `Bearer xxx`。
+													若填写裸令牌，系统默认按官方常见格式发送 `Authorization: token
+													&lt;TOKEN&gt;`；如服务商要求其他前缀，可直接填写完整值，例如 `Bearer
+													xxx`。
 												</div>
 											</div>
 										</div>
@@ -1539,7 +1823,9 @@
 								/>
 							</div>
 
-							<div class="mb-3 flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
+							<div
+								class="mb-3 flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40"
+							>
 								<div>
 									<div class="text-sm font-medium">Markdown 标题分割器</div>
 									<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -1551,7 +1837,9 @@
 
 							<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 								<div>
-									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">分块大小</div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+										分块大小
+									</div>
 									<input
 										class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
 										type="number"
@@ -1562,7 +1850,9 @@
 									/>
 								</div>
 								<div>
-									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">分块重叠</div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+										分块重叠
+									</div>
 									<input
 										class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
 										type="number"
@@ -1574,7 +1864,9 @@
 								</div>
 								{#if RAGConfig.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER}
 									<div>
-										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">最小块合并阈值</div>
+										<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+											最小块合并阈值
+										</div>
 										<input
 											class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
 											type="number"
@@ -1586,7 +1878,9 @@
 									</div>
 								{/if}
 								<div>
-									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">最小分块大小</div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+										最小分块大小
+									</div>
 									<input
 										class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
 										type="number"
@@ -1600,10 +1894,16 @@
 						</div>
 
 						<div class="glass-item p-5">
-							<div class="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">文件限制</div>
+							<div
+								class="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400"
+							>
+								文件限制
+							</div>
 							<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 								<div class="md:col-span-2">
-									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">允许的文件扩展名</div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+										允许的文件扩展名
+									</div>
 									<input
 										class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
 										type="text"
@@ -1613,7 +1913,9 @@
 									/>
 								</div>
 								<div>
-									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Max Upload Size')}</div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+										{$i18n.t('Max Upload Size')}
+									</div>
 									<Tooltip
 										content={$i18n.t(
 											'The maximum file size in MB. If the file size exceeds this limit, the file will not be uploaded.'
@@ -1632,7 +1934,9 @@
 								</div>
 
 								<div>
-									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Max Upload Count')}</div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+										{$i18n.t('Max Upload Count')}
+									</div>
 									<Tooltip
 										content={$i18n.t(
 											'The maximum number of files that can be used at once in chat. If the number of files exceeds this limit, the files will not be uploaded.'
@@ -1650,7 +1954,9 @@
 									</Tooltip>
 								</div>
 								<div>
-									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">图片压缩宽度</div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+										图片压缩宽度
+									</div>
 									<input
 										class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
 										type="number"
@@ -1661,7 +1967,9 @@
 									/>
 								</div>
 								<div>
-									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">图片压缩高度</div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+										图片压缩高度
+									</div>
 									<input
 										class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
 										type="number"
@@ -1675,7 +1983,11 @@
 						</div>
 
 						<div class="glass-item p-5">
-							<div class="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">云存储</div>
+							<div
+								class="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400"
+							>
+								云存储
+							</div>
 							<div class="space-y-3">
 								<div class="flex items-center justify-between gap-4">
 									<div class="text-sm font-medium">{$i18n.t('Google Drive')}</div>
@@ -1697,7 +2009,9 @@
 				>
 					<div class="space-y-3">
 						{#if RAGConfig.FILE_PROCESSING_DEFAULT_MODE !== 'retrieval'}
-							<div class="glass-item border border-amber-200/70 bg-amber-50/80 p-4 text-xs leading-6 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300">
+							<div
+								class="glass-item border border-amber-200/70 bg-amber-50/80 p-4 text-xs leading-6 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300"
+							>
 								当前默认文件处理模式不是“检索模式”。这里的嵌入设置仍会影响手动按检索模式处理的文件，以及后续重建索引时的行为，但不会作用于默认按“完整上下文”或“原生文件”保存的上传。
 							</div>
 						{/if}
@@ -1707,65 +2021,75 @@
 								<HaloSelect
 									bind:value={embeddingEngine}
 									placeholder="选择嵌入引擎"
-										options={[
-											{
-												value: '',
-												label: '默认（SentenceTransformers）',
-												disabled: !runtimeCapabilities.local_embedding_available
-											},
-											{ value: 'ollama', label: $i18n.t('Ollama') },
-											{ value: 'openai', label: $i18n.t('OpenAI') },
-											{ value: 'azure_openai', label: 'Azure OpenAI' }
-										]}
-										className="w-fit"
-										on:change={(e) => {
-											if (e.detail.value === 'ollama') {
-												embeddingModel = '';
-											} else if (e.detail.value === 'openai') {
-												embeddingModel = 'text-embedding-3-small';
-											} else if (e.detail.value === 'azure_openai') {
-												embeddingModel = 'text-embedding-3-small';
-											} else if (e.detail.value === '') {
-												embeddingModel = 'sentence-transformers/all-MiniLM-L6-v2';
-											}
-										}}
-									/>
+									options={[
+										{
+											value: '',
+											label: '默认（SentenceTransformers）',
+											disabled: !runtimeCapabilities.local_embedding_available
+										},
+										{ value: 'ollama', label: $i18n.t('Ollama') },
+										{ value: 'openai', label: $i18n.t('OpenAI') },
+										{ value: 'azure_openai', label: 'Azure OpenAI' }
+									]}
+									className="w-fit"
+									on:change={(e) => {
+										if (e.detail.value === 'ollama') {
+											embeddingModel = '';
+										} else if (e.detail.value === 'openai') {
+											embeddingModel = 'text-embedding-3-small';
+										} else if (e.detail.value === 'azure_openai') {
+											embeddingModel = 'text-embedding-3-small';
+										} else if (e.detail.value === '') {
+											embeddingModel = 'sentence-transformers/all-MiniLM-L6-v2';
+										}
+									}}
+								/>
 							</div>
 
 							{#if localEmbeddingUnavailable}
-								<div class="mt-3 rounded-xl border border-amber-200/70 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300">
+								<div
+									class="mt-3 rounded-xl border border-amber-200/70 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300"
+								>
 									{runtimeCapabilities.messages.local_embedding}
 								</div>
 							{/if}
 
 							{#if embeddingEngine === 'openai'}
-									<div class="mt-3 space-y-3 border-t border-gray-100/60 pt-3 dark:border-gray-800/40">
-										<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">API 基础 URL</div>
-											<div class="w-full sm:w-1/2">
-												<input
-													class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
-													placeholder="填写 OpenAI 兼容 API 基础 URL"
-													bind:value={OpenAIUrl}
-													required
-												/>
-											</div>
-										</div>
-										<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">API 密钥</div>
-											<div class="w-full sm:w-1/2">
-												<SensitiveInput
-													inputClassName="w-full text-sm"
-													placeholder="填写 OpenAI API 密钥"
-													bind:value={OpenAIKey}
-												/>
-											</div>
-										</div>
-								</div>
-								{:else if embeddingEngine === 'ollama'}
-									<div class="mt-3 space-y-3 border-t border-gray-100/60 pt-3 dark:border-gray-800/40">
+								<div
+									class="mt-3 space-y-3 border-t border-gray-100/60 pt-3 dark:border-gray-800/40"
+								>
 									<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">API 基础 URL</div>
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+											API 基础 URL
+										</div>
+										<div class="w-full sm:w-1/2">
+											<input
+												class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+												placeholder="填写 OpenAI 兼容 API 基础 URL"
+												bind:value={OpenAIUrl}
+												required
+											/>
+										</div>
+									</div>
+									<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">API 密钥</div>
+										<div class="w-full sm:w-1/2">
+											<SensitiveInput
+												inputClassName="w-full text-sm"
+												placeholder="填写 OpenAI API 密钥"
+												bind:value={OpenAIKey}
+											/>
+										</div>
+									</div>
+								</div>
+							{:else if embeddingEngine === 'ollama'}
+								<div
+									class="mt-3 space-y-3 border-t border-gray-100/60 pt-3 dark:border-gray-800/40"
+								>
+									<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+											API 基础 URL
+										</div>
 										<div class="w-full sm:w-1/2">
 											<input
 												class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
@@ -1785,48 +2109,54 @@
 												required={false}
 											/>
 										</div>
+									</div>
+								</div>
+							{:else if embeddingEngine === 'azure_openai'}
+								<div
+									class="mt-3 space-y-3 border-t border-gray-100/60 pt-3 dark:border-gray-800/40"
+								>
+									<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+											API 基础 URL
+										</div>
+										<div class="w-full sm:w-1/2">
+											<input
+												class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+												placeholder="https://YOUR-RESOURCE.openai.azure.com"
+												bind:value={AzureOpenAIUrl}
+												required
+											/>
 										</div>
 									</div>
-								{:else if embeddingEngine === 'azure_openai'}
-									<div class="mt-3 space-y-3 border-t border-gray-100/60 pt-3 dark:border-gray-800/40">
-										<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">API 基础 URL</div>
-											<div class="w-full sm:w-1/2">
-												<input
-													class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
-													placeholder="https://YOUR-RESOURCE.openai.azure.com"
-													bind:value={AzureOpenAIUrl}
-													required
-												/>
-											</div>
-										</div>
-										<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">API 密钥</div>
-											<div class="w-full sm:w-1/2">
-												<SensitiveInput
-													inputClassName="w-full text-sm"
-													placeholder="填写 Azure OpenAI API 密钥"
-													bind:value={AzureOpenAIKey}
-												/>
-											</div>
-										</div>
-										<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">API 版本</div>
-											<div class="w-full sm:w-1/2">
-												<input
-													class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
-													placeholder="2024-02-01"
-													bind:value={AzureOpenAIVersion}
-													required
-												/>
-											</div>
+									<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">API 密钥</div>
+										<div class="w-full sm:w-1/2">
+											<SensitiveInput
+												inputClassName="w-full text-sm"
+												placeholder="填写 Azure OpenAI API 密钥"
+												bind:value={AzureOpenAIKey}
+											/>
 										</div>
 									</div>
-								{/if}
+									<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">API 版本</div>
+										<div class="w-full sm:w-1/2">
+											<input
+												class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
+												placeholder="2024-02-01"
+												bind:value={AzureOpenAIVersion}
+												required
+											/>
+										</div>
+									</div>
+								</div>
+							{/if}
 						</div>
 
 						<div class="glass-item p-5">
-							<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">嵌入模型</div>
+							<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+								嵌入模型
+							</div>
 							{#if embeddingEngine === 'ollama'}
 								<input
 									class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
@@ -1856,9 +2186,18 @@
 											{#if updateEmbeddingModelLoading}
 												<Spinner className="size-4" />
 											{:else}
-												<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="h-4 w-4">
-													<path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
-													<path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													viewBox="0 0 16 16"
+													fill="currentColor"
+													class="h-4 w-4"
+												>
+													<path
+														d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z"
+													/>
+													<path
+														d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z"
+													/>
 												</svg>
 											{/if}
 										</button>
@@ -1870,45 +2209,53 @@
 								更换嵌入模型后，通常需要重新导入或重建全部文档索引。
 							</div>
 
-								{#if embeddingEngine === 'ollama' || embeddingEngine === 'openai' || embeddingEngine === 'azure_openai'}
-									<div class="mt-3 space-y-3 border-t border-gray-100/60 pt-3 dark:border-gray-800/40">
-										<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">嵌入批大小</div>
-											<input
-												bind:value={embeddingBatchSize}
-												type="number"
-												class="glass-input w-24 px-3 py-2 text-right text-sm dark:text-gray-300"
-												min="-2"
-												max="16000"
-												step="1"
-											/>
+							{#if embeddingEngine === 'ollama' || embeddingEngine === 'openai' || embeddingEngine === 'azure_openai'}
+								<div
+									class="mt-3 space-y-3 border-t border-gray-100/60 pt-3 dark:border-gray-800/40"
+								>
+									<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+											嵌入批大小
 										</div>
-										<div class="flex items-center justify-between gap-4">
-											<div>
-												<div class="text-xs font-medium text-gray-500 dark:text-gray-400">异步嵌入处理</div>
-												<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-													并发执行嵌入批处理以加速文档处理，如遇速率限制可关闭。
-												</div>
-											</div>
-											<Switch bind:state={enableAsyncEmbedding} />
-										</div>
-										<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-											<div>
-												<div class="text-xs font-medium text-gray-500 dark:text-gray-400">嵌入并发请求数</div>
-												<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-													限制并发嵌入请求数，`0` 表示不限制。
-												</div>
-											</div>
-											<input
-												bind:value={embeddingConcurrentRequests}
-												type="number"
-												class="glass-input w-24 px-3 py-2 text-right text-sm dark:text-gray-300"
-												min="0"
-												step="1"
-											/>
-										</div>
+										<input
+											bind:value={embeddingBatchSize}
+											type="number"
+											class="glass-input w-24 px-3 py-2 text-right text-sm dark:text-gray-300"
+											min="-2"
+											max="16000"
+											step="1"
+										/>
 									</div>
-								{/if}
+									<div class="flex items-center justify-between gap-4">
+										<div>
+											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+												异步嵌入处理
+											</div>
+											<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+												并发执行嵌入批处理以加速文档处理，如遇速率限制可关闭。
+											</div>
+										</div>
+										<Switch bind:state={enableAsyncEmbedding} />
+									</div>
+									<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+										<div>
+											<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+												嵌入并发请求数
+											</div>
+											<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+												限制并发嵌入请求数，`0` 表示不限制。
+											</div>
+										</div>
+										<input
+											bind:value={embeddingConcurrentRequests}
+											type="number"
+											class="glass-input w-24 px-3 py-2 text-right text-sm dark:text-gray-300"
+											min="0"
+											step="1"
+										/>
+									</div>
+								</div>
+							{/if}
 						</div>
 					</div>
 				</section>
@@ -1920,7 +2267,9 @@
 				>
 					<div class="space-y-3">
 						{#if RAGConfig.FILE_PROCESSING_DEFAULT_MODE !== 'retrieval'}
-							<div class="glass-item border border-sky-200/70 bg-sky-50/80 p-4 text-xs leading-6 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/20 dark:text-sky-300">
+							<div
+								class="glass-item border border-sky-200/70 bg-sky-50/80 p-4 text-xs leading-6 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/20 dark:text-sky-300"
+							>
 								当前默认文件处理模式不是“检索模式”。这里的召回、混合搜索和重排设置主要影响已建立索引的知识库内容，以及后续改为检索模式处理的文件。
 							</div>
 						{/if}
@@ -1949,21 +2298,23 @@
 										<Switch bind:state={RAGConfig.ENABLE_RAG_HYBRID_SEARCH} />
 									</div>
 
-										{#if RAGConfig.ENABLE_RAG_HYBRID_SEARCH === true}
-											<div class="space-y-4 border-t border-gray-100/60 pt-4 dark:border-gray-800/40">
-												<div class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40">
-													<div>
-														<div class="text-sm font-medium">BM25 富化文本</div>
-														<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-															把文件名、标题、标题层级和摘要拼入 BM25 文本，提升词法召回率。
-														</div>
-													</div>
-													<Switch bind:state={RAGConfig.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS} />
-												</div>
+									{#if RAGConfig.ENABLE_RAG_HYBRID_SEARCH === true}
+										<div class="space-y-4 border-t border-gray-100/60 pt-4 dark:border-gray-800/40">
+											<div
+												class="flex items-center justify-between gap-4 rounded-2xl border border-gray-200/70 bg-white/60 px-4 py-3 dark:border-gray-700/70 dark:bg-gray-900/40"
+											>
 												<div>
-													<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-														重排序引擎
+													<div class="text-sm font-medium">BM25 富化文本</div>
+													<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+														把文件名、标题、标题层级和摘要拼入 BM25 文本，提升词法召回率。
 													</div>
+												</div>
+												<Switch bind:state={RAGConfig.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS} />
+											</div>
+											<div>
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													重排序引擎
+												</div>
 												<select
 													class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
 													bind:value={rerankingEngine}
@@ -1978,7 +2329,9 @@
 											{#if ['jina', 'external'].includes(rerankingEngine)}
 												<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 													<div>
-														<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+														<div
+															class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400"
+														>
 															API 基础 URL
 														</div>
 														<input
@@ -1988,7 +2341,9 @@
 														/>
 													</div>
 													<div>
-														<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+														<div
+															class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400"
+														>
 															API 密钥
 														</div>
 														<SensitiveInput
@@ -2023,15 +2378,26 @@
 														{#if updateRerankingModelLoading}
 															<Spinner className="size-4" />
 														{:else}
-															<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="h-4 w-4">
-																<path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
-																<path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
+															<svg
+																xmlns="http://www.w3.org/2000/svg"
+																viewBox="0 0 16 16"
+																fill="currentColor"
+																class="h-4 w-4"
+															>
+																<path
+																	d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z"
+																/>
+																<path
+																	d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z"
+																/>
 															</svg>
 														{/if}
 													</button>
 												</div>
 												{#if localRerankingUnavailable}
-													<div class="mt-2 rounded-xl border border-amber-200/70 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300">
+													<div
+														class="mt-2 rounded-xl border border-amber-200/70 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300"
+													>
 														{getLocalRerankingMessage()}
 													</div>
 												{/if}
@@ -2042,7 +2408,9 @@
 									<div class="border-t border-gray-100/60 pt-4 dark:border-gray-800/40">
 										<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 											<div>
-												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Top K')}</div>
+												<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+													{$i18n.t('Top K')}
+												</div>
 												<input
 													class="glass-input w-full px-3 py-2 text-sm dark:text-gray-300"
 													type="number"
@@ -2070,54 +2438,59 @@
 										</div>
 									</div>
 
-										{#if RAGConfig.ENABLE_RAG_HYBRID_SEARCH === true}
-											<div class="space-y-4 border-t border-gray-100/60 pt-4 dark:border-gray-800/40">
-												<div>
-													<div class="mb-1.5 flex items-center justify-between">
-														<div class="text-xs font-medium text-gray-500 dark:text-gray-400">BM25 权重</div>
-														<button
-															class="rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-gray-600 transition hover:border-gray-300 hover:text-gray-900 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:text-white"
-															type="button"
-															on:click={() => {
-																isBm25WeightCustom = !isBm25WeightCustom;
-																if (!isBm25WeightCustom) {
-																	RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT = 0.5;
-																} else if (RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT === null || RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT === undefined) {
-																	RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT = 0.5;
-																}
-															}}
-														>
-															{isBm25WeightCustom ? '自定义' : '默认'}
-														</button>
+									{#if RAGConfig.ENABLE_RAG_HYBRID_SEARCH === true}
+										<div class="space-y-4 border-t border-gray-100/60 pt-4 dark:border-gray-800/40">
+											<div>
+												<div class="mb-1.5 flex items-center justify-between">
+													<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+														BM25 权重
 													</div>
-													{#if isBm25WeightCustom}
-														<div class="space-y-2">
-															<div class="flex items-center justify-between text-xs text-gray-400">
-																<span>语义</span>
-																<span>{RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT ?? 0.5}</span>
-																<span>词法</span>
-															</div>
-															<input
-																class="w-full"
-																type="range"
-																step="0.05"
-																min="0"
-																max="1"
-																bind:value={RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT}
-															/>
-															<input
-																class="glass-input w-28 px-3 py-2 text-right text-sm dark:text-gray-300"
-																type="number"
-																step="0.01"
-																min="0"
-																max="1"
-																bind:value={RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT}
-															/>
+													<button
+														class="rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-gray-600 transition hover:border-gray-300 hover:text-gray-900 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:text-white"
+														type="button"
+														on:click={() => {
+															isBm25WeightCustom = !isBm25WeightCustom;
+															if (!isBm25WeightCustom) {
+																RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT = 0.5;
+															} else if (
+																RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT === null ||
+																RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT === undefined
+															) {
+																RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT = 0.5;
+															}
+														}}
+													>
+														{isBm25WeightCustom ? '自定义' : '默认'}
+													</button>
+												</div>
+												{#if isBm25WeightCustom}
+													<div class="space-y-2">
+														<div class="flex items-center justify-between text-xs text-gray-400">
+															<span>语义</span>
+															<span>{RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT ?? 0.5}</span>
+															<span>词法</span>
 														</div>
-													{/if}
-													<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-														{$i18n.t(
-															'Balance between keyword (BM25) and semantic (vector) search. 0 = pure vector, 1 = pure keyword.'
+														<input
+															class="w-full"
+															type="range"
+															step="0.05"
+															min="0"
+															max="1"
+															bind:value={RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT}
+														/>
+														<input
+															class="glass-input w-28 px-3 py-2 text-right text-sm dark:text-gray-300"
+															type="number"
+															step="0.01"
+															min="0"
+															max="1"
+															bind:value={RAGConfig.RAG_HYBRID_SEARCH_BM25_WEIGHT}
+														/>
+													</div>
+												{/if}
+												<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+													{$i18n.t(
+														'Balance between keyword (BM25) and semantic (vector) search. 0 = pure vector, 1 = pure keyword.'
 													)}
 												</div>
 											</div>
@@ -2165,7 +2538,9 @@
 								</div>
 
 								<div class="border-t border-gray-100/60 pt-4 dark:border-gray-800/40">
-									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">RAG 提示模板</div>
+									<div class="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+										RAG 提示模板
+									</div>
 									<Tooltip
 										content="留空时使用默认提示词，也可以在这里填写自定义模板。"
 										placement="top-start"
@@ -2182,18 +2557,39 @@
 					</div>
 				</section>
 			{:else if selectedTab === 'danger'}
-				<section class="p-5 space-y-3 transition-all duration-300 glass-section border-red-200/60 dark:border-red-800/40">
-					<div class="glass-item border border-red-100/70 bg-red-50/70 p-5 dark:border-red-900/40 dark:bg-red-950/20">
+				<section
+					class="p-5 space-y-3 transition-all duration-300 glass-section border-red-200/60 dark:border-red-800/40"
+				>
+					<div
+						class="glass-item border border-red-100/70 bg-red-50/70 p-5 dark:border-red-900/40 dark:bg-red-950/20"
+					>
 						<div class="flex items-start gap-3">
-							<div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400">
-								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="size-4">
-									<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+							<div
+								class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400"
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									fill="none"
+									viewBox="0 0 24 24"
+									stroke-width="1.8"
+									stroke="currentColor"
+									class="size-4"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+									/>
 								</svg>
 							</div>
 							<div class="min-w-0">
-								<div class="text-sm font-medium text-red-700 dark:text-red-300">{$i18n.t('Danger Zone')}</div>
+								<div class="text-sm font-medium text-red-700 dark:text-red-300">
+									{$i18n.t('Danger Zone')}
+								</div>
 								<p class="mt-1 text-xs leading-5 text-red-600/85 dark:text-red-300/80">
-									{$i18n.t('These actions affect uploaded files, vector storage, and knowledge indexing. Please confirm carefully before proceeding.')}
+									{$i18n.t(
+										'These actions affect uploaded files, vector storage, and knowledge indexing. Please confirm carefully before proceeding.'
+									)}
 								</p>
 							</div>
 						</div>
@@ -2224,7 +2620,9 @@
 							<div class="min-w-0">
 								<div class="text-sm font-medium">{$i18n.t('Reset Vector Storage/Knowledge')}</div>
 								<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-									{$i18n.t('Clear vector storage and remove indexed knowledge data for all documents.')}
+									{$i18n.t(
+										'Clear vector storage and remove indexed knowledge data for all documents.'
+									)}
 								</p>
 							</div>
 							<button
@@ -2244,7 +2642,9 @@
 							<div class="min-w-0">
 								<div class="text-sm font-medium">{$i18n.t('Reindex Knowledge Base Vectors')}</div>
 								<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-									{$i18n.t('Rebuild the vector index for existing knowledge files after model or retrieval changes.')}
+									{$i18n.t(
+										'Rebuild the vector index for existing knowledge files after model or retrieval changes.'
+									)}
 								</p>
 							</div>
 							<button

@@ -35,7 +35,6 @@ from open_webui.utils.user_connections import maybe_migrate_user_connections
 from open_webui.utils.user_tools import maybe_migrate_user_tool_settings
 from open_webui.utils.access_control import get_permissions
 
-
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
@@ -57,6 +56,7 @@ def _get_ui_connections(settings_like: Any) -> dict:
 
     ui = _as_dict(settings_dict.get("ui"))
     return _as_dict(ui.get("connections"))
+
 
 ############################
 # GetUsers
@@ -115,14 +115,16 @@ async def export_users_csv(user=Depends(get_admin_user)):
     writer = csv.writer(buf)
     writer.writerow(["id", "name", "email", "role", "created_at", "last_active_at"])
     for u in all_users:
-        writer.writerow([
-            u.id,
-            u.name,
-            u.email,
-            u.role,
-            u.created_at,
-            u.last_active_at,
-        ])
+        writer.writerow(
+            [
+                u.id,
+                u.name,
+                u.email,
+                u.role,
+                u.created_at,
+                u.last_active_at,
+            ]
+        )
 
     buf.seek(0)
     return StreamingResponse(
@@ -248,7 +250,9 @@ async def update_user_role(form_data: UserRoleUpdateForm, user=Depends(get_admin
 
 
 @router.get("/user/settings", response_model=Optional[UserSettings])
-async def get_user_settings_by_session_user(request: Request, user=Depends(get_verified_user)):
+async def get_user_settings_by_session_user(
+    request: Request, user=Depends(get_verified_user)
+):
     user = Users.get_user_by_id(user.id)
     if user:
         user = maybe_migrate_user_connections(request, user)
@@ -292,9 +296,9 @@ async def update_user_settings_by_session_user(
         return existing_user.settings or UserSettings()
 
     next_settings_dict = _deep_merge_dict(existing_settings_dict, patch_payload)
-    connections_changed = _get_ui_connections(existing_settings_dict) != _get_ui_connections(
-        next_settings_dict
-    )
+    connections_changed = _get_ui_connections(
+        existing_settings_dict
+    ) != _get_ui_connections(next_settings_dict)
 
     try:
         user = Users.patch_user_settings_by_id(

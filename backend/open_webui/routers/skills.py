@@ -3,7 +3,16 @@ import logging
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
 
 from open_webui.constants import ERROR_MESSAGES
@@ -197,7 +206,11 @@ def _hostname(url: str) -> str:
 
 
 def _prompt_skill_source(skill: SkillModel) -> str:
-    return "imported" if (skill.source or "manual") in {"url", "github", "zip"} else "custom"
+    return (
+        "imported"
+        if (skill.source or "manual") in {"url", "github", "zip"}
+        else "custom"
+    )
 
 
 def _prompt_skill_badge(skill: SkillModel) -> str:
@@ -264,10 +277,7 @@ async def _build_tool_server_items(request: Request, user) -> list[SkillCatalogI
                 description = str(result)
             elif isinstance(result, dict):
                 status_value = "connected"
-                description = (
-                    result.get("info", {}).get("description")
-                    or description
-                )
+                description = result.get("info", {}).get("description") or description
 
         items.append(
             SkillCatalogItem(
@@ -310,9 +320,8 @@ async def _build_mcp_server_items(request: Request, user) -> list[SkillCatalogIt
             status_value = "connected"
             version = server_info.get("version")
             if verified_at:
-                description = (
-                    f"MCP server with {tool_count} tools"
-                    + (f" (v{version})" if version else "")
+                description = f"MCP server with {tool_count} tools" + (
+                    f" (v{version})" if version else ""
                 )
             else:
                 description = "MCP server needs verification."
@@ -429,7 +438,9 @@ def _build_prompt_skill_items(skills: list[SkillModel]) -> list[SkillCatalogItem
     return items
 
 
-async def _upsert_imported_skill(user, payload: ImportedSkillPayload) -> SkillImportResult:
+async def _upsert_imported_skill(
+    user, payload: ImportedSkillPayload
+) -> SkillImportResult:
     existing = Skills.get_skill_by_identifier_and_user_id(user.id, payload.identifier)
 
     if existing:
@@ -545,14 +556,23 @@ async def get_skill_catalog(request: Request, user=Depends(get_verified_user)):
     prompt_skill_items = _build_prompt_skill_items(visible_skills)
 
     return (
-        sorted(builtin_items, key=lambda item: (item.status != "enabled", item.title.lower()))
+        sorted(
+            builtin_items,
+            key=lambda item: (item.status != "enabled", item.title.lower()),
+        )
         + sorted(
             tool_server_items,
-            key=lambda item: (item.status not in {"connected", "enabled"}, item.title.lower()),
+            key=lambda item: (
+                item.status not in {"connected", "enabled"},
+                item.title.lower(),
+            ),
         )
         + sorted(
             mcp_server_items,
-            key=lambda item: (item.status not in {"connected", "enabled"}, item.title.lower()),
+            key=lambda item: (
+                item.status not in {"connected", "enabled"},
+                item.title.lower(),
+            ),
         )
         + sorted(workspace_tool_items, key=lambda item: item.title.lower())
         + sorted(prompt_skill_items, key=lambda item: item.title.lower())
@@ -676,9 +696,7 @@ async def import_skill_from_zip_route(
 async def get_skill_by_id(skill_id: str, user=Depends(get_verified_user)):
     skill = Skills.get_skill_by_id(skill_id)
     if not skill:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
-        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     if not can_read_resource(user, skill):
         raise HTTPException(
@@ -702,9 +720,7 @@ async def update_skill_by_id(
 ):
     skill = Skills.get_skill_by_id(skill_id)
     if not skill:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
-        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     if not can_write_resource(user, skill):
         raise HTTPException(
@@ -740,9 +756,7 @@ async def update_skill_by_id(
 async def delete_skill_by_id(skill_id: str, user=Depends(get_verified_user)):
     skill = Skills.get_skill_by_id(skill_id)
     if not skill:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
-        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     if not can_write_resource(user, skill):
         raise HTTPException(

@@ -201,7 +201,10 @@ def ensure_runtime_migrated() -> Optional[DetectionResult]:
 
 
 def migrate_auto(
-    *, dry_run: bool = False, backup_only: bool = False, force_family: Optional[str] = None
+    *,
+    dry_run: bool = False,
+    backup_only: bool = False,
+    force_family: Optional[str] = None,
 ) -> dict[str, Any]:
     with _locked_connection() as (_engine, conn, url):
         detection = _detect_database(conn, url)
@@ -317,7 +320,9 @@ def _locked_connection():
         return
 
     with engine.connect() as conn:
-        conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": PG_ADVISORY_LOCK_KEY})
+        conn.execute(
+            text("SELECT pg_advisory_lock(:key)"), {"key": PG_ADVISORY_LOCK_KEY}
+        )
         try:
             yield engine, conn, url
         finally:
@@ -454,9 +459,7 @@ def _verify_family(conn: Connection, family: str, tables: set[str]) -> bool:
     return False
 
 
-def _format_unknown_database_error(
-    revision: Optional[str], backend: str
-) -> str:
+def _format_unknown_database_error(revision: Optional[str], backend: str) -> str:
     revision_text = revision or "None"
     return (
         "检测到未知数据库形态，已阻止启动以避免误迁移。"
@@ -540,7 +543,11 @@ def _choose_pg_dump_binary_path(
             if major > server_major:
                 return versioned_binaries[major], major
 
-        if fallback_binary and fallback_major is not None and fallback_major >= server_major:
+        if (
+            fallback_binary
+            and fallback_major is not None
+            and fallback_major >= server_major
+        ):
             return fallback_binary, fallback_major
 
         compatible_majors = sorted(
@@ -606,8 +613,8 @@ def _backup_database(conn: Connection, url: URL, detection: DetectionResult) -> 
         return backup_path
 
     backup_path = HALO_BACKUP_DIR / f"{timestamp}-{family_slug}.dump"
-    pg_dump_binary, server_major, selected_major, available_majors = _select_pg_dump_binary(
-        conn
+    pg_dump_binary, server_major, selected_major, available_majors = (
+        _select_pg_dump_binary(conn)
     )
     cmd = [
         pg_dump_binary,
@@ -656,12 +663,16 @@ def _ensure_no_incomplete_state(conn: Connection) -> None:
     tables = set(inspect(conn).get_table_names())
     if HALO_STATE_TABLE not in tables:
         return
-    row = conn.execute(
-        text(
-            f'SELECT status, backup_path FROM "{HALO_STATE_TABLE}" '
-            "ORDER BY started_at DESC LIMIT 1"
+    row = (
+        conn.execute(
+            text(
+                f'SELECT status, backup_path FROM "{HALO_STATE_TABLE}" '
+                "ORDER BY started_at DESC LIMIT 1"
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     if row and row["status"] != "completed":
         raise RuntimeMigrationError(
             "检测到上次迁移未完成，已阻止继续启动。"
@@ -673,9 +684,7 @@ def _ensure_state_table(conn: Connection) -> None:
     tables = set(inspect(conn).get_table_names())
     if HALO_STATE_TABLE in tables:
         return
-    conn.execute(
-        text(
-            f"""
+    conn.execute(text(f"""
             CREATE TABLE "{HALO_STATE_TABLE}" (
                 id TEXT PRIMARY KEY,
                 source_family TEXT NOT NULL,
@@ -687,9 +696,7 @@ def _ensure_state_table(conn: Connection) -> None:
                 started_at BIGINT NOT NULL,
                 updated_at BIGINT NOT NULL
             )
-            """
-        )
-    )
+            """))
 
 
 def _write_state(
@@ -705,14 +712,12 @@ def _write_state(
     _ensure_state_table(conn)
     now = _now()
     conn.execute(
-        text(
-            f"""
+        text(f"""
             INSERT INTO "{HALO_STATE_TABLE}"
             (id, source_family, source_revision, target_revision, status, backup_path, details, started_at, updated_at)
             VALUES
             (:id, :source_family, :source_revision, :target_revision, :status, :backup_path, :details, :started_at, :updated_at)
-            """
-        ),
+            """),
         {
             "id": str(uuid.uuid4()),
             "source_family": source_family,
@@ -786,7 +791,9 @@ def _ensure_group_user_ids(conn: Connection, backend: str) -> None:
             for user_id in current:
                 if user_id not in user_ids:
                     user_ids.append(user_id)
-        _update_json_column_by_id(conn, backend, "group", "user_ids", group_id, user_ids)
+        _update_json_column_by_id(
+            conn, backend, "group", "user_ids", group_id, user_ids
+        )
         if group.get("updated_at") is None and group.get("created_at") is not None:
             conn.execute(
                 text('UPDATE "group" SET updated_at = :updated_at WHERE id = :id'),
@@ -857,9 +864,7 @@ def _ensure_prompt_legacy_and_v2_columns(
     _ensure_column(conn, "prompt", "access_control", "JSON")
 
     rows = conn.execute(text('SELECT * FROM "prompt"')).mappings()
-    access_map = (
-        _build_access_control_map(conn) if source_has_access_grants else {}
-    )
+    access_map = _build_access_control_map(conn) if source_has_access_grants else {}
     for row in rows:
         prompt_id = row.get("id") or str(uuid.uuid4())
         created_at = row.get("created_at") or row.get("timestamp") or _now()
@@ -879,7 +884,7 @@ def _ensure_prompt_legacy_and_v2_columns(
                 "updated_at = COALESCE(updated_at, :updated_at), "
                 "timestamp = COALESCE(timestamp, :timestamp), "
                 "is_active = COALESCE(is_active, :is_active) "
-                'WHERE command = :command'
+                "WHERE command = :command"
             ),
             {
                 "name": name,
@@ -893,7 +898,11 @@ def _ensure_prompt_legacy_and_v2_columns(
         )
         if source_has_access_grants:
             access = access_map.get(
-                ("prompt", prompt_id), {"read": {"group_ids": [], "user_ids": []}, "write": {"group_ids": [], "user_ids": []}}
+                ("prompt", prompt_id),
+                {
+                    "read": {"group_ids": [], "user_ids": []},
+                    "write": {"group_ids": [], "user_ids": []},
+                },
             )
             _update_json_column_by_id(
                 conn,
@@ -926,7 +935,10 @@ def _ensure_note_columns(
         if source_has_access_grants:
             access = access_map.get(
                 ("note", note_id),
-                {"read": {"group_ids": [], "user_ids": []}, "write": {"group_ids": [], "user_ids": []}},
+                {
+                    "read": {"group_ids": [], "user_ids": []},
+                    "write": {"group_ids": [], "user_ids": []},
+                },
             )
             _update_json_column_by_id(
                 conn, backend, "note", "access_control", note_id, access
@@ -969,7 +981,9 @@ def _ensure_knowledge_columns(
                 if file_id not in current_ids:
                     current_ids.append(file_id)
             data["file_ids"] = current_ids
-        _update_json_column_by_id(conn, backend, "knowledge", "data", knowledge_id, data)
+        _update_json_column_by_id(
+            conn, backend, "knowledge", "data", knowledge_id, data
+        )
 
         created_at = row.get("created_at") or _now()
         if row.get("updated_at") is None:
@@ -981,7 +995,10 @@ def _ensure_knowledge_columns(
         if source_has_access_grants:
             access = access_map.get(
                 ("knowledge", knowledge_id),
-                {"read": {"group_ids": [], "user_ids": []}, "write": {"group_ids": [], "user_ids": []}},
+                {
+                    "read": {"group_ids": [], "user_ids": []},
+                    "write": {"group_ids": [], "user_ids": []},
+                },
             )
             _update_json_column_by_id(
                 conn, backend, "knowledge", "access_control", knowledge_id, access
@@ -1006,7 +1023,9 @@ def _ensure_folder_system_prompt(conn: Connection) -> None:
             )
         if system_prompt:
             conn.execute(
-                text('UPDATE "folder" SET system_prompt = :system_prompt WHERE id = :id'),
+                text(
+                    'UPDATE "folder" SET system_prompt = :system_prompt WHERE id = :id'
+                ),
                 {"system_prompt": str(system_prompt), "id": row["id"]},
             )
 
@@ -1038,7 +1057,10 @@ def _ensure_access_control_columns(
             resource_id = str(row["id"])
             access = access_map.get(
                 (table_name, resource_id),
-                {"read": {"group_ids": [], "user_ids": []}, "write": {"group_ids": [], "user_ids": []}},
+                {
+                    "read": {"group_ids": [], "user_ids": []},
+                    "write": {"group_ids": [], "user_ids": []},
+                },
             )
             _update_json_column_by_id(
                 conn, backend, table_name, "access_control", resource_id, access
@@ -1049,9 +1071,7 @@ def _ensure_skill_table(
     conn: Connection, backend: str, *, source_has_access_grants: bool
 ) -> None:
     if not _table_exists(conn, "skill"):
-        conn.execute(
-            text(
-                """
+        conn.execute(text("""
                 CREATE TABLE "skill" (
                     id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
@@ -1067,11 +1087,11 @@ def _ensure_skill_table(
                     updated_at BIGINT NOT NULL,
                     created_at BIGINT NOT NULL
                 )
-                """
-            )
-        )
+                """))
         conn.execute(
-            text('CREATE INDEX IF NOT EXISTS "ix_skill_identifier" ON "skill" ("identifier")')
+            text(
+                'CREATE INDEX IF NOT EXISTS "ix_skill_identifier" ON "skill" ("identifier")'
+            )
         )
         return
 
@@ -1087,7 +1107,10 @@ def _ensure_skill_table(
         skill_id = str(row["id"])
         access = access_map.get(
             ("skill", skill_id),
-            {"read": {"group_ids": [], "user_ids": []}, "write": {"group_ids": [], "user_ids": []}},
+            {
+                "read": {"group_ids": [], "user_ids": []},
+                "write": {"group_ids": [], "user_ids": []},
+            },
         )
         _update_json_column_by_id(
             conn, backend, "skill", "access_control", skill_id, access
@@ -1101,9 +1124,7 @@ def _rebuild_chat_message_table(
     if _table_exists(conn, temp_table):
         conn.execute(text(f'DROP TABLE "{temp_table}"'))
 
-    conn.execute(
-        text(
-            f"""
+    conn.execute(text(f"""
             CREATE TABLE "{temp_table}" (
                 id TEXT PRIMARY KEY,
                 chat_id TEXT NOT NULL,
@@ -1118,9 +1139,7 @@ def _rebuild_chat_message_table(
                 created_at BIGINT NOT NULL,
                 updated_at BIGINT NOT NULL
             )
-            """
-        )
-    )
+            """))
     conn.execute(
         text(
             f'CREATE INDEX IF NOT EXISTS "ix_{temp_table}_chat_id" ON "{temp_table}" ("chat_id")'
@@ -1176,14 +1195,12 @@ def _copy_chat_messages_from_source(
         meta = _merge_meta(meta, legacy_meta)
         user_id = row.get("user_id") or chat_owner_map.get(str(row["chat_id"])) or ""
         conn.execute(
-            text(
-                f"""
+            text(f"""
                 INSERT INTO "{temp_table}"
                 (id, chat_id, user_id, role, content, parent_id, model, prompt_tokens, completion_tokens, meta, created_at, updated_at)
                 VALUES
                 (:id, :chat_id, :user_id, :role, :content, :parent_id, :model, :prompt_tokens, :completion_tokens, { _json_bind_expr('meta_json', backend) }, :created_at, :updated_at)
-                """
-            ),
+                """),
             {
                 "id": str(row["id"]),
                 "chat_id": str(row["chat_id"]),
@@ -1196,7 +1213,9 @@ def _copy_chat_messages_from_source(
                 "completion_tokens": completion_tokens,
                 "meta_json": _json_dump(meta),
                 "created_at": int(row.get("created_at") or _now()),
-                "updated_at": int(row.get("updated_at") or row.get("created_at") or _now()),
+                "updated_at": int(
+                    row.get("updated_at") or row.get("created_at") or _now()
+                ),
             },
         )
 
@@ -1244,14 +1263,12 @@ def _backfill_chat_messages_from_chat_blob(
             meta = _merge_meta(meta, legacy_meta)
             created_at = message.get("timestamp") or chat_created_at
             conn.execute(
-                text(
-                    f"""
+                text(f"""
                     INSERT INTO "{temp_table}"
                     (id, chat_id, user_id, role, content, parent_id, model, prompt_tokens, completion_tokens, meta, created_at, updated_at)
                     VALUES
                     (:id, :chat_id, :user_id, :role, :content, :parent_id, :model, :prompt_tokens, :completion_tokens, { _json_bind_expr('meta_json', backend) }, :created_at, :updated_at)
-                    """
-                ),
+                    """),
                 {
                     "id": row_id,
                     "chat_id": chat_id,
@@ -1271,9 +1288,7 @@ def _backfill_chat_messages_from_chat_blob(
 
 def _ensure_halo_extra_tables(conn: Connection, backend: str) -> None:
     if not _table_exists(conn, "chat_reaction"):
-        conn.execute(
-            text(
-                """
+        conn.execute(text("""
                 CREATE TABLE "chat_reaction" (
                     id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
@@ -1282,9 +1297,7 @@ def _ensure_halo_extra_tables(conn: Connection, backend: str) -> None:
                     name TEXT NOT NULL,
                     created_at BIGINT NOT NULL
                 )
-                """
-            )
-        )
+                """))
         conn.execute(
             text(
                 'CREATE INDEX IF NOT EXISTS "ix_chat_reaction_chat_message" '
@@ -1293,9 +1306,7 @@ def _ensure_halo_extra_tables(conn: Connection, backend: str) -> None:
         )
 
     if not _table_exists(conn, "haloclaw_gateway"):
-        conn.execute(
-            text(
-                """
+        conn.execute(text("""
                 CREATE TABLE "haloclaw_gateway" (
                     id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
@@ -1310,14 +1321,10 @@ def _ensure_halo_extra_tables(conn: Connection, backend: str) -> None:
                     created_at BIGINT NOT NULL,
                     updated_at BIGINT NOT NULL
                 )
-                """
-            )
-        )
+                """))
 
     if not _table_exists(conn, "haloclaw_external_user"):
-        conn.execute(
-            text(
-                """
+        conn.execute(text("""
                 CREATE TABLE "haloclaw_external_user" (
                     id TEXT PRIMARY KEY,
                     gateway_id TEXT NOT NULL,
@@ -1332,9 +1339,7 @@ def _ensure_halo_extra_tables(conn: Connection, backend: str) -> None:
                     created_at BIGINT NOT NULL,
                     updated_at BIGINT NOT NULL
                 )
-                """
-            )
-        )
+                """))
         conn.execute(
             text(
                 'CREATE UNIQUE INDEX IF NOT EXISTS "ix_haloclaw_ext_user_lookup" '
@@ -1343,9 +1348,7 @@ def _ensure_halo_extra_tables(conn: Connection, backend: str) -> None:
         )
 
     if not _table_exists(conn, "haloclaw_message_log"):
-        conn.execute(
-            text(
-                """
+        conn.execute(text("""
                 CREATE TABLE "haloclaw_message_log" (
                     id TEXT PRIMARY KEY,
                     gateway_id TEXT NOT NULL,
@@ -1361,9 +1364,7 @@ def _ensure_halo_extra_tables(conn: Connection, backend: str) -> None:
                     meta TEXT NULL,
                     created_at BIGINT NOT NULL
                 )
-                """
-            )
-        )
+                """))
         conn.execute(
             text(
                 'CREATE INDEX IF NOT EXISTS "ix_haloclaw_msg_log_chat" '
@@ -1372,13 +1373,15 @@ def _ensure_halo_extra_tables(conn: Connection, backend: str) -> None:
         )
 
 
-def _build_access_control_map(conn: Connection) -> dict[tuple[str, str], dict[str, Any]]:
+def _build_access_control_map(
+    conn: Connection,
+) -> dict[tuple[str, str], dict[str, Any]]:
     if not _table_exists(conn, "access_grant"):
         return {}
 
     rows = conn.execute(
         text(
-            'SELECT resource_type, resource_id, principal_type, principal_id, permission '
+            "SELECT resource_type, resource_id, principal_type, principal_id, permission "
             'FROM "access_grant"'
         )
     ).mappings()
@@ -1387,7 +1390,10 @@ def _build_access_control_map(conn: Connection) -> dict[tuple[str, str], dict[st
         key = (str(row["resource_type"]), str(row["resource_id"]))
         grouped.setdefault(
             key,
-            {"read": {"group_ids": [], "user_ids": []}, "write": {"group_ids": [], "user_ids": []}},
+            {
+                "read": {"group_ids": [], "user_ids": []},
+                "write": {"group_ids": [], "user_ids": []},
+            },
         )
         permission = str(row["permission"])
         if permission not in ("read", "write"):
@@ -1405,23 +1411,17 @@ def _build_access_control_map(conn: Connection) -> dict[tuple[str, str], dict[st
 
 def _seed_migratehistory(conn: Connection) -> None:
     if not _table_exists(conn, "migratehistory"):
-        conn.execute(
-            text(
-                """
+        conn.execute(text("""
                 CREATE TABLE "migratehistory" (
                     id INTEGER PRIMARY KEY,
                     name VARCHAR(255) NOT NULL,
                     migrated_at DATETIME NOT NULL
                 )
-                """
-            )
-        )
+                """))
 
     existing = {
         row["name"]
-        for row in conn.execute(
-            text('SELECT name FROM "migratehistory"')
-        ).mappings()
+        for row in conn.execute(text('SELECT name FROM "migratehistory"')).mappings()
     }
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     for index, migration_name in enumerate(HALO_PEEWEE_MIGRATIONS, start=1):
@@ -1438,15 +1438,11 @@ def _seed_migratehistory(conn: Connection) -> None:
 
 def _stamp_halo_head(conn: Connection) -> None:
     if not _table_exists(conn, "alembic_version"):
-        conn.execute(
-            text(
-                """
+        conn.execute(text("""
                 CREATE TABLE "alembic_version" (
                     version_num VARCHAR(32) NOT NULL PRIMARY KEY
                 )
-                """
-            )
-        )
+                """))
         conn.execute(
             text('INSERT INTO "alembic_version" (version_num) VALUES (:version_num)'),
             {"version_num": HALO_TARGET_HEAD},
@@ -1472,9 +1468,11 @@ def _migratehistory_complete(conn: Connection) -> bool:
 
 
 def _get_alembic_revision(conn: Connection) -> Optional[str]:
-    row = conn.execute(
-        text('SELECT version_num FROM "alembic_version" LIMIT 1')
-    ).mappings().first()
+    row = (
+        conn.execute(text('SELECT version_num FROM "alembic_version" LIMIT 1'))
+        .mappings()
+        .first()
+    )
     return str(row["version_num"]) if row and row.get("version_num") else None
 
 
@@ -1499,9 +1497,7 @@ def _ensure_column(
     if _column_exists(conn, table_name, column_name):
         return
     conn.execute(
-        text(
-            f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_sql}'
-        )
+        text(f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_sql}')
     )
 
 
@@ -1515,9 +1511,7 @@ def _update_json_column_by_id(
 ) -> None:
     if value is None:
         conn.execute(
-            text(
-                f'UPDATE "{table_name}" SET "{column_name}" = NULL WHERE id = :id'
-            ),
+            text(f'UPDATE "{table_name}" SET "{column_name}" = NULL WHERE id = :id'),
             {"id": row_id},
         )
         return
@@ -1535,9 +1529,7 @@ def _json_placeholder(backend: str) -> str:
 
 def _json_bind_expr(param_name: str, backend: str) -> str:
     return (
-        f"CAST(:{param_name} AS JSON)"
-        if backend == "postgresql"
-        else f":{param_name}"
+        f"CAST(:{param_name} AS JSON)" if backend == "postgresql" else f":{param_name}"
     )
 
 

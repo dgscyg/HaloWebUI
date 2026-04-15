@@ -178,7 +178,9 @@
 									placement="top-start"
 									className="flex flex-1 gap-2 items-center"
 								>
-									<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+									<span
+										class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+									>
 										<Wrench class="size-4" strokeWidth={2} />
 									</span>
 
@@ -201,64 +203,66 @@
 				<hr class="border-black/5 dark:border-white/5 my-1" />
 			{/if}
 
-				{#if webSearchFeatureEnabled || $config?.features?.enable_image_generation || $config?.features?.enable_code_interpreter}
-					{#if webSearchFeatureEnabled && webSearchModeOptions.some((option) => option.value !== 'off') && ($user?.role === 'admin' || $user?.permissions?.features?.web_search)}
+			{#if webSearchFeatureEnabled || $config?.features?.enable_image_generation || $config?.features?.enable_code_interpreter}
+				{#if webSearchFeatureEnabled && webSearchModeOptions.some((option) => option.value !== 'off') && ($user?.role === 'admin' || $user?.permissions?.features?.web_search)}
 					<DropdownMenu.Sub>
 						<DropdownMenu.SubTrigger
 							class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
 						>
 							<div class="flex gap-2 items-center min-w-0">
-								<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+								<span
+									class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+								>
 									<Globe class="size-4" strokeWidth={2} />
 								</span>
-									<div class="truncate">{$i18n.t('Web Search')}</div>
+								<div class="truncate">{$i18n.t('Web Search')}</div>
 							</div>
 							<div class="shrink-0 text-xs text-gray-500 dark:text-gray-400">
 								{currentWebSearchModeLabel}
 							</div>
 						</DropdownMenu.SubTrigger>
-							<DropdownMenu.SubContent
-								class="w-full min-w-[260px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
-								sideOffset={8}
-								transition={flyAndScale}
-							>
-								{#each webSearchModeOptions as option}
-									<DropdownMenu.Item
-										disabled={option.disabled}
-										class="flex w-full justify-between gap-3 items-start px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 data-[disabled]:opacity-45 data-[disabled]:cursor-not-allowed"
-										on:click={() => {
-											if (option.disabled) {
-												return;
-											}
-											webSearchMode = option.value;
-											show = false;
-										}}
-									>
-										<div class="min-w-0 flex-1">
-											<div class="flex items-center gap-2">
-												<div class="truncate">{option.label}</div>
-												{#if option.badge}
-													<span
-														class="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-													>
-														{option.badge}
-													</span>
-												{/if}
-											</div>
-											{#if option.description}
-												<div class={getOptionDescriptionClasses(option.descriptionTone)}>
-													{option.description}
-												</div>
+						<DropdownMenu.SubContent
+							class="w-full min-w-[260px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
+							sideOffset={8}
+							transition={flyAndScale}
+						>
+							{#each webSearchModeOptions as option}
+								<DropdownMenu.Item
+									disabled={option.disabled}
+									class="flex w-full justify-between gap-3 items-start px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 data-[disabled]:opacity-45 data-[disabled]:cursor-not-allowed"
+									on:click={() => {
+										if (option.disabled) {
+											return;
+										}
+										webSearchMode = option.value;
+										show = false;
+									}}
+								>
+									<div class="min-w-0 flex-1">
+										<div class="flex items-center gap-2">
+											<div class="truncate">{option.label}</div>
+											{#if option.badge}
+												<span
+													class="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+												>
+													{option.badge}
+												</span>
 											{/if}
 										</div>
-										{#if webSearchMode === option.value}
-											<div class="shrink-0 pt-0.5 text-xs text-blue-500 dark:text-blue-400">✓</div>
+										{#if option.description}
+											<div class={getOptionDescriptionClasses(option.descriptionTone)}>
+												{option.description}
+											</div>
 										{/if}
-									</DropdownMenu.Item>
-								{/each}
-								</DropdownMenu.SubContent>
-							</DropdownMenu.Sub>
-						{/if}
+									</div>
+									{#if webSearchMode === option.value}
+										<div class="shrink-0 pt-0.5 text-xs text-blue-500 dark:text-blue-400">✓</div>
+									{/if}
+								</DropdownMenu.Item>
+							{/each}
+						</DropdownMenu.SubContent>
+					</DropdownMenu.Sub>
+				{/if}
 
 				{#if $config?.features?.enable_image_generation && ($user?.role === 'admin' || $user?.permissions?.features?.image_generation)}
 					<button
@@ -269,7 +273,9 @@
 						}}
 					>
 						<div class="flex gap-2 items-center">
-							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+							<span
+								class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+							>
 								<Image class="size-4" strokeWidth={2} />
 							</span>
 							<div class="truncate">{$i18n.t('Image')}</div>
@@ -289,7 +295,9 @@
 						}}
 					>
 						<div class="flex gap-2 items-center">
-							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+							<span
+								class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+							>
 								<Terminal class="size-4" strokeWidth={2} />
 							</span>
 							<div class="truncate">{$i18n.t('Code Interpreter')}</div>
@@ -325,7 +333,9 @@
 						}
 					}}
 				>
-					<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+					<span
+						class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+					>
 						<Camera class="size-4" strokeWidth={2} />
 					</span>
 					<div class=" line-clamp-1">{$i18n.t('Capture')}</div>
@@ -346,7 +356,9 @@
 						}
 					}}
 				>
-					<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+					<span
+						class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+					>
 						<FileUp class="size-4" strokeWidth={2} />
 					</span>
 					<div class="line-clamp-1">{$i18n.t('Upload Files')}</div>
@@ -360,7 +372,9 @@
 						uploadGoogleDriveHandler();
 					}}
 				>
-					<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+					<span
+						class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+					>
 						<GoogleDrive className="size-4" />
 					</span>
 					<div class="line-clamp-1">{$i18n.t('Google Drive')}</div>
@@ -374,7 +388,9 @@
 						uploadOneDriveHandler();
 					}}
 				>
-					<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
+					<span
+						class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700/60 dark:text-gray-300"
+					>
 						<OneDrive className="size-4" />
 					</span>
 					<div class="line-clamp-1">{$i18n.t('OneDrive')}</div>

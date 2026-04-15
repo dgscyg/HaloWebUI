@@ -2,11 +2,7 @@ export type WebSearchMode = 'off' | 'halo' | 'native' | 'auto';
 
 export const WEB_SEARCH_MODES: WebSearchMode[] = ['off', 'halo', 'native', 'auto'];
 
-export const WEB_SEARCH_RUNTIME_MODES: Exclude<WebSearchMode, 'off'>[] = [
-	'halo',
-	'native',
-	'auto'
-];
+export const WEB_SEARCH_RUNTIME_MODES: Exclude<WebSearchMode, 'off'>[] = ['halo', 'native', 'auto'];
 
 export function isWebSearchMode(value: unknown): value is WebSearchMode {
 	return typeof value === 'string' && WEB_SEARCH_MODES.includes(value as WebSearchMode);
@@ -34,7 +30,11 @@ export function getPreferredWebSearchMode(
 	settingsValue: { webSearchMode?: unknown; webSearch?: unknown } | null | undefined,
 	fallback: WebSearchMode = 'off'
 ): WebSearchMode {
-	if (settingsValue && settingsValue.webSearchMode !== undefined && settingsValue.webSearchMode !== null) {
+	if (
+		settingsValue &&
+		settingsValue.webSearchMode !== undefined &&
+		settingsValue.webSearchMode !== null
+	) {
 		return normalizeWebSearchMode(settingsValue.webSearchMode, fallback);
 	}
 

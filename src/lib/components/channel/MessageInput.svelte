@@ -392,7 +392,9 @@
 				: item
 		);
 
-		toast.error(localizeFileUploadError(error, $i18n.t.bind($i18n), { isAdmin: $user?.role === 'admin' }));
+		toast.error(
+			localizeFileUploadError(error, $i18n.t.bind($i18n), { isAdmin: $user?.role === 'admin' })
+		);
 	};
 
 	const handleKeyDown = (event: KeyboardEvent) => {
@@ -788,7 +790,10 @@
 														];
 													};
 													reader.readAsDataURL(blob);
-												} else if (item.type === 'text/plain' && ($settings?.largeTextAsFile ?? false)) {
+												} else if (
+													item.type === 'text/plain' &&
+													($settings?.largeTextAsFile ?? false)
+												) {
 													const text = clipboardData.getData('text/plain');
 													if (text.length > PASTED_TEXT_CHARACTER_LIMIT) {
 														e.preventDefault();

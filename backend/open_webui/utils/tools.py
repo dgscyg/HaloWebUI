@@ -88,11 +88,7 @@ def _is_mcp_apps_enabled(connection: dict, *, global_enabled: bool = False) -> b
 def _get_mcp_tool_ui_resource_uri(mcp_tool: dict) -> str:
     meta = _as_dict(mcp_tool.get("_meta"))
     ui_meta = _as_dict(meta.get("ui"))
-    return str(
-        ui_meta.get("resourceUri")
-        or meta.get("ui/resourceUri")
-        or ""
-    ).strip()
+    return str(ui_meta.get("resourceUri") or meta.get("ui/resourceUri") or "").strip()
 
 
 def _is_mcp_tool_app_only(mcp_tool: dict) -> bool:
@@ -184,8 +180,14 @@ def get_tools(
                     continue
 
                 tool_server_connections = (
-                    getattr(getattr(request, "state", None), "TOOL_SERVER_CONNECTIONS", None)
-                    or getattr(getattr(request.app.state, "config", None), "TOOL_SERVER_CONNECTIONS", None)
+                    getattr(
+                        getattr(request, "state", None), "TOOL_SERVER_CONNECTIONS", None
+                    )
+                    or getattr(
+                        getattr(request.app.state, "config", None),
+                        "TOOL_SERVER_CONNECTIONS",
+                        None,
+                    )
                     or []
                 )
                 if server_idx < 0 or server_idx >= len(tool_server_connections):
@@ -267,8 +269,14 @@ def get_tools(
                     continue
 
                 mcp_connections = (
-                    getattr(getattr(request, "state", None), "MCP_SERVER_CONNECTIONS", None)
-                    or getattr(getattr(request.app.state, "config", None), "MCP_SERVER_CONNECTIONS", None)
+                    getattr(
+                        getattr(request, "state", None), "MCP_SERVER_CONNECTIONS", None
+                    )
+                    or getattr(
+                        getattr(request.app.state, "config", None),
+                        "MCP_SERVER_CONNECTIONS",
+                        None,
+                    )
                     or []
                 )
                 if server_idx < 0 or server_idx >= len(mcp_connections):
@@ -341,6 +349,7 @@ def get_tools(
                             # notifications to the WebUI event emitter.
                             notif_cb = None
                             if __event_emitter__ is not None:
+
                                 async def notif_cb(notification):
                                     method = notification.get("method", "")
                                     params = notification.get("params") or {}
@@ -379,13 +388,17 @@ def get_tools(
                                 mcp_server_connection,
                                 name=original_tool_name,
                                 arguments=kwargs,
-                                session_token=getattr(
-                                    getattr(request, "state", None),
-                                    "token",
-                                    None,
-                                ).credentials
-                                if getattr(getattr(request, "state", None), "token", None)
-                                else None,
+                                session_token=(
+                                    getattr(
+                                        getattr(request, "state", None),
+                                        "token",
+                                        None,
+                                    ).credentials
+                                    if getattr(
+                                        getattr(request, "state", None), "token", None
+                                    )
+                                    else None
+                                ),
                                 user_id=getattr(user, "id", None),
                                 on_notification=notif_cb,
                             )

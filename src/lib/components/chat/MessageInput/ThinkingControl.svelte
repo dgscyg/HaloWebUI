@@ -216,7 +216,7 @@
 					class="flex-1 text-xs py-1 rounded-md transition-all duration-200 cursor-pointer
 						{activeMode === 'effort'
 						? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400 font-medium'
-							: 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100'}"
+						: 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100'}"
 					on:click={() => switchMode('effort')}
 				>
 					强度
@@ -226,7 +226,7 @@
 					class="flex-1 text-xs py-1 rounded-md transition-all duration-200 cursor-pointer
 						{activeMode === 'budget'
 						? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400 font-medium'
-							: 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100'}"
+						: 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100'}"
 					on:click={() => switchMode('budget')}
 				>
 					预算
@@ -295,7 +295,7 @@
 					class="text-[10px] transition-colors duration-150 cursor-pointer
 						{customMode
 						? 'text-blue-500 dark:text-blue-400'
-							: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}"
+						: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}"
 					on:click={toggleCustom}
 				>
 					{customMode ? '返回预设' : '自定义'}

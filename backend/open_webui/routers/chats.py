@@ -91,6 +91,7 @@ def _sync_imported_chat_tags(chat, user_id: str) -> None:
         ):
             Tags.insert_new_tag(tag_name, user_id)
 
+
 ############################
 # GetChatList
 ############################
@@ -195,7 +196,9 @@ async def import_chats_batch(
 
     if form_data.mode == "replace":
         try:
-            import_forms = [ChatImportForm(**item.model_dump()) for item in form_data.items]
+            import_forms = [
+                ChatImportForm(**item.model_dump()) for item in form_data.items
+            ]
             chats = Chats.replace_chats_by_user_id(user.id, import_forms)
             for chat in chats:
                 _sync_imported_chat_tags(chat, user.id)

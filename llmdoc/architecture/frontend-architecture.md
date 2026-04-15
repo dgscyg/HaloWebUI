@@ -80,15 +80,15 @@ graph TD
 
 ### 4.1 应用内路由 (`(app)` 布局)
 
-| 路径 | 组件 | 功能 |
-|------|------|------|
-| `/` | `+page.svelte` | 首页/新聊天 |
-| `/c/[id]` | `+page.svelte` | 聊天详情页 |
-| `/channels/[id]` | `+page.svelte` | 频道详情页 |
-| `/admin` | `+page.svelte` | 管理后台 |
-| `/admin/[...path]` | `+page.svelte` | 管理后台子路由 |
-| `/settings/*` | 多个 `+page.svelte` | 设置子页面 |
-| `/workspace/*` | 多个 `+page.svelte` | 工作区子页面 |
+| 路径               | 组件                | 功能           |
+| ------------------ | ------------------- | -------------- |
+| `/`                | `+page.svelte`      | 首页/新聊天    |
+| `/c/[id]`          | `+page.svelte`      | 聊天详情页     |
+| `/channels/[id]`   | `+page.svelte`      | 频道详情页     |
+| `/admin`           | `+page.svelte`      | 管理后台       |
+| `/admin/[...path]` | `+page.svelte`      | 管理后台子路由 |
+| `/settings/*`      | 多个 `+page.svelte` | 设置子页面     |
+| `/workspace/*`     | 多个 `+page.svelte` | 工作区子页面   |
 
 补充说明:
 
@@ -98,11 +98,11 @@ graph TD
 
 ### 4.2 公开路由
 
-| 路径 | 功能 |
-|------|------|
-| `/auth` | 登录/注册页面 |
+| 路径      | 功能           |
+| --------- | -------------- |
+| `/auth`   | 登录/注册页面  |
 | `/s/[id]` | 分享的聊天页面 |
-| `/error` | 错误页面 |
+| `/error`  | 错误页面       |
 
 ## 5. 设计原则
 

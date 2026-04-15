@@ -165,11 +165,12 @@ curl http://localhost:8080/api/v1/retrieval/config
 ```
 
 响应示例:
+
 ```json
 {
-  "local_embedding_available": true,
-  "local_reranking_available": true,
-  "colbert_reranking_available": false
+	"local_embedding_available": true,
+	"local_reranking_available": true,
+	"colbert_reranking_available": false
 }
 ```
 
@@ -179,9 +180,9 @@ curl http://localhost:8080/api/v1/retrieval/config
 
 ## 6. 常见问题
 
-| 问题 | 解决方案 |
-|------|----------|
-| 嵌入生成失败 | 检查 API 密钥和网络连接，或切换到本地模型 |
-| 向量库连接失败 | 确认数据库服务已启动，检查 URI 和认证信息 |
-| 检索结果不准确 | 尝试启用混合搜索或配置重排序模型 |
-| 内存不足 | 减小 `RAG_EMBEDDING_BATCH_SIZE` 或使用更小的嵌入模型 |
+| 问题           | 解决方案                                             |
+| -------------- | ---------------------------------------------------- |
+| 嵌入生成失败   | 检查 API 密钥和网络连接，或切换到本地模型            |
+| 向量库连接失败 | 确认数据库服务已启动，检查 URI 和认证信息            |
+| 检索结果不准确 | 尝试启用混合搜索或配置重排序模型                     |
+| 内存不足       | 减小 `RAG_EMBEDDING_BATCH_SIZE` 或使用更小的嵌入模型 |

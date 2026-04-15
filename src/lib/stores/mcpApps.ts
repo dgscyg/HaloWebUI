@@ -17,9 +17,11 @@ export const pipApps = derived(mcpApps, ($apps) =>
 	Array.from($apps.values()).filter((app) => app.displayMode === 'pip')
 );
 
-export const activeAppCount = derived(mcpApps, ($apps) =>
-	Array.from($apps.values()).filter((app) => app.state !== 'closed' && app.state !== 'error')
-		.length
+export const activeAppCount = derived(
+	mcpApps,
+	($apps) =>
+		Array.from($apps.values()).filter((app) => app.state !== 'closed' && app.state !== 'error')
+			.length
 );
 
 export function generateInstanceId(): string {

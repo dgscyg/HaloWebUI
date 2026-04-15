@@ -1,42 +1,42 @@
 {
-  "name": "HaloWebUI",
-  "short_name": "HaloWebUI",
-  "description": "HaloWebUI - AI Chat Interface",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#171717",
-  "theme_color": "#171717",
-  "share_target": {
-    "action": "/",
-    "method": "GET",
-    "params": {
-      "text": "q"
-    }
-  },
-  "icons": [
-    {
-      "src": "/static/favicon.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/static/favicon-96x96.png",
-      "sizes": "96x96",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/static/favicon-dark.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "/static/apple-touch-icon.png",
-      "sizes": "180x180",
-      "type": "image/png",
-      "purpose": "any"
-    }
-  ]
+	"name": "HaloWebUI",
+	"short_name": "HaloWebUI",
+	"description": "HaloWebUI - AI Chat Interface",
+	"start_url": "/",
+	"display": "standalone",
+	"background_color": "#171717",
+	"theme_color": "#171717",
+	"share_target": {
+		"action": "/",
+		"method": "GET",
+		"params": {
+			"text": "q"
+		}
+	},
+	"icons": [
+		{
+			"src": "/static/favicon.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "/static/favicon-96x96.png",
+			"sizes": "96x96",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "/static/favicon-dark.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "maskable"
+		},
+		{
+			"src": "/static/apple-touch-icon.png",
+			"sizes": "180x180",
+			"type": "image/png",
+			"purpose": "any"
+		}
+	]
 }

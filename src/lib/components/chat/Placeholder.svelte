@@ -308,7 +308,11 @@
 				</div>
 			{/if}
 
-			<div class="mx-auto w-full max-w-4xl pt-2 pb-3 text-base font-normal {atSelectedModel ? 'mt-2' : ''}">
+			<div
+				class="mx-auto w-full max-w-4xl pt-2 pb-3 text-base font-normal {atSelectedModel
+					? 'mt-2'
+					: ''}"
+			>
 				<MessageInput
 					{history}
 					{selectedModels}
@@ -351,14 +355,16 @@
 					inputValue={prompt}
 					on:select={(e) => {
 						selectSuggestionPrompt(e.detail);
-				}}
+					}}
 				/>
 			</div>
 		</div>
 	{/if}
 	{#if !$selectedAssistantScene && !activeAssistant && onActivateAssistant && ($settings?.showFeaturedAssistantsOnHome ?? true)}
 		<div class="mx-auto mt-1 w-full max-w-4xl px-2.5" in:fade={{ duration: 160, delay: 120 }}>
-			<div class="rounded-3xl border border-gray-200/60 bg-white/65 p-3 text-left shadow-sm backdrop-blur-xl dark:border-gray-700/30 dark:bg-white/[0.03]">
+			<div
+				class="rounded-3xl border border-gray-200/60 bg-white/65 p-3 text-left shadow-sm backdrop-blur-xl dark:border-gray-700/30 dark:bg-white/[0.03]"
+			>
 				<div class="flex items-center justify-between gap-3 px-1">
 					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">精选助手</div>
 					<button
@@ -458,7 +464,9 @@
 										{assistant.name}
 									</div>
 									{#if assistant.description}
-										<div class="mt-1 line-clamp-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
+										<div
+											class="mt-1 line-clamp-2 text-xs leading-5 text-gray-500 dark:text-gray-400"
+										>
 											{assistant.description}
 										</div>
 									{/if}
@@ -485,7 +493,9 @@
 				</div>
 
 				{#if !editMode && featuredAssistants.length === 0}
-					<div class="mt-2 rounded-2xl border border-dashed border-gray-200/80 px-4 py-8 text-center text-sm text-gray-400 dark:border-gray-700/70 dark:text-gray-500">
+					<div
+						class="mt-2 rounded-2xl border border-dashed border-gray-200/80 px-4 py-8 text-center text-sm text-gray-400 dark:border-gray-700/70 dark:text-gray-500"
+					>
 						暂无精选助手，点击右上角“管理”即可添加
 					</div>
 				{/if}
@@ -515,7 +525,11 @@
 		</div>
 	{:else}
 		<div
-			class="mx-auto w-full max-w-4xl px-2.5 font-primary {!activeAssistant && onActivateAssistant && ($settings?.showFeaturedAssistantsOnHome ?? true) ? 'mt-4' : 'mt-2'}"
+			class="mx-auto w-full max-w-4xl px-2.5 font-primary {!activeAssistant &&
+			onActivateAssistant &&
+			($settings?.showFeaturedAssistantsOnHome ?? true)
+				? 'mt-4'
+				: 'mt-2'}"
 			in:fade={{ duration: 200, delay: 200 }}
 		>
 			<div>

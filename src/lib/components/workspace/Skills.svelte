@@ -97,7 +97,7 @@
 		tags: ''
 	};
 
-	const cloneJson = <T>(value: T): T => {
+	const cloneJson = <T,>(value: T): T => {
 		if (value === null || value === undefined) {
 			return value;
 		}
@@ -551,11 +551,21 @@
 	};
 
 	$: installedSkills = [...promptSkills];
-	$: filteredInstalledSkills = installedSkills.filter((skill) => matchesSkillQuery(skill, mainQuery));
-	$: lobehubInstalledCount = installedSkills.filter((skill) => getSkillSource(skill) === 'lobehub').length;
-	$: communityInstalledCount = installedSkills.filter((skill) => getSkillSource(skill) === 'community').length;
-	$: customInstalledCount = installedSkills.filter((skill) => getSkillSource(skill) === 'custom').length;
-	$: communityStoreSkills = installedSkills.filter((skill) => getSkillSource(skill) === 'community');
+	$: filteredInstalledSkills = installedSkills.filter((skill) =>
+		matchesSkillQuery(skill, mainQuery)
+	);
+	$: lobehubInstalledCount = installedSkills.filter(
+		(skill) => getSkillSource(skill) === 'lobehub'
+	).length;
+	$: communityInstalledCount = installedSkills.filter(
+		(skill) => getSkillSource(skill) === 'community'
+	).length;
+	$: customInstalledCount = installedSkills.filter(
+		(skill) => getSkillSource(skill) === 'custom'
+	).length;
+	$: communityStoreSkills = installedSkills.filter(
+		(skill) => getSkillSource(skill) === 'community'
+	);
 	$: customStoreSkills = installedSkills.filter((skill) => getSkillSource(skill) === 'custom');
 	$: filteredLobeHubSkills = VERIFIED_LOBEHUB_SKILLS.filter((entry) =>
 		matchesCatalogQuery(entry, storeQuery)
@@ -563,7 +573,9 @@
 	$: filteredCommunitySkills = communityStoreSkills.filter((skill) =>
 		matchesSkillQuery(skill, storeQuery)
 	);
-	$: filteredCustomSkills = customStoreSkills.filter((skill) => matchesSkillQuery(skill, storeQuery));
+	$: filteredCustomSkills = customStoreSkills.filter((skill) =>
+		matchesSkillQuery(skill, storeQuery)
+	);
 
 	onMount(async () => {
 		await refreshData();
@@ -588,11 +600,9 @@
 	bind:show={showDeleteConfirm}
 	on:confirm={handleDelete}
 	title={$i18n.t('Delete Skill')}
-	message={
-		deletingSkill
-			? $i18n.t('This will permanently delete {{name}}.', { name: deletingSkill.name })
-			: $i18n.t('Are you sure you want to delete this skill?')
-	}
+	message={deletingSkill
+		? $i18n.t('This will permanently delete {{name}}.', { name: deletingSkill.name })
+		: $i18n.t('Are you sure you want to delete this skill?')}
 />
 
 <AccessControlModal
@@ -618,7 +628,8 @@
 							{$i18n.t('Skills')}
 						</div>
 						<div class="workspace-count-pill">
-							{installedSkills.length} {$i18n.t('Installed')}
+							{installedSkills.length}
+							{$i18n.t('Installed')}
 						</div>
 					</div>
 
@@ -634,17 +645,13 @@
 					</p>
 
 					<div class="flex flex-wrap gap-2">
-						<div
-							class="glass-item px-3 py-2 text-sm"
-						>
+						<div class="glass-item px-3 py-2 text-sm">
 							<div class="text-[11px] uppercase tracking-[0.2em] text-gray-400">LobeHub</div>
 							<div class="mt-1 font-semibold text-gray-900 dark:text-gray-100">
 								{lobehubInstalledCount}
 							</div>
 						</div>
-						<div
-							class="glass-item px-3 py-2 text-sm"
-						>
+						<div class="glass-item px-3 py-2 text-sm">
 							<div class="text-[11px] uppercase tracking-[0.2em] text-gray-400">
 								{$i18n.t('Community')}
 							</div>
@@ -652,9 +659,7 @@
 								{communityInstalledCount}
 							</div>
 						</div>
-						<div
-							class="glass-item px-3 py-2 text-sm"
-						>
+						<div class="glass-item px-3 py-2 text-sm">
 							<div class="text-[11px] uppercase tracking-[0.2em] text-gray-400">
 								{$i18n.t('Custom')}
 							</div>
@@ -666,18 +671,12 @@
 				</div>
 
 				<div class="flex items-center gap-2">
-					<button
-						class="workspace-secondary-button"
-						on:click={() => refreshData()}
-					>
+					<button class="workspace-secondary-button" on:click={() => refreshData()}>
 						<ArrowPath className={`size-4 ${refreshing ? 'animate-spin' : ''}`} />
 						{$i18n.t('Refresh')}
 					</button>
 
-					<button
-						class="workspace-primary-button"
-						on:click={() => (showStore = true)}
-					>
+					<button class="workspace-primary-button" on:click={() => (showStore = true)}>
 						<Sparkles className="size-4" />
 						{$i18n.t('Skill Store')}
 					</button>
@@ -685,7 +684,9 @@
 			</div>
 		</div>
 
-		<div class="workspace-section flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+		<div
+			class="workspace-section flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+		>
 			<div class="text-sm text-gray-500 dark:text-gray-400">
 				{$i18n.t('Showing installed skill packages only.')}
 			</div>
@@ -739,7 +740,8 @@
 											<span
 												class="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300"
 											>
-												{getSkillPackageFileCount(skill)} {$i18n.t('files')}
+												{getSkillPackageFileCount(skill)}
+												{$i18n.t('files')}
 											</span>
 										{/if}
 									</div>
@@ -811,7 +813,9 @@
 			<div
 				class="rounded-[1.5rem] border border-dashed border-gray-300 bg-white px-6 py-12 text-center shadow-sm dark:border-gray-700 dark:bg-gray-900"
 			>
-				<div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
+				<div
+					class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800"
+				>
 					<Sparkles className="size-6 text-gray-500 dark:text-gray-300" />
 				</div>
 				<div class="mt-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -820,7 +824,9 @@
 				<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 					{mainQuery
 						? $i18n.t('No installed skills match your search.')
-						: $i18n.t('Open the Skill Store to install a real skill package or create your own custom skill.')}
+						: $i18n.t(
+								'Open the Skill Store to install a real skill package or create your own custom skill.'
+							)}
 				</div>
 				<div class="mt-5 flex flex-wrap items-center justify-center gap-2">
 					<button
@@ -1069,7 +1075,9 @@
 					<div
 						class="rounded-[1.5rem] border border-dashed border-gray-300 bg-white px-6 py-12 text-center shadow-sm dark:border-gray-700 dark:bg-gray-900"
 					>
-						<div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
+						<div
+							class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800"
+						>
 							<Sparkles className="size-6 text-gray-500 dark:text-gray-300" />
 						</div>
 						<div class="mt-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -1115,7 +1123,8 @@
 													<span
 														class="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300"
 													>
-														{getSkillPackageFileCount(skill)} {$i18n.t('files')}
+														{getSkillPackageFileCount(skill)}
+														{$i18n.t('files')}
 													</span>
 												{/if}
 											</div>
@@ -1187,7 +1196,9 @@
 					<div
 						class="rounded-[1.5rem] border border-dashed border-gray-300 bg-white px-6 py-12 text-center shadow-sm dark:border-gray-700 dark:bg-gray-900"
 					>
-						<div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
+						<div
+							class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800"
+						>
 							<Sparkles className="size-6 text-gray-500 dark:text-gray-300" />
 						</div>
 						<div class="mt-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -1301,7 +1312,9 @@
 				<div
 					class="rounded-[1.5rem] border border-dashed border-gray-300 bg-white px-6 py-12 text-center shadow-sm dark:border-gray-700 dark:bg-gray-900"
 				>
-					<div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
+					<div
+						class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800"
+					>
 						<Sparkles className="size-6 text-gray-500 dark:text-gray-300" />
 					</div>
 					<div class="mt-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -1354,18 +1367,19 @@
 		</div>
 
 		<div class="mt-5">
-			<label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-200" for="skill-import-url">
+			<label
+				class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-200"
+				for="skill-import-url"
+			>
 				{importType === 'github' ? $i18n.t('GitHub URL') : $i18n.t('SKILL.md URL')}
 			</label>
 			<input
 				id="skill-import-url"
 				class="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-gray-400 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100 dark:focus:border-gray-700"
 				bind:value={importValue}
-				placeholder={
-					importType === 'github'
-						? 'https://github.com/org/repo/tree/main/skill-path'
-						: 'https://example.com/SKILL.md'
-				}
+				placeholder={importType === 'github'
+					? 'https://github.com/org/repo/tree/main/skill-path'
+					: 'https://example.com/SKILL.md'}
 			/>
 		</div>
 
@@ -1396,13 +1410,17 @@
 	className="bg-white/95 dark:bg-gray-950/95 backdrop-blur-xl rounded-[1.75rem]"
 >
 	<div class="flex max-h-[85vh] flex-col">
-		<div class="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-5 dark:border-gray-800">
+		<div
+			class="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-5 dark:border-gray-800"
+		>
 			<div>
 				<div class="text-lg font-semibold text-gray-900 dark:text-gray-100">
 					{editingSkill ? $i18n.t('Edit Skill') : $i18n.t('New Skill')}
 				</div>
 				<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-					{$i18n.t('Skills still reuse the existing prompt-skill injection flow for compatibility.')}
+					{$i18n.t(
+						'Skills still reuse the existing prompt-skill injection flow for compatibility.'
+					)}
 				</div>
 			</div>
 
@@ -1417,7 +1435,10 @@
 		<div class="min-h-0 flex-1 overflow-y-auto px-6 py-5">
 			<div class="space-y-4">
 				<div>
-					<label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-200" for="skill-name">
+					<label
+						class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-200"
+						for="skill-name"
+					>
 						{$i18n.t('Name')}
 					</label>
 					<input
@@ -1429,7 +1450,10 @@
 				</div>
 
 				<div>
-					<label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-200" for="skill-description">
+					<label
+						class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-200"
+						for="skill-description"
+					>
 						{$i18n.t('Description')}
 					</label>
 					<input
@@ -1441,7 +1465,10 @@
 				</div>
 
 				<div>
-					<label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-200" for="skill-tags">
+					<label
+						class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-200"
+						for="skill-tags"
+					>
 						{$i18n.t('Tags')}
 					</label>
 					<input
@@ -1453,20 +1480,29 @@
 				</div>
 
 				<div>
-					<label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-200" for="skill-content">
+					<label
+						class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-200"
+						for="skill-content"
+					>
 						{$i18n.t('Content')}
 					</label>
 					<textarea
 						id="skill-content"
 						class="min-h-[18rem] w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 font-mono text-sm outline-none transition focus:border-gray-400 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100 dark:focus:border-gray-700"
 						bind:value={skillForm.content}
-						placeholder={$i18n.t('Write the instructions that should be injected when this skill is selected...')}
+						placeholder={$i18n.t(
+							'Write the instructions that should be injected when this skill is selected...'
+						)}
 					></textarea>
 				</div>
 
 				{#if editingSkill && getSkillSource(editingSkill) === 'lobehub'}
-					<div class="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
-						<div class="font-medium text-gray-800 dark:text-gray-100">{$i18n.t('LobeHub Skill')}</div>
+					<div
+						class="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"
+					>
+						<div class="font-medium text-gray-800 dark:text-gray-100">
+							{$i18n.t('LobeHub Skill')}
+						</div>
 						<div class="mt-1">LobeHub</div>
 						{#if getSkillSourceUrl(editingSkill)}
 							<a
@@ -1481,8 +1517,12 @@
 						{/if}
 					</div>
 				{:else if editingSkill?.source && editingSkill.source !== 'manual'}
-					<div class="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
-						<div class="font-medium text-gray-800 dark:text-gray-100">{$i18n.t('Imported Skill')}</div>
+					<div
+						class="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"
+					>
+						<div class="font-medium text-gray-800 dark:text-gray-100">
+							{$i18n.t('Imported Skill')}
+						</div>
 						<div class="mt-1">{getImportSourceLabel(editingSkill.source)}</div>
 						{#if getSkillSourceUrl(editingSkill)}
 							<a
@@ -1500,15 +1540,17 @@
 			</div>
 		</div>
 
-			<div class="flex items-center justify-between gap-3 border-t border-gray-100 px-6 py-4 dark:border-gray-800">
-				<button
-					class="inline-flex items-center gap-2 rounded-2xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:hover:bg-transparent dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-850 dark:disabled:hover:bg-transparent disabled:opacity-60 disabled:cursor-not-allowed"
-					disabled={!canManageAcl}
-					on:click={() => {
-						if (!canManageAcl) return;
-						showAccessControlModal = true;
-					}}
-				>
+		<div
+			class="flex items-center justify-between gap-3 border-t border-gray-100 px-6 py-4 dark:border-gray-800"
+		>
+			<button
+				class="inline-flex items-center gap-2 rounded-2xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:hover:bg-transparent dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-850 dark:disabled:hover:bg-transparent disabled:opacity-60 disabled:cursor-not-allowed"
+				disabled={!canManageAcl}
+				on:click={() => {
+					if (!canManageAcl) return;
+					showAccessControlModal = true;
+				}}
+			>
 				<LockClosed className="size-4" />
 				{accessControl === null ? $i18n.t('Public') : $i18n.t('Restricted')}
 			</button>

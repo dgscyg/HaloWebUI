@@ -36,6 +36,7 @@ class UserSettingsRevisionConflict(Exception):
         self.current_revision = current_revision
         super().__init__("User settings revision conflict")
 
+
 ####################
 # User DB Schema
 ####################

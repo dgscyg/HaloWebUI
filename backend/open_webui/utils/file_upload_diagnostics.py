@@ -154,12 +154,12 @@ def make_unsupported_binary_diagnostic(filename: str | None = None) -> dict[str,
 def _get_embedding_hint(user: Any) -> str:
     if getattr(user, "role", None) == "admin":
         return (
-            'Go to /settings/documents to configure an embedding model, '
+            "Go to /settings/documents to configure an embedding model, "
             'or switch the default file processing mode to "Full Context" or "Native File".'
         )
 
     return (
-        'Ask an administrator to configure document retrieval, or switch '
+        "Ask an administrator to configure document retrieval, or switch "
         'the default file processing mode to "Full Context" or "Native File" if you have admin access.'
     )
 
@@ -227,19 +227,25 @@ def classify_file_upload_error(
     embedding_detail = batch_match.group(1).strip() if batch_match else ""
     embedding_message = embedding_detail or message
     embedding_lower = embedding_message.lower()
-    looks_like_embedding_error = any(
-        token in embedding_lower
-        for token in (
-            "embedding",
-            "embeddings",
-            "sentence-transformers",
-            "rag_embedding",
-            "local embedding models",
+    looks_like_embedding_error = (
+        any(
+            token in embedding_lower
+            for token in (
+                "embedding",
+                "embeddings",
+                "sentence-transformers",
+                "rag_embedding",
+                "local embedding models",
+            )
         )
-    ) or batch_match is not None
+        or batch_match is not None
+    )
 
     if looks_like_embedding_error:
-        if "optional dependencies" in embedding_lower or "local embedding models" in embedding_lower:
+        if (
+            "optional dependencies" in embedding_lower
+            or "local embedding models" in embedding_lower
+        ):
             return make_file_upload_diagnostic(
                 "embedding_unavailable",
                 title="No embedding model is available for document retrieval.",
@@ -250,7 +256,9 @@ def classify_file_upload_error(
                 hint=_get_embedding_hint(user),
             )
 
-        if any(pattern in embedding_lower for pattern in _EMBEDDING_UNAUTHORIZED_PATTERNS):
+        if any(
+            pattern in embedding_lower for pattern in _EMBEDDING_UNAUTHORIZED_PATTERNS
+        ):
             return make_file_upload_diagnostic(
                 "embedding_provider_unauthorized",
                 title="The embedding model service rejected the request.",
@@ -266,7 +274,9 @@ def classify_file_upload_error(
                 ),
             )
 
-        if any(pattern in embedding_lower for pattern in _EMBEDDING_CONNECTION_PATTERNS):
+        if any(
+            pattern in embedding_lower for pattern in _EMBEDDING_CONNECTION_PATTERNS
+        ):
             return make_file_upload_diagnostic(
                 "embedding_provider_unreachable",
                 title="The embedding model service could not be reached.",

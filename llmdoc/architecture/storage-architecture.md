@@ -22,11 +22,11 @@
 ### 文件存储
 
 - `backend/open_webui/storage/provider.py` (StorageProvider, LocalStorageProvider, S3StorageProvider, GCSStorageProvider, AzureStorageProvider): 存储抽象接口和四种后端实现。
-- `backend/open_webui/config.py:933-953` (STORAGE_PROVIDER, S3_*, GCS_*, AZURE_*): 存储配置环境变量定义。
+- `backend/open_webui/config.py:933-953` (STORAGE*PROVIDER, S3*\_, GCS\_\_, AZURE\_\*): 存储配置环境变量定义。
 
 ### 迁移系统
 
-- `backend/open_webui/runtime_migrations.py` (ensure_runtime_migrated, _detect_database): 运行时自动迁移，检测并迁移 OpenWebUI 旧版数据库。
+- `backend/open_webui/runtime_migrations.py` (ensure_runtime_migrated, \_detect_database): 运行时自动迁移，检测并迁移 OpenWebUI 旧版数据库。
 - `backend/open_webui/migrations/versions/`: Alembic 迁移版本脚本目录（约 30 个文件）。
 - `backend/open_webui/internal/migrations/`: Peewee 遗留迁移脚本目录（20 个文件）。
 
@@ -70,15 +70,18 @@ with get_db() as db:
 ## 4. Design Rationale
 
 **双轨迁移机制：**
+
 - Peewee 迁移仅用于向后兼容 OpenWebUI 旧版数据库
 - 新功能开发统一使用 Alembic 迁移
 - 运行时迁移自动处理版本升级，减少用户操作
 
 **自定义 JSONField：**
+
 - SQLAlchemy 的 JSON 类型在不同数据库间行为不一致
 - 自定义 `JSONField` 确保跨数据库 JSON 兼容性
 
 **存储抽象工厂模式：**
+
 - 统一接口简化存储后端切换
 - 云存储实现先写本地再同步，确保可靠性
 - 依赖延迟加载，无云存储需求时不安装 boto3 等库

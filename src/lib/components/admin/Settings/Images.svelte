@@ -209,7 +209,11 @@
 		return normalizedValue;
 	};
 
-	const buildSnapshot = (currentConfig, currentImageGenerationConfig, currentRequiredWorkflowNodes) => ({
+	const buildSnapshot = (
+		currentConfig,
+		currentImageGenerationConfig,
+		currentRequiredWorkflowNodes
+	) => ({
 		config: currentConfig,
 		imageGenerationConfig: currentImageGenerationConfig,
 		requiredWorkflowNodes: currentRequiredWorkflowNodes
@@ -230,7 +234,10 @@
 		models = null;
 	};
 
-	const clearUnavailableDefaultModel = (nextModels, { silent = false }: { silent?: boolean } = {}) => {
+	const clearUnavailableDefaultModel = (
+		nextModels,
+		{ silent = false }: { silent?: boolean } = {}
+	) => {
 		if (!imageGenerationConfig) {
 			return;
 		}
@@ -246,9 +253,7 @@
 		}
 
 		const availableModelIds = new Set(
-			normalizedModels
-				.map((model) => `${model?.id ?? ''}`.trim())
-				.filter(Boolean)
+			normalizedModels.map((model) => `${model?.id ?? ''}`.trim()).filter(Boolean)
 		);
 
 		if (availableModelIds.has(currentModel)) {
@@ -352,11 +357,15 @@
 		return nextModels;
 	};
 
-	const updateConfigHandler = async ({ refreshModels = true }: { refreshModels?: boolean } = {}) => {
-		const res = await updateConfig(localStorage.token, serializeConfigForSave(config)).catch((error) => {
-			toast.error(formatImageSettingsError(error));
-			return null;
-		});
+	const updateConfigHandler = async ({
+		refreshModels = true
+	}: { refreshModels?: boolean } = {}) => {
+		const res = await updateConfig(localStorage.token, serializeConfigForSave(config)).catch(
+			(error) => {
+				toast.error(formatImageSettingsError(error));
+				return null;
+			}
+		);
 
 		if (res) {
 			config = normalizeLoadedConfig(res);
@@ -419,9 +428,13 @@
 
 		const pickPromptNode = () => {
 			return (
-				nodes.find((node) => /^CLIPTextEncodeLumina2$/i.test(node.classType) && hasInput(node, 'user_prompt')) ??
+				nodes.find(
+					(node) => /^CLIPTextEncodeLumina2$/i.test(node.classType) && hasInput(node, 'user_prompt')
+				) ??
 				nodes.find((node) => /^CLIPTextEncode/i.test(node.classType) && hasInput(node, 'text')) ??
-				nodes.find((node) => /^CLIPTextEncode/i.test(node.classType) && hasInput(node, 'user_prompt')) ??
+				nodes.find(
+					(node) => /^CLIPTextEncode/i.test(node.classType) && hasInput(node, 'user_prompt')
+				) ??
 				nodes.find((node) => /^CLIPTextEncode/i.test(node.classType) && hasInput(node, 'text_g')) ??
 				nodes.find((node) =>
 					['user_prompt', 'text', 'prompt', 'text_g'].some((key) => hasInput(node, key))
@@ -432,7 +445,9 @@
 		const pickModelNode = () => {
 			return (
 				nodes.find((node) => /^UNETLoader$/i.test(node.classType) && hasInput(node, 'unet_name')) ??
-				nodes.find((node) => /CheckpointLoader/i.test(node.classType) && hasInput(node, 'ckpt_name')) ??
+				nodes.find(
+					(node) => /CheckpointLoader/i.test(node.classType) && hasInput(node, 'ckpt_name')
+				) ??
 				nodes.find((node) => hasInput(node, 'unet_name')) ??
 				nodes.find((node) => hasInput(node, 'ckpt_name')) ??
 				nodes.find((node) => hasInput(node, 'model_name')) ??
@@ -467,7 +482,8 @@
 						/KSampler|Sampler/i.test(node.classType)
 				) ??
 				nodes.find(
-					(node) => hasInput(node, 'steps') && (hasInput(node, 'seed') || hasInput(node, 'noise_seed'))
+					(node) =>
+						hasInput(node, 'steps') && (hasInput(node, 'seed') || hasInput(node, 'noise_seed'))
 				)
 			);
 		};
@@ -508,7 +524,9 @@
 				: { key: 'unet_name', node_ids: '' },
 			width: sizeNode ? { key: 'width', node_ids: sizeNode.id } : { key: 'width', node_ids: '' },
 			height: sizeNode ? { key: 'height', node_ids: sizeNode.id } : { key: 'height', node_ids: '' },
-			steps: samplerNode ? { key: 'steps', node_ids: samplerNode.id } : { key: 'steps', node_ids: '' },
+			steps: samplerNode
+				? { key: 'steps', node_ids: samplerNode.id }
+				: { key: 'steps', node_ids: '' },
 			seed: samplerNode
 				? { key: hasInput(samplerNode, 'seed') ? 'seed' : 'noise_seed', node_ids: samplerNode.id }
 				: { key: 'seed', node_ids: '' }
@@ -533,7 +551,9 @@
 		requiredWorkflowNodes = inferredNodes;
 
 		if (!silent) {
-			const resolvedCount = inferredNodes.filter((node) => `${node.node_ids ?? ''}`.trim() !== '').length;
+			const resolvedCount = inferredNodes.filter(
+				(node) => `${node.node_ids ?? ''}`.trim() !== ''
+			).length;
 			const unresolved = inferredNodes
 				.filter((node) => `${node.node_ids ?? ''}`.trim() === '')
 				.map((node) => node.type);
@@ -601,17 +621,17 @@
 	const saveHandler = async () => {
 		loading = true;
 
-			if (config?.comfyui?.COMFYUI_WORKFLOW) {
-				if (!validateJSON(config.comfyui.COMFYUI_WORKFLOW)) {
-					toast.error($i18n.t('Invalid JSON format for ComfyUI Workflow.'));
-					loading = false;
-					return;
-				}
-
-				applyAutoDetectedComfyUIWorkflowNodes(config.comfyui.COMFYUI_WORKFLOW, {
-					silent: true
-				});
+		if (config?.comfyui?.COMFYUI_WORKFLOW) {
+			if (!validateJSON(config.comfyui.COMFYUI_WORKFLOW)) {
+				toast.error($i18n.t('Invalid JSON format for ComfyUI Workflow.'));
+				loading = false;
+				return;
 			}
+
+			applyAutoDetectedComfyUIWorkflowNodes(config.comfyui.COMFYUI_WORKFLOW, {
+				silent: true
+			});
+		}
 
 		if (config?.comfyui?.COMFYUI_WORKFLOW) {
 			const nextWorkflowNodes = requiredWorkflowNodes.map((node) => {
@@ -709,13 +729,13 @@
 				})
 			]);
 
-				if (res) {
-					config = normalizeLoadedConfig(res);
-				}
+			if (res) {
+				config = normalizeLoadedConfig(res);
+			}
 
-				if (config.comfyui.COMFYUI_WORKFLOW) {
-					try {
-						config.comfyui.COMFYUI_WORKFLOW = JSON.stringify(
+			if (config.comfyui.COMFYUI_WORKFLOW) {
+				try {
+					config.comfyui.COMFYUI_WORKFLOW = JSON.stringify(
 						JSON.parse(config.comfyui.COMFYUI_WORKFLOW),
 						null,
 						2
@@ -725,40 +745,38 @@
 				}
 			}
 
-				const storedWorkflowNodes = config.comfyui.COMFYUI_WORKFLOW_NODES ?? [];
-				const storedMappingsMissing =
-					config?.comfyui?.COMFYUI_WORKFLOW &&
-					getMissingComfyUIWorkflowMappings(
-						config.comfyui.COMFYUI_WORKFLOW,
-						storedWorkflowNodes
-					).length > 0;
+			const storedWorkflowNodes = config.comfyui.COMFYUI_WORKFLOW_NODES ?? [];
+			const storedMappingsMissing =
+				config?.comfyui?.COMFYUI_WORKFLOW &&
+				getMissingComfyUIWorkflowMappings(config.comfyui.COMFYUI_WORKFLOW, storedWorkflowNodes)
+					.length > 0;
 
-				if (storedMappingsMissing) {
-					applyAutoDetectedComfyUIWorkflowNodes(config.comfyui.COMFYUI_WORKFLOW, {
-						silent: true
-					});
-				} else {
-					requiredWorkflowNodes = requiredWorkflowNodes.map((node) => {
-						const n = storedWorkflowNodes.find((n) => n.type === node.type) ?? node;
+			if (storedMappingsMissing) {
+				applyAutoDetectedComfyUIWorkflowNodes(config.comfyui.COMFYUI_WORKFLOW, {
+					silent: true
+				});
+			} else {
+				requiredWorkflowNodes = requiredWorkflowNodes.map((node) => {
+					const n = storedWorkflowNodes.find((n) => n.type === node.type) ?? node;
 
-						return {
-							type: n.type,
-							key: n.key,
-							node_ids: typeof n.node_ids === 'string' ? n.node_ids : n.node_ids.join(',')
-						};
-					});
-				}
+					return {
+						type: n.type,
+						key: n.key,
+						node_ids: typeof n.node_ids === 'string' ? n.node_ids : n.node_ids.join(',')
+					};
+				});
+			}
 
-				if (imageConfigRes) {
-					imageGenerationConfig = imageConfigRes;
-				}
+			if (imageConfigRes) {
+				imageGenerationConfig = imageConfigRes;
+			}
 
-				if (config.enabled) {
-					await getModels({ silent: true });
-				}
+			if (config.enabled) {
+				await getModels({ silent: true });
+			}
 
-				await tick();
-				syncBaseline();
+			await tick();
+			syncBaseline();
 		}
 	});
 
@@ -813,9 +831,7 @@
 							{$i18n.t('Features')}
 						</div>
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-							<div
-								class="flex items-center justify-between glass-item px-4 py-3"
-							>
+							<div class="flex items-center justify-between glass-item px-4 py-3">
 								<div class="text-sm font-medium">
 									{$i18n.t('Image Generation (Experimental)')}
 								</div>
@@ -853,12 +869,18 @@
 											} else if (
 												config.engine === 'gemini' &&
 												config.shared_key_enabled &&
-												(!hasConfiguredProviderBaseUrl(config.gemini.GEMINI_API_BASE_URL, '/v1beta') ||
+												(!hasConfiguredProviderBaseUrl(
+													config.gemini.GEMINI_API_BASE_URL,
+													'/v1beta'
+												) ||
 													config.gemini.GEMINI_API_KEY === '')
 											) {
 												toast.error(
 													$i18n.t(
-														!hasConfiguredProviderBaseUrl(config.gemini.GEMINI_API_BASE_URL, '/v1beta')
+														!hasConfiguredProviderBaseUrl(
+															config.gemini.GEMINI_API_BASE_URL,
+															'/v1beta'
+														)
 															? 'Gemini API Base URL is required.'
 															: 'Gemini API Key is required.'
 													)
@@ -872,17 +894,13 @@
 							</div>
 
 							{#if config.enabled}
-								<div
-									class="flex items-center justify-between glass-item px-4 py-3"
-								>
+								<div class="flex items-center justify-between glass-item px-4 py-3">
 									<div class="text-sm font-medium">{$i18n.t('Image Prompt Generation')}</div>
 									<Switch bind:state={config.prompt_generation} />
 								</div>
 							{/if}
 
-							<div
-								class="glass-item px-4 py-3"
-							>
+							<div class="glass-item px-4 py-3">
 								<div class="flex items-center justify-between">
 									<div class="text-sm font-medium">{$i18n.t('Image Generation Engine')}</div>
 									<HaloSelect
@@ -912,9 +930,7 @@
 							</div>
 
 							{#if config.enabled && ['openai', 'gemini'].includes(config.engine)}
-								<div
-									class="flex items-center justify-between glass-item px-4 py-3"
-								>
+								<div class="flex items-center justify-between glass-item px-4 py-3">
 									<div class="text-sm font-medium">
 										{$i18n.t('Allow users to use the workspace shared key')}
 									</div>
@@ -925,12 +941,18 @@
 											if (enabled) {
 												if (
 													config.engine === 'openai' &&
-													(!hasConfiguredProviderBaseUrl(config.openai.OPENAI_API_BASE_URL, '/v1') ||
+													(!hasConfiguredProviderBaseUrl(
+														config.openai.OPENAI_API_BASE_URL,
+														'/v1'
+													) ||
 														config.openai.OPENAI_API_KEY === '')
 												) {
 													toast.error(
 														$i18n.t(
-															!hasConfiguredProviderBaseUrl(config.openai.OPENAI_API_BASE_URL, '/v1')
+															!hasConfiguredProviderBaseUrl(
+																config.openai.OPENAI_API_BASE_URL,
+																'/v1'
+															)
 																? 'OpenAI API Base URL is required.'
 																: 'OpenAI API Key is required.'
 														)
@@ -940,12 +962,18 @@
 												}
 												if (
 													config.engine === 'gemini' &&
-													(!hasConfiguredProviderBaseUrl(config.gemini.GEMINI_API_BASE_URL, '/v1beta') ||
+													(!hasConfiguredProviderBaseUrl(
+														config.gemini.GEMINI_API_BASE_URL,
+														'/v1beta'
+													) ||
 														config.gemini.GEMINI_API_KEY === '')
 												) {
 													toast.error(
 														$i18n.t(
-															!hasConfiguredProviderBaseUrl(config.gemini.GEMINI_API_BASE_URL, '/v1beta')
+															!hasConfiguredProviderBaseUrl(
+																config.gemini.GEMINI_API_BASE_URL,
+																'/v1beta'
+															)
 																? 'Gemini API Base URL is required.'
 																: 'Gemini API Key is required.'
 														)
@@ -991,9 +1019,7 @@
 								/>
 							</svg>
 						</div>
-						<div class="text-base font-semibold text-gray-800 dark:text-gray-100">
-							引擎配置
-						</div>
+						<div class="text-base font-semibold text-gray-800 dark:text-gray-100">引擎配置</div>
 					</div>
 
 					<div class="space-y-4">
@@ -1003,9 +1029,7 @@
 							</div>
 
 							<!-- Base URL -->
-							<div
-								class="glass-item p-4"
-							>
+							<div class="glass-item p-4">
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 									{$i18n.t('AUTOMATIC1111 Base URL')}
 								</div>
@@ -1056,9 +1080,7 @@
 							</div>
 
 							<!-- API Auth -->
-							<div
-								class="glass-item p-4"
-							>
+							<div class="glass-item p-4">
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 									{$i18n.t('AUTOMATIC1111 Api Auth String')}
 								</div>
@@ -1083,9 +1105,7 @@
 
 							<!-- Sampler + Scheduler -->
 							<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-								<div
-									class="glass-item p-4"
-								>
+								<div class="glass-item p-4">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 										{$i18n.t('Set Sampler')}
 									</div>
@@ -1103,9 +1123,7 @@
 										</datalist>
 									</Tooltip>
 								</div>
-								<div
-									class="glass-item p-4"
-								>
+								<div class="glass-item p-4">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 										{$i18n.t('Set Scheduler')}
 									</div>
@@ -1126,9 +1144,7 @@
 							</div>
 
 							<!-- CFG Scale -->
-							<div
-								class="glass-item p-4"
-							>
+							<div class="glass-item p-4">
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 									{$i18n.t('Set CFG Scale')}
 								</div>
@@ -1140,16 +1156,13 @@
 									/>
 								</Tooltip>
 							</div>
-
 						{:else if config?.engine === 'comfyui'}
 							<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1">
 								{$i18n.t('ComfyUI')}
 							</div>
 
 							<!-- Base URL -->
-							<div
-								class="glass-item p-4"
-							>
+							<div class="glass-item p-4">
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 									{$i18n.t('ComfyUI Base URL')}
 								</div>
@@ -1190,9 +1203,7 @@
 							</div>
 
 							<!-- API Key -->
-							<div
-								class="glass-item p-4"
-							>
+							<div class="glass-item p-4">
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 									{$i18n.t('ComfyUI API Key')}
 								</div>
@@ -1204,37 +1215,37 @@
 							</div>
 
 							<!-- Workflow -->
-							<div
-								class="glass-item p-4"
-							>
+							<div class="glass-item p-4">
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 									{$i18n.t('ComfyUI Workflow')}
 								</div>
 
-									{#if config.comfyui.COMFYUI_WORKFLOW}
-										<textarea
-											class="w-full mb-2 py-2 px-3 text-xs dark:text-gray-300 glass-input disabled:text-gray-600 resize-none"
-											rows="10"
-											bind:value={config.comfyui.COMFYUI_WORKFLOW}
-											on:blur={() => {
-												if (config?.comfyui?.COMFYUI_WORKFLOW && validateJSON(config.comfyui.COMFYUI_WORKFLOW)) {
-													applyAutoDetectedComfyUIWorkflowNodes(
-														config.comfyui.COMFYUI_WORKFLOW,
-														{ silent: true }
-													);
-												}
-											}}
-											required
-										/>
-									{/if}
-
-									<input
-										id="upload-comfyui-workflow-input"
-										hidden
-										type="file"
-										accept=".json"
-										on:change={handleComfyUIWorkflowUpload}
+								{#if config.comfyui.COMFYUI_WORKFLOW}
+									<textarea
+										class="w-full mb-2 py-2 px-3 text-xs dark:text-gray-300 glass-input disabled:text-gray-600 resize-none"
+										rows="10"
+										bind:value={config.comfyui.COMFYUI_WORKFLOW}
+										on:blur={() => {
+											if (
+												config?.comfyui?.COMFYUI_WORKFLOW &&
+												validateJSON(config.comfyui.COMFYUI_WORKFLOW)
+											) {
+												applyAutoDetectedComfyUIWorkflowNodes(config.comfyui.COMFYUI_WORKFLOW, {
+													silent: true
+												});
+											}
+										}}
+										required
 									/>
+								{/if}
+
+								<input
+									id="upload-comfyui-workflow-input"
+									hidden
+									type="file"
+									accept=".json"
+									on:change={handleComfyUIWorkflowUpload}
+								/>
 								<button
 									class="w-full text-sm font-medium py-2.5 glass-item border-dashed text-gray-600 dark:text-gray-400 text-center transition"
 									type="button"
@@ -1251,9 +1262,7 @@
 
 							<!-- Workflow Nodes -->
 							{#if config.comfyui.COMFYUI_WORKFLOW}
-								<div
-									class="glass-item p-4"
-								>
+								<div class="glass-item p-4">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
 										{$i18n.t('ComfyUI Workflow Nodes')}
 									</div>
@@ -1299,15 +1308,12 @@
 									</div>
 								</div>
 							{/if}
-
 						{:else if config?.engine === 'openai'}
 							<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1">
 								{$i18n.t('OpenAI API Config')}
 							</div>
 							<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-								<div
-									class="glass-item p-4"
-								>
+								<div class="glass-item p-4">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 										{$i18n.t('API Base URL')}
 									</div>
@@ -1324,9 +1330,7 @@
 										required
 									/>
 								</div>
-								<div
-									class="glass-item p-4"
-								>
+								<div class="glass-item p-4">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 										{$i18n.t('API Key')}
 									</div>
@@ -1336,15 +1340,12 @@
 									/>
 								</div>
 							</div>
-
 						{:else if config?.engine === 'gemini'}
 							<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1">
 								{$i18n.t('Gemini API Config')}
 							</div>
 							<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-								<div
-									class="glass-item p-4"
-								>
+								<div class="glass-item p-4">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 										{$i18n.t('API Base URL')}
 									</div>
@@ -1361,9 +1362,7 @@
 										required
 									/>
 								</div>
-								<div
-									class="glass-item p-4"
-								>
+								<div class="glass-item p-4">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 										{$i18n.t('API Key')}
 									</div>
@@ -1396,48 +1395,43 @@
 								/>
 							</svg>
 						</div>
-						<div class="text-base font-semibold text-gray-800 dark:text-gray-100">
-							生成参数
-						</div>
+						<div class="text-base font-semibold text-gray-800 dark:text-gray-100">生成参数</div>
 					</div>
 
 					<div class="space-y-4">
-						<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1">
-							默认设置
-						</div>
+						<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1">默认设置</div>
 
 						{#if config?.enabled}
 							<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-								<div
-									class="glass-item p-4"
-								>
+								<div class="glass-item p-4">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 										{$i18n.t('Set Default Model')}
 									</div>
-										<HaloSelect
-											bind:value={imageGenerationConfig.MODEL}
-											options={imageModelOptions}
-											placeholder={$i18n.t('Select a model')}
-											searchEnabled={true}
-											searchPlaceholder={$i18n.t('Search a model')}
-											noResultsText={$i18n.t('No results found')}
-											allowCustomValue={true}
-											customValueLabel={$i18n.t('Use custom model ID')}
-											className="w-full"
-										/>
-										<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
-											{$i18n.t(
-												'If the model is not listed, search and use its exact model ID directly.'
-											)}
-										</div>
+									<HaloSelect
+										bind:value={imageGenerationConfig.MODEL}
+										options={imageModelOptions}
+										placeholder={$i18n.t('Select a model')}
+										searchEnabled={true}
+										searchPlaceholder={$i18n.t('Search a model')}
+										noResultsText={$i18n.t('No results found')}
+										allowCustomValue={true}
+										customValueLabel={$i18n.t('Use custom model ID')}
+										className="w-full"
+									/>
+									<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+										{$i18n.t(
+											'If the model is not listed, search and use its exact model ID directly.'
+										)}
+									</div>
 								</div>
-								<div
-									class="glass-item p-4"
-								>
+								<div class="glass-item p-4">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 										{$i18n.t('Set Image Size')}
 									</div>
-									<Tooltip content={$i18n.t('Enter Image Size (e.g. 512x512)')} placement="top-start">
+									<Tooltip
+										content={$i18n.t('Enter Image Size (e.g. 512x512)')}
+										placement="top-start"
+									>
 										<input
 											class="w-full py-2 px-3 text-sm dark:text-gray-300 glass-input"
 											placeholder={$i18n.t('Enter Image Size (e.g. 512x512)')}
@@ -1449,13 +1443,14 @@
 							</div>
 
 							<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-								<div
-									class="glass-item p-4"
-								>
+								<div class="glass-item p-4">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 										{$i18n.t('Set Steps')}
 									</div>
-									<Tooltip content={$i18n.t('Enter Number of Steps (e.g. 50)')} placement="top-start">
+									<Tooltip
+										content={$i18n.t('Enter Number of Steps (e.g. 50)')}
+										placement="top-start"
+									>
 										<input
 											class="w-full py-2 px-3 text-sm dark:text-gray-300 glass-input"
 											placeholder={$i18n.t('Enter Number of Steps (e.g. 50)')}
@@ -1464,14 +1459,14 @@
 										/>
 									</Tooltip>
 								</div>
-								<div
-									class="glass-item p-4"
-								>
+								<div class="glass-item p-4">
 									<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 										{$i18n.t('Model Filter Regex')}
 									</div>
 									<Tooltip
-										content={$i18n.t('Regex pattern to filter image models (leave empty to show all)')}
+										content={$i18n.t(
+											'Regex pattern to filter image models (leave empty to show all)'
+										)}
 										placement="top-start"
 									>
 										<input
@@ -1483,14 +1478,14 @@
 								</div>
 							</div>
 						{:else}
-							<div
-								class="glass-item p-4"
-							>
+							<div class="glass-item p-4">
 								<div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
 									{$i18n.t('Model Filter Regex')}
 								</div>
 								<Tooltip
-									content={$i18n.t('Regex pattern to filter image models (leave empty to show all)')}
+									content={$i18n.t(
+										'Regex pattern to filter image models (leave empty to show all)'
+									)}
 									placement="top-start"
 								>
 									<input
@@ -1506,5 +1501,4 @@
 			</div>
 		{/if}
 	</div>
-
 </form>

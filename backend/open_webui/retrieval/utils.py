@@ -185,7 +185,8 @@ def query_doc_with_hybrid_search(
         )
 
         ensemble_retriever = EnsembleRetriever(
-            retrievers=[bm25_retriever, vector_search_retriever], weights=[bm25_weight, 1 - bm25_weight]
+            retrievers=[bm25_retriever, vector_search_retriever],
+            weights=[bm25_weight, 1 - bm25_weight],
         )
         compressor = RerankCompressor(
             embedding_function=embedding_function,
@@ -614,9 +615,7 @@ def get_sources_from_files(
             elif nested_file.get("data"):
                 context = {
                     "documents": [[nested_file.get("data", {}).get("content")]],
-                    "metadatas": [
-                        [nested_file.get("data", {}).get("metadata", {})]
-                    ],
+                    "metadatas": [[nested_file.get("data", {}).get("metadata", {})]],
                 }
         else:
             collection_names = []
@@ -784,7 +783,9 @@ def generate_openai_batch_embeddings(
             timeout=60,
         )
         if not r.ok:
-            raise RuntimeError(build_error_detail(read_requests_error_payload(r), r.reason))
+            raise RuntimeError(
+                build_error_detail(read_requests_error_payload(r), r.reason)
+            )
         data = r.json()
         if "data" in data:
             return [elem["embedding"] for elem in data["data"]]
@@ -831,7 +832,9 @@ def generate_ollama_batch_embeddings(
             timeout=60,
         )
         if not r.ok:
-            raise RuntimeError(build_error_detail(read_requests_error_payload(r), r.reason))
+            raise RuntimeError(
+                build_error_detail(read_requests_error_payload(r), r.reason)
+            )
         data = r.json()
 
         if "embeddings" in data:
@@ -993,9 +996,9 @@ class RerankCompressor(BaseDocumentCompressor):
         query_norm = math.sqrt(sum(value * value for value in query_vector)) or 1.0
         scores = []
         for document_vector in document_vectors:
-            document_norm = math.sqrt(
-                sum(value * value for value in document_vector)
-            ) or 1.0
+            document_norm = (
+                math.sqrt(sum(value * value for value in document_vector)) or 1.0
+            )
             dot_product = sum(
                 q_value * d_value
                 for q_value, d_value in zip(query_vector, document_vector)
@@ -1020,9 +1023,7 @@ class RerankCompressor(BaseDocumentCompressor):
             document_embedding = self.embedding_function(
                 [doc.page_content for doc in documents], RAG_EMBEDDING_CONTENT_PREFIX
             )
-            scores = self._cosine_similarity_scores(
-                query_embedding, document_embedding
-            )
+            scores = self._cosine_similarity_scores(query_embedding, document_embedding)
 
         docs_with_scores = list(zip(documents, self._to_list(scores)))
         if self.r_score:

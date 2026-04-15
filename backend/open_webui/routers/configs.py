@@ -44,7 +44,6 @@ from open_webui.utils.user_tools import (
 )
 from open_webui.utils.data_management import deep_merge_dict
 
-
 router = APIRouter()
 
 
@@ -59,7 +58,9 @@ def _log_background_task_exception(task: asyncio.Task, *, label: str) -> None:
     if exc is not None:
         import logging
 
-        logging.getLogger(__name__).warning("Background task failed: %s", label, exc_info=exc)
+        logging.getLogger(__name__).warning(
+            "Background task failed: %s", label, exc_info=exc
+        )
 
 
 ############################
@@ -150,12 +151,17 @@ async def set_connections_config(
 ):
     prev_cache_enabled = request.app.state.config.ENABLE_BASE_MODELS_CACHE
 
-    request.app.state.config.ENABLE_DIRECT_CONNECTIONS = form_data.ENABLE_DIRECT_CONNECTIONS
-    request.app.state.config.ENABLE_BASE_MODELS_CACHE = form_data.ENABLE_BASE_MODELS_CACHE
+    request.app.state.config.ENABLE_DIRECT_CONNECTIONS = (
+        form_data.ENABLE_DIRECT_CONNECTIONS
+    )
+    request.app.state.config.ENABLE_BASE_MODELS_CACHE = (
+        form_data.ENABLE_BASE_MODELS_CACHE
+    )
 
     # If the cache is (re-)enabled, warm it once at save time (in background).
     if request.app.state.config.ENABLE_BASE_MODELS_CACHE and (
-        not prev_cache_enabled or getattr(request.app.state, "BASE_MODELS", None) is None
+        not prev_cache_enabled
+        or getattr(request.app.state, "BASE_MODELS", None) is None
     ):
         from open_webui.utils.models import invalidate_base_model_cache
 
@@ -459,12 +465,9 @@ async def get_mcp_servers_config(request: Request, user=Depends(get_verified_use
 async def set_mcp_servers_config(
     request: Request, form_data: MCPServersConfigForm, user=Depends(get_verified_user)
 ):
-    if (
-        getattr(user, "role", None) != "admin"
-        and any(
-            connection.transport_type == "stdio"
-            for connection in form_data.MCP_SERVER_CONNECTIONS
-        )
+    if getattr(user, "role", None) != "admin" and any(
+        connection.transport_type == "stdio"
+        for connection in form_data.MCP_SERVER_CONNECTIONS
     ):
         raise HTTPException(status_code=403, detail="stdio MCP servers are admin-only")
 
@@ -486,8 +489,13 @@ async def verify_mcp_server_connection(
     Verify the connection to an MCP server.
     """
     try:
-        if form_data.transport_type == "stdio" and getattr(user, "role", None) != "admin":
-            raise HTTPException(status_code=403, detail="stdio MCP servers are admin-only")
+        if (
+            form_data.transport_type == "stdio"
+            and getattr(user, "role", None) != "admin"
+        ):
+            raise HTTPException(
+                status_code=403, detail="stdio MCP servers are admin-only"
+            )
 
         normalized_connection = _normalize_mcp_server_connection(form_data)
         token = None
@@ -542,7 +550,9 @@ def _is_mcp_connection_enabled(connection: dict) -> bool:
     return bool(config.get("enable", True))
 
 
-def _get_mcp_apps_form_state(connection: dict, *, default_global_enabled: bool) -> tuple[bool, bool]:
+def _get_mcp_apps_form_state(
+    connection: dict, *, default_global_enabled: bool
+) -> tuple[bool, bool]:
     apps_cfg = dict(connection.get(MCP_APPS_KEY) or {})
     global_enabled = bool(
         apps_cfg.get(MCP_APPS_GLOBAL_ENABLE_KEY, default_global_enabled)
@@ -572,8 +582,14 @@ def _serialize_mcp_apps_form_state(
 
 
 def _get_mcp_app_resource_proxy_url(server_idx: int, resource: dict) -> str:
-    resource_uri = str(resource.get("uri") or resource.get("resource_uri") or "").strip()
-    return build_mcp_app_resource_proxy_path(server_idx, resource_uri) if resource_uri else ""
+    resource_uri = str(
+        resource.get("uri") or resource.get("resource_uri") or ""
+    ).strip()
+    return (
+        build_mcp_app_resource_proxy_path(server_idx, resource_uri)
+        if resource_uri
+        else ""
+    )
 
 
 def _pick_mcp_resource_content(resource_result: dict, resource_uri: str) -> dict | None:
@@ -637,7 +653,9 @@ async def set_mcp_apps_config(
     )
 
 
-@router.get("/mcp_servers/apps/capabilities", response_model=MCPAppsCapabilitiesResponse)
+@router.get(
+    "/mcp_servers/apps/capabilities", response_model=MCPAppsCapabilitiesResponse
+)
 async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_user)):
     connections = get_user_mcp_server_connections(request, user)
     apps_config = get_user_mcp_apps_config(request, user)
@@ -658,7 +676,9 @@ async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_
             connection,
             default_global_enabled=global_enabled_default,
         )
-        apps_enabled = bool(apps_global_enabled and server_apps_enabled and base_enabled)
+        apps_enabled = bool(
+            apps_global_enabled and server_apps_enabled and base_enabled
+        )
         global_enabled = global_enabled or apps_global_enabled
 
         data = server_map.get(idx, {})
@@ -702,7 +722,9 @@ async def get_mcp_apps_capabilities(request: Request, user=Depends(get_verified_
                 if isinstance(resource, dict)
             ]
             prompts = [
-                prompt for prompt in (data.get("prompts", []) or []) if isinstance(prompt, dict)
+                prompt
+                for prompt in (data.get("prompts", []) or [])
+                if isinstance(prompt, dict)
             ]
             metadata = {
                 "tool_count": len(data.get("tools", []) or []),
@@ -757,7 +779,9 @@ async def get_mcp_app_resource(
         default_global_enabled=global_enabled_default,
     )
     if not (base_enabled and apps_global_enabled and server_apps_enabled):
-        raise HTTPException(status_code=403, detail="MCP apps are disabled for this server")
+        raise HTTPException(
+            status_code=403, detail="MCP apps are disabled for this server"
+        )
 
     session_token = getattr(getattr(request.state, "token", None), "credentials", None)
 
@@ -777,13 +801,16 @@ async def get_mcp_app_resource(
 
     selected = _pick_mcp_resource_content(resource_result, uri)
     if not selected:
-        raise HTTPException(status_code=404, detail="MCP app resource content not found")
+        raise HTTPException(
+            status_code=404, detail="MCP app resource content not found"
+        )
 
-    media_type = str(
-        selected.get("mimeType")
-        or selected.get("mime_type")
+    media_type = (
+        str(
+            selected.get("mimeType") or selected.get("mime_type") or "text/plain"
+        ).strip()
         or "text/plain"
-    ).strip() or "text/plain"
+    )
 
     text_content = selected.get("text")
     if isinstance(text_content, str):
@@ -944,9 +971,7 @@ class PromptSuggestionsConfigForm(BaseModel):
 
 
 @router.get("/prompt_suggestions", response_model=PromptSuggestionsConfigForm)
-async def get_prompt_suggestions_config(
-    request: Request, user=Depends(get_admin_user)
-):
+async def get_prompt_suggestions_config(request: Request, user=Depends(get_admin_user)):
     return {
         "ENABLE_DEFAULT_PROMPT_SUGGESTIONS": request.app.state.config.ENABLE_DEFAULT_PROMPT_SUGGESTIONS,
     }

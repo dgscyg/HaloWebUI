@@ -199,7 +199,9 @@ class PromptsTable:
                     data=form_data.data,
                     meta=form_data.meta,
                     tags=form_data.tags,
-                    is_active=form_data.is_active if form_data.is_active is not None else True,
+                    is_active=(
+                        form_data.is_active if form_data.is_active is not None else True
+                    ),
                     access_control=form_data.access_control,
                     created_at=now,
                     updated_at=now,
@@ -442,7 +444,9 @@ class PromptsTable:
     def delete_prompt_by_id(self, prompt_id: str) -> bool:
         try:
             with get_db() as db:
-                db.query(Prompt).filter_by(id=self._coerce_prompt_id(db, prompt_id)).delete()
+                db.query(Prompt).filter_by(
+                    id=self._coerce_prompt_id(db, prompt_id)
+                ).delete()
                 db.commit()
                 return True
         except Exception:

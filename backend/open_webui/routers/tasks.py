@@ -39,7 +39,6 @@ from open_webui.config import (
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.utils.models import get_all_models
 
-
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
@@ -70,8 +69,7 @@ TASK_CONFIG_NULLABLE_FIELDS = {
 
 def _serialize_task_config(request: Request) -> dict:
     return {
-        field: getattr(request.app.state.config, field)
-        for field in TASK_CONFIG_FIELDS
+        field: getattr(request.app.state.config, field) for field in TASK_CONFIG_FIELDS
     }
 
 
@@ -654,6 +652,7 @@ async def generate_follow_ups(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(e)},
         )
+
 
 @router.post("/moa/completions")
 async def generate_moa_response(

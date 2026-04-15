@@ -327,10 +327,14 @@
 								</button>
 							</div>
 
-							<div class="rounded-xl border border-primary-200/70 bg-primary-50/70 p-3 dark:border-primary-800/40 dark:bg-primary-950/20">
+							<div
+								class="rounded-xl border border-primary-200/70 bg-primary-50/70 p-3 dark:border-primary-800/40 dark:bg-primary-950/20"
+							>
 								<div class="flex items-start justify-between gap-3">
 									<div class="min-w-0 flex-1">
-										<div class="flex items-center gap-2 text-xs font-medium text-primary-700 dark:text-primary-300">
+										<div
+											class="flex items-center gap-2 text-xs font-medium text-primary-700 dark:text-primary-300"
+										>
 											<GlobeAlt className="size-3.5 shrink-0" strokeWidth="2" />
 											<span>MCP App</span>
 										</div>

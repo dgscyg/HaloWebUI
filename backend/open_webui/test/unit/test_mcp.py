@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 # Ensure `open_webui` is importable when running tests from repo root.
 _BACKEND_DIR = pathlib.Path(__file__).resolve().parents[3]
 if str(_BACKEND_DIR) not in sys.path:
@@ -53,10 +52,22 @@ def test_mcp_streamable_http_client_json_and_sse():
         if method == "tools/list":
             cursor = (payload.get("params") or {}).get("cursor")
             if not cursor:
-                tools = [{"name": "foo/bar", "description": "t1", "inputSchema": {"type": "object"}}]
+                tools = [
+                    {
+                        "name": "foo/bar",
+                        "description": "t1",
+                        "inputSchema": {"type": "object"},
+                    }
+                ]
                 result = {"tools": tools, "nextCursor": "c2"}
             else:
-                tools = [{"name": "echo", "description": "t2", "inputSchema": {"type": "object"}}]
+                tools = [
+                    {
+                        "name": "echo",
+                        "description": "t2",
+                        "inputSchema": {"type": "object"},
+                    }
+                ]
                 result = {"tools": tools, "nextCursor": None}
 
             return web.json_response(
@@ -91,7 +102,11 @@ def test_mcp_streamable_http_client_json_and_sse():
             return resp
 
         return web.json_response(
-            {"jsonrpc": "2.0", "id": payload.get("id"), "error": {"message": "unknown method"}},
+            {
+                "jsonrpc": "2.0",
+                "id": payload.get("id"),
+                "error": {"message": "unknown method"},
+            },
             status=400,
         )
 
@@ -146,7 +161,9 @@ def test_get_tools_exposes_mcp_tool_and_routes_call(monkeypatch):
 
     called = {}
 
-    async def fake_execute_mcp_tool(connection, *, name, arguments, session_token=None, **_kwargs):
+    async def fake_execute_mcp_tool(
+        connection, *, name, arguments, session_token=None, **_kwargs
+    ):
         called["connection"] = connection
         called["name"] = name
         called["arguments"] = arguments
@@ -159,7 +176,9 @@ def test_get_tools_exposes_mcp_tool_and_routes_call(monkeypatch):
         app=SimpleNamespace(
             state=SimpleNamespace(
                 config=SimpleNamespace(
-                    MCP_SERVER_CONNECTIONS=[{"url": "http://mcp.local", "auth_type": "none"}],
+                    MCP_SERVER_CONNECTIONS=[
+                        {"url": "http://mcp.local", "auth_type": "none"}
+                    ],
                     TOOL_SERVER_CONNECTIONS=[],
                 ),
                 MCP_SERVERS=[
@@ -204,7 +223,9 @@ def test_get_tools_exposes_mcp_tool_and_routes_call(monkeypatch):
     assert called["session_token"] == "tok_abc"
 
 
-def test_get_tools_skips_app_only_mcp_tools_and_preserves_ui_resource_metadata(monkeypatch):
+def test_get_tools_skips_app_only_mcp_tools_and_preserves_ui_resource_metadata(
+    monkeypatch,
+):
     import open_webui.utils.tools as tools_mod
 
     monkeypatch.setattr(tools_mod.Tools, "get_tool_by_id", lambda _id: None)
@@ -240,7 +261,9 @@ def test_get_tools_skips_app_only_mcp_tools_and_preserves_ui_resource_metadata(m
                                 "description": "desc",
                                 "inputSchema": {"type": "object"},
                                 "_meta": {
-                                    "ui": {"resourceUri": "ui://debug-tool/mcp-app.html"},
+                                    "ui": {
+                                        "resourceUri": "ui://debug-tool/mcp-app.html"
+                                    },
                                     "ui/resourceUri": "ui://debug-tool/mcp-app.html",
                                 },
                             },
@@ -347,7 +370,11 @@ def test_normalize_mcp_server_connection_materializes_default_server_apps_state_
 
 
 def test_set_mcp_servers_config_preserves_legacy_enabled_and_apps_state():
-    from open_webui.routers.configs import MCPServerConnection, MCPServersConfigForm, set_mcp_servers_config
+    from open_webui.routers.configs import (
+        MCPServerConnection,
+        MCPServersConfigForm,
+        set_mcp_servers_config,
+    )
 
     user = SimpleNamespace(id="user-1")
     request = SimpleNamespace()
@@ -355,7 +382,9 @@ def test_set_mcp_servers_config_preserves_legacy_enabled_and_apps_state():
     saved = {}
 
     with patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter:
-        setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+        setter.side_effect = lambda _user, connections: saved.setdefault(
+            "connections", connections
+        )
         form = MCPServersConfigForm(
             MCP_SERVER_CONNECTIONS=[
                 MCPServerConnection(
@@ -380,7 +409,11 @@ def test_set_mcp_servers_config_preserves_legacy_enabled_and_apps_state():
 
 
 def test_set_mcp_servers_config_preserves_legacy_apps_enabled_without_collapsing_to_base_enabled():
-    from open_webui.routers.configs import MCPServerConnection, MCPServersConfigForm, set_mcp_servers_config
+    from open_webui.routers.configs import (
+        MCPServerConnection,
+        MCPServersConfigForm,
+        set_mcp_servers_config,
+    )
 
     user = SimpleNamespace(id="user-1")
     request = SimpleNamespace()
@@ -388,7 +421,9 @@ def test_set_mcp_servers_config_preserves_legacy_apps_enabled_without_collapsing
     saved = {}
 
     with patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter:
-        setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+        setter.side_effect = lambda _user, connections: saved.setdefault(
+            "connections", connections
+        )
         form = MCPServersConfigForm(
             MCP_SERVER_CONNECTIONS=[
                 MCPServerConnection(
@@ -417,17 +452,25 @@ def test_set_mcp_apps_config_updates_apps_flag_without_mutating_enabled_semantic
     request = SimpleNamespace()
     existing_connections = [
         {"url": "http://one.example", "enabled": False},
-        {"url": "http://two.example", "config": {"enable": True}, "mcp_apps": {"enabled": True}},
+        {
+            "url": "http://two.example",
+            "config": {"enable": True},
+            "mcp_apps": {"enabled": True},
+        },
     ]
     saved = {}
 
-    with patch(
-        "open_webui.routers.configs.get_user_mcp_server_connections",
-        return_value=existing_connections,
-    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter, patch(
-        "open_webui.routers.configs.set_user_mcp_apps_config"
-    ) as set_apps_cfg:
-        setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+    with (
+        patch(
+            "open_webui.routers.configs.get_user_mcp_server_connections",
+            return_value=existing_connections,
+        ),
+        patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter,
+        patch("open_webui.routers.configs.set_user_mcp_apps_config") as set_apps_cfg,
+    ):
+        setter.side_effect = lambda _user, connections: saved.setdefault(
+            "connections", connections
+        )
         set_apps_cfg.side_effect = lambda *_args, **_kwargs: None
         result = asyncio.run(
             set_mcp_apps_config(
@@ -471,13 +514,17 @@ def test_set_mcp_apps_config_preserves_legacy_apps_enabled_round_trip_when_base_
     ]
     saved = {}
 
-    with patch(
-        "open_webui.routers.configs.get_user_mcp_server_connections",
-        return_value=existing_connections,
-    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter, patch(
-        "open_webui.routers.configs.set_user_mcp_apps_config"
-    ) as set_apps_cfg:
-        setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+    with (
+        patch(
+            "open_webui.routers.configs.get_user_mcp_server_connections",
+            return_value=existing_connections,
+        ),
+        patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter,
+        patch("open_webui.routers.configs.set_user_mcp_apps_config") as set_apps_cfg,
+    ):
+        setter.side_effect = lambda _user, connections: saved.setdefault(
+            "connections", connections
+        )
         set_apps_cfg.side_effect = lambda *_args, **_kwargs: None
         result = asyncio.run(
             set_mcp_apps_config(
@@ -512,19 +559,35 @@ def test_set_mcp_apps_config_preserves_mixed_server_apps_state_round_trip():
     user = SimpleNamespace(id="user-1")
     request = SimpleNamespace()
     existing_connections = [
-        {"url": "http://one.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True}},
-        {"url": "http://two.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False}},
-        {"url": "http://three.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
+        {
+            "url": "http://one.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True},
+        },
+        {
+            "url": "http://two.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+        },
+        {
+            "url": "http://three.example",
+            "enabled": False,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
     ]
     saved = {}
 
-    with patch(
-        "open_webui.routers.configs.get_user_mcp_server_connections",
-        return_value=existing_connections,
-    ), patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter, patch(
-        "open_webui.routers.configs.set_user_mcp_apps_config"
-    ) as set_apps_cfg:
-        setter.side_effect = lambda _user, connections: saved.setdefault("connections", connections)
+    with (
+        patch(
+            "open_webui.routers.configs.get_user_mcp_server_connections",
+            return_value=existing_connections,
+        ),
+        patch("open_webui.routers.configs.set_user_mcp_server_connections") as setter,
+        patch("open_webui.routers.configs.set_user_mcp_apps_config") as set_apps_cfg,
+    ):
+        setter.side_effect = lambda _user, connections: saved.setdefault(
+            "connections", connections
+        )
         set_apps_cfg.side_effect = lambda *_args, **_kwargs: None
         result = asyncio.run(
             set_mcp_apps_config(
@@ -570,17 +633,30 @@ def test_get_mcp_apps_config_reports_global_and_per_server_state():
     request = SimpleNamespace()
     user = SimpleNamespace(id="user-1")
     connections = [
-        {"url": "http://one.example", "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
-        {"url": "http://two.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False}},
-        {"url": "http://three.example", "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True}},
+        {
+            "url": "http://one.example",
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
+        {
+            "url": "http://two.example",
+            "enabled": False,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+        },
+        {
+            "url": "http://three.example",
+            "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True},
+        },
     ]
 
-    with patch(
-        "open_webui.routers.configs.get_user_mcp_server_connections",
-        return_value=connections,
-    ), patch(
-        "open_webui.routers.configs.get_user_mcp_apps_config",
-        return_value={"ENABLE_MCP_APPS": True},
+    with (
+        patch(
+            "open_webui.routers.configs.get_user_mcp_server_connections",
+            return_value=connections,
+        ),
+        patch(
+            "open_webui.routers.configs.get_user_mcp_apps_config",
+            return_value={"ENABLE_MCP_APPS": True},
+        ),
     ):
         result = asyncio.run(get_mcp_apps_config(request, user))
 
@@ -600,9 +676,21 @@ def test_get_mcp_apps_config_preserves_stored_server_toggles_even_when_global_di
     request = SimpleNamespace()
     user = SimpleNamespace(id="user-1")
     connections = [
-        {"url": "http://one.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True}},
-        {"url": "http://two.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": False}},
-        {"url": "http://three.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True}},
+        {
+            "url": "http://one.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True},
+        },
+        {
+            "url": "http://two.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": False},
+        },
+        {
+            "url": "http://three.example",
+            "enabled": False,
+            "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True},
+        },
     ]
 
     with patch(
@@ -621,7 +709,9 @@ def test_get_mcp_apps_config_preserves_stored_server_toggles_even_when_global_di
     }
 
 
-def test_mcp_apps_route_sequence_persists_nested_apps_state_through_db_backed_reload(monkeypatch):
+def test_mcp_apps_route_sequence_persists_nested_apps_state_through_db_backed_reload(
+    monkeypatch,
+):
     from open_webui.routers.configs import (
         MCPAppsConfigForm,
         get_mcp_apps_config,
@@ -629,9 +719,21 @@ def test_mcp_apps_route_sequence_persists_nested_apps_state_through_db_backed_re
     )
 
     stored_connections = [
-        {"url": "http://one.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True}},
-        {"url": "http://two.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False}},
-        {"url": "http://three.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
+        {
+            "url": "http://one.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": False, "enabled": True},
+        },
+        {
+            "url": "http://two.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": False},
+        },
+        {
+            "url": "http://three.example",
+            "enabled": False,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
     ]
     persisted_settings = {"tools": {"mcp_server_connections": stored_connections}}
     persisted_snapshots = []
@@ -646,7 +748,9 @@ def test_mcp_apps_route_sequence_persists_nested_apps_state_through_db_backed_re
         persisted_snapshots.append(json.loads(json.dumps(persisted_settings)))
         return SimpleNamespace(id="user-1", role="user", settings=persisted_settings)
 
-    monkeypatch.setattr("open_webui.utils.user_tools.Users.get_user_by_id", fake_get_user_by_id)
+    monkeypatch.setattr(
+        "open_webui.utils.user_tools.Users.get_user_by_id", fake_get_user_by_id
+    )
     monkeypatch.setattr(
         "open_webui.utils.user_tools.Users.update_user_settings_by_id",
         fake_update_user_settings_by_id,
@@ -712,14 +816,16 @@ def test_set_mcp_apps_config_persists_global_flag_without_any_connections():
     user = SimpleNamespace(id="user-1")
     request = SimpleNamespace()
 
-    with patch(
-        "open_webui.routers.configs.get_user_mcp_server_connections",
-        return_value=[],
-    ), patch(
-        "open_webui.routers.configs.set_user_mcp_server_connections"
-    ) as set_connections, patch(
-        "open_webui.routers.configs.set_user_mcp_apps_config"
-    ) as set_apps_cfg:
+    with (
+        patch(
+            "open_webui.routers.configs.get_user_mcp_server_connections",
+            return_value=[],
+        ),
+        patch(
+            "open_webui.routers.configs.set_user_mcp_server_connections"
+        ) as set_connections,
+        patch("open_webui.routers.configs.set_user_mcp_apps_config") as set_apps_cfg,
+    ):
         set_apps_cfg.side_effect = lambda *_args, **_kwargs: None
         result = asyncio.run(
             set_mcp_apps_config(
@@ -740,9 +846,14 @@ def test_set_mcp_apps_config_persists_global_flag_without_any_connections():
 
 
 def test_verify_mcp_server_connection_uses_session_token_for_session_auth():
-    from open_webui.routers.configs import MCPServerConnection, verify_mcp_server_connection
+    from open_webui.routers.configs import (
+        MCPServerConnection,
+        verify_mcp_server_connection,
+    )
 
-    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="sess-token")))
+    request = SimpleNamespace(
+        state=SimpleNamespace(token=SimpleNamespace(credentials="sess-token"))
+    )
     user = SimpleNamespace(id="user-1")
     captured = {}
 
@@ -754,7 +865,10 @@ def test_verify_mcp_server_connection_uses_session_token_for_session_auth():
             "tools": [{"name": "echo", "description": "Echo"}],
         }
 
-    with patch("open_webui.routers.configs.get_mcp_server_data", side_effect=fake_get_mcp_server_data):
+    with patch(
+        "open_webui.routers.configs.get_mcp_server_data",
+        side_effect=fake_get_mcp_server_data,
+    ):
         result = asyncio.run(
             verify_mcp_server_connection(
                 request,
@@ -768,12 +882,17 @@ def test_verify_mcp_server_connection_uses_session_token_for_session_auth():
     assert result["server_info"] == {"name": "Session-backed"}
     assert result["tool_count"] == 1
     assert result["tools"] == [{"name": "echo", "description": "Echo"}]
-    assert isinstance(result["verified_at"], str) and result["verified_at"].endswith("Z")
+    assert isinstance(result["verified_at"], str) and result["verified_at"].endswith(
+        "Z"
+    )
 
 
 def test_verify_mcp_server_connection_requires_authenticated_session_for_session_auth():
     from fastapi import HTTPException
-    from open_webui.routers.configs import MCPServerConnection, verify_mcp_server_connection
+    from open_webui.routers.configs import (
+        MCPServerConnection,
+        verify_mcp_server_connection,
+    )
 
     request = SimpleNamespace(state=SimpleNamespace())
     user = SimpleNamespace(id="user-1")
@@ -798,7 +917,9 @@ def test_verify_mcp_server_connection_requires_authenticated_session_for_session
 def test_get_mcp_apps_capabilities_exposes_stable_frontend_contract():
     from open_webui.routers.configs import get_mcp_apps_capabilities
 
-    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc")))
+    request = SimpleNamespace(
+        state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc"))
+    )
     user = SimpleNamespace(id="user-1")
     connections = [
         {
@@ -832,10 +953,15 @@ def test_get_mcp_apps_capabilities_exposes_stable_frontend_contract():
         }
     ]
 
-    with patch(
-        "open_webui.routers.configs.get_user_mcp_server_connections",
-        return_value=connections,
-    ), patch("open_webui.routers.configs.get_mcp_servers_data", return_value=server_data):
+    with (
+        patch(
+            "open_webui.routers.configs.get_user_mcp_server_connections",
+            return_value=connections,
+        ),
+        patch(
+            "open_webui.routers.configs.get_mcp_servers_data", return_value=server_data
+        ),
+    ):
         result = asyncio.run(get_mcp_apps_capabilities(request, user))
 
     assert result["ENABLE_MCP_APPS"] is True
@@ -868,7 +994,9 @@ def test_get_mcp_apps_capabilities_exposes_stable_frontend_contract():
 def test_get_mcp_apps_capabilities_builds_proxy_render_url_from_resource_uri():
     from open_webui.routers.configs import get_mcp_apps_capabilities
 
-    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc")))
+    request = SimpleNamespace(
+        state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc"))
+    )
     user = SimpleNamespace(id="user-1")
     connections = [
         {
@@ -895,10 +1023,15 @@ def test_get_mcp_apps_capabilities_builds_proxy_render_url_from_resource_uri():
         }
     ]
 
-    with patch(
-        "open_webui.routers.configs.get_user_mcp_server_connections",
-        return_value=connections,
-    ), patch("open_webui.routers.configs.get_mcp_servers_data", return_value=server_data):
+    with (
+        patch(
+            "open_webui.routers.configs.get_user_mcp_server_connections",
+            return_value=connections,
+        ),
+        patch(
+            "open_webui.routers.configs.get_mcp_servers_data", return_value=server_data
+        ),
+    ):
         result = asyncio.run(get_mcp_apps_capabilities(request, user))
 
     assert result["servers"][0]["resources"] == [
@@ -920,11 +1053,21 @@ def test_get_mcp_apps_capabilities_builds_proxy_render_url_from_resource_uri():
 def test_get_mcp_apps_capabilities_preserves_disabled_server_index_without_leaking_active_apps_metadata():
     from open_webui.routers.configs import get_mcp_apps_capabilities
 
-    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc")))
+    request = SimpleNamespace(
+        state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc"))
+    )
     user = SimpleNamespace(id="user-1")
     connections = [
-        {"url": "http://one.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
-        {"url": "http://two.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
+        {
+            "url": "http://one.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
+        {
+            "url": "http://two.example",
+            "enabled": False,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
     ]
     server_data = [
         {
@@ -932,14 +1075,21 @@ def test_get_mcp_apps_capabilities_preserves_disabled_server_index_without_leaki
             "server_info": {"name": "Server One"},
             "capabilities": {"resources": {}},
             "tools": [{"name": "lookup"}],
-            "resources": [{"id": "resource-1", "render_url": "https://apps.example/render/1"}],
+            "resources": [
+                {"id": "resource-1", "render_url": "https://apps.example/render/1"}
+            ],
         }
     ]
 
-    with patch(
-        "open_webui.routers.configs.get_user_mcp_server_connections",
-        return_value=connections,
-    ), patch("open_webui.routers.configs.get_mcp_servers_data", return_value=server_data):
+    with (
+        patch(
+            "open_webui.routers.configs.get_user_mcp_server_connections",
+            return_value=connections,
+        ),
+        patch(
+            "open_webui.routers.configs.get_mcp_servers_data", return_value=server_data
+        ),
+    ):
         result = asyncio.run(get_mcp_apps_capabilities(request, user))
 
     assert result["ENABLE_MCP_APPS"] is True
@@ -970,11 +1120,21 @@ def test_get_mcp_apps_capabilities_preserves_disabled_server_index_without_leaki
 def test_get_mcp_apps_capabilities_blanks_prompt_and_tool_metadata_for_disabled_base_connection():
     from open_webui.routers.configs import get_mcp_apps_capabilities
 
-    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc")))
+    request = SimpleNamespace(
+        state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc"))
+    )
     user = SimpleNamespace(id="user-1")
     connections = [
-        {"url": "http://one.example", "enabled": True, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
-        {"url": "http://two.example", "enabled": False, "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True}},
+        {
+            "url": "http://one.example",
+            "enabled": True,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
+        {
+            "url": "http://two.example",
+            "enabled": False,
+            "mcp_apps": {"ENABLE_MCP_APPS": True, "enabled": True},
+        },
     ]
     server_data = [
         {
@@ -983,7 +1143,9 @@ def test_get_mcp_apps_capabilities_blanks_prompt_and_tool_metadata_for_disabled_
             "capabilities": {"resources": {}, "prompts": {}},
             "tools": [{"name": "lookup"}],
             "prompts": [{"name": "assist"}],
-            "resources": [{"id": "resource-1", "render_url": "https://apps.example/render/1"}],
+            "resources": [
+                {"id": "resource-1", "render_url": "https://apps.example/render/1"}
+            ],
         },
         {
             "idx": 1,
@@ -991,19 +1153,29 @@ def test_get_mcp_apps_capabilities_blanks_prompt_and_tool_metadata_for_disabled_
             "capabilities": {"resources": {}, "prompts": {}},
             "tools": [{"name": "should-not-leak"}],
             "prompts": [{"name": "hidden"}],
-            "resources": [{"id": "resource-2", "render_url": "https://apps.example/render/2"}],
+            "resources": [
+                {"id": "resource-2", "render_url": "https://apps.example/render/2"}
+            ],
         },
     ]
 
-    with patch(
-        "open_webui.routers.configs.get_user_mcp_server_connections",
-        return_value=connections,
-    ), patch("open_webui.routers.configs.get_mcp_servers_data", return_value=server_data):
+    with (
+        patch(
+            "open_webui.routers.configs.get_user_mcp_server_connections",
+            return_value=connections,
+        ),
+        patch(
+            "open_webui.routers.configs.get_mcp_servers_data", return_value=server_data
+        ),
+    ):
         result = asyncio.run(get_mcp_apps_capabilities(request, user))
 
     assert [server["idx"] for server in result["servers"]] == [0, 1]
     assert result["servers"][0]["prompts"] == [{"name": "assist"}]
-    assert result["servers"][0]["metadata"] == {"tool_count": 1, "tool_names": ["lookup"]}
+    assert result["servers"][0]["metadata"] == {
+        "tool_count": 1,
+        "tool_names": ["lookup"],
+    }
     assert result["servers"][1]["enabled"] is False
     assert result["servers"][1]["apps_enabled"] is False
     assert result["servers"][1]["capabilities"] == {}
@@ -1015,7 +1187,9 @@ def test_get_mcp_apps_capabilities_blanks_prompt_and_tool_metadata_for_disabled_
 def test_get_mcp_app_resource_proxies_text_resource():
     from open_webui.routers.configs import get_mcp_app_resource
 
-    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc")))
+    request = SimpleNamespace(
+        state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc"))
+    )
     user = SimpleNamespace(id="user-1")
     connections = [
         {
@@ -1025,20 +1199,23 @@ def test_get_mcp_app_resource_proxies_text_resource():
         }
     ]
 
-    with patch(
-        "open_webui.routers.configs.get_user_mcp_server_connections",
-        return_value=connections,
-    ), patch(
-        "open_webui.routers.configs.read_mcp_resource",
-        return_value={
-            "contents": [
-                {
-                    "uri": "ui://debug-tool/mcp-app.html",
-                    "mimeType": "text/html;profile=mcp-app",
-                    "text": "<html>ok</html>",
-                }
-            ]
-        },
+    with (
+        patch(
+            "open_webui.routers.configs.get_user_mcp_server_connections",
+            return_value=connections,
+        ),
+        patch(
+            "open_webui.routers.configs.read_mcp_resource",
+            return_value={
+                "contents": [
+                    {
+                        "uri": "ui://debug-tool/mcp-app.html",
+                        "mimeType": "text/html;profile=mcp-app",
+                        "text": "<html>ok</html>",
+                    }
+                ]
+            },
+        ),
     ):
         response = asyncio.run(
             get_mcp_app_resource(
@@ -1084,7 +1261,9 @@ def test_get_mcp_server_data_fetches_resources_and_prompts_when_advertised():
 
     fake_client = FakeClient()
 
-    with patch("open_webui.utils.mcp.MCPStreamableHttpClient", return_value=fake_client):
+    with patch(
+        "open_webui.utils.mcp.MCPStreamableHttpClient", return_value=fake_client
+    ):
         result = asyncio.run(get_mcp_server_data({"url": "http://mcp.local"}))
 
     assert fake_client.calls == [
@@ -1106,7 +1285,9 @@ def test_get_mcp_server_data_fetches_resources_and_prompts_when_advertised():
 def test_tools_route_prefers_custom_mcp_title_and_description(monkeypatch):
     from open_webui.routers import tools as tools_router
 
-    monkeypatch.setattr(tools_router, "get_user_tool_server_connections", lambda _request, _user: [])
+    monkeypatch.setattr(
+        tools_router, "get_user_tool_server_connections", lambda _request, _user: []
+    )
     monkeypatch.setattr(
         tools_router,
         "get_user_mcp_server_connections",
@@ -1122,12 +1303,16 @@ def test_tools_route_prefers_custom_mcp_title_and_description(monkeypatch):
             }
         ],
     )
-    monkeypatch.setattr(tools_router.Tools, "get_tools_list_by_user_id", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        tools_router.Tools, "get_tools_list_by_user_id", lambda *_args, **_kwargs: []
+    )
 
     async def fake_get_tool_servers_data(*_args, **_kwargs):
         return []
 
-    monkeypatch.setattr(tools_router, "get_tool_servers_data", fake_get_tool_servers_data)
+    monkeypatch.setattr(
+        tools_router, "get_tool_servers_data", fake_get_tool_servers_data
+    )
 
     request = SimpleNamespace(
         state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc")),
@@ -1177,7 +1362,7 @@ def test_mcp_streamable_http_client_reads_large_resource_sse():
         if method == "initialize":
             return web.Response(
                 text=(
-                    'event: message\n'
+                    "event: message\n"
                     'data: {"jsonrpc":"2.0","id":"%s","result":{"serverInfo":{"name":"TestMCP"},'
                     '"capabilities":{"tools":{},"resources":{}}}}\n\n'
                 )
@@ -1211,7 +1396,11 @@ def test_mcp_streamable_http_client_reads_large_resource_sse():
             )
 
         return web.json_response(
-            {"jsonrpc": "2.0", "id": payload.get("id"), "error": {"message": "unknown"}},
+            {
+                "jsonrpc": "2.0",
+                "id": payload.get("id"),
+                "error": {"message": "unknown"},
+            },
             status=400,
         )
 
@@ -1314,7 +1503,9 @@ def test_http_client_protocol_negotiation_retries_on_http_error():
                 headers={"Mcp-Session-Id": "legacy_sess"},
             )
 
-        return web.json_response({"jsonrpc": "2.0", "id": payload.get("id"), "result": {}})
+        return web.json_response(
+            {"jsonrpc": "2.0", "id": payload.get("id"), "result": {}}
+        )
 
     async def run():
         app = web.Application()
@@ -1361,13 +1552,13 @@ def test_convert_content_blocks_to_messages_preserves_tool_files_for_persisted_h
                 {
                     "id": "call_1",
                     "type": "function",
-                    "function": {"name": "lookup", "arguments": "{\"query\":\"halo\"}"},
+                    "function": {"name": "lookup", "arguments": '{"query":"halo"}'},
                 }
             ],
             "results": [
                 {
                     "tool_call_id": "call_1",
-                    "content": "{\"app_id\":\"resource-1\",\"render_url\":\"https://apps.example/render/1\",\"metadata\":{\"tool_call_id\":\"call_1\"}}",
+                    "content": '{"app_id":"resource-1","render_url":"https://apps.example/render/1","metadata":{"tool_call_id":"call_1"}}',
                     "files": [{"type": "image", "url": "data:image/png;base64,abc"}],
                 }
             ],
@@ -1384,14 +1575,14 @@ def test_convert_content_blocks_to_messages_preserves_tool_files_for_persisted_h
                 {
                     "id": "call_1",
                     "type": "function",
-                    "function": {"name": "lookup", "arguments": "{\"query\":\"halo\"}"},
+                    "function": {"name": "lookup", "arguments": '{"query":"halo"}'},
                 }
             ],
         },
         {
             "role": "tool",
             "tool_call_id": "call_1",
-            "content": "{\"app_id\":\"resource-1\",\"render_url\":\"https://apps.example/render/1\",\"metadata\":{\"tool_call_id\":\"call_1\"}}",
+            "content": '{"app_id":"resource-1","render_url":"https://apps.example/render/1","metadata":{"tool_call_id":"call_1"}}',
             "files": [{"type": "image", "url": "data:image/png;base64,abc"}],
         },
     ]
@@ -1437,7 +1628,9 @@ def test_build_mcp_app_display_result_uses_resource_proxy_for_ui_resource_uri():
 def test_mcp_router_read_resource_extracts_ui_metadata_and_content():
     from open_webui.routers.mcp import ReadResourceRequest, read_resource
 
-    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc")))
+    request = SimpleNamespace(
+        state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc"))
+    )
     user = SimpleNamespace(id="user-1")
     connections = [
         {
@@ -1447,35 +1640,39 @@ def test_mcp_router_read_resource_extracts_ui_metadata_and_content():
         }
     ]
 
-    with patch(
-        "open_webui.routers.mcp.get_user_mcp_server_connections",
-        return_value=connections,
-    ), patch(
-        "open_webui.routers.mcp.get_mcp_server_data",
-        return_value={
-            "resources": [
-                {
-                    "uri": "ui://debug-tool/mcp-app.html",
-                    "meta": {
-                        "ui": {
-                            "csp": {"connectDomains": ["https://api.example.com"]},
-                            "permissions": {"camera": {}},
-                        }
-                    },
-                }
-            ]
-        },
-    ), patch(
-        "open_webui.routers.mcp.read_mcp_resource",
-        return_value={
-            "contents": [
-                {
-                    "uri": "ui://debug-tool/mcp-app.html",
-                    "mimeType": "text/html;profile=mcp-app",
-                    "text": "<html>ok</html>",
-                }
-            ]
-        },
+    with (
+        patch(
+            "open_webui.routers.mcp.get_user_mcp_server_connections",
+            return_value=connections,
+        ),
+        patch(
+            "open_webui.routers.mcp.get_mcp_server_data",
+            return_value={
+                "resources": [
+                    {
+                        "uri": "ui://debug-tool/mcp-app.html",
+                        "meta": {
+                            "ui": {
+                                "csp": {"connectDomains": ["https://api.example.com"]},
+                                "permissions": {"camera": {}},
+                            }
+                        },
+                    }
+                ]
+            },
+        ),
+        patch(
+            "open_webui.routers.mcp.read_mcp_resource",
+            return_value={
+                "contents": [
+                    {
+                        "uri": "ui://debug-tool/mcp-app.html",
+                        "mimeType": "text/html;profile=mcp-app",
+                        "text": "<html>ok</html>",
+                    }
+                ]
+            },
+        ),
     ):
         response = asyncio.run(
             read_resource(
@@ -1490,8 +1687,18 @@ def test_mcp_router_read_resource_extracts_ui_metadata_and_content():
             "uri": "ui://debug-tool/mcp-app.html",
             "content": "<html>ok</html>",
             "mimeType": "text/html;profile=mcp-app",
-            "csp": {"connectDomains": ["https://api.example.com"], "resourceDomains": None, "frameDomains": None, "baseUriDomains": None},
-            "permissions": {"camera": {}, "microphone": None, "geolocation": None, "clipboardWrite": None},
+            "csp": {
+                "connectDomains": ["https://api.example.com"],
+                "resourceDomains": None,
+                "frameDomains": None,
+                "baseUriDomains": None,
+            },
+            "permissions": {
+                "camera": {},
+                "microphone": None,
+                "geolocation": None,
+                "clipboardWrite": None,
+            },
         }
     }
 
@@ -1499,7 +1706,9 @@ def test_mcp_router_read_resource_extracts_ui_metadata_and_content():
 def test_mcp_router_call_tool_preserves_mcp_content_shape():
     from open_webui.routers.mcp import CallToolRequest, call_tool
 
-    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc")))
+    request = SimpleNamespace(
+        state=SimpleNamespace(token=SimpleNamespace(credentials="tok_abc"))
+    )
     user = SimpleNamespace(id="user-1")
     connections = [
         {
@@ -1509,21 +1718,26 @@ def test_mcp_router_call_tool_preserves_mcp_content_shape():
         }
     ]
 
-    with patch(
-        "open_webui.routers.mcp.get_user_mcp_server_connections",
-        return_value=connections,
-    ), patch(
-        "open_webui.routers.mcp.execute_mcp_tool",
-        return_value={
-            "content": [{"type": "text", "text": "Debug text content #1"}],
-            "structuredContent": {"counter": 1},
-            "isError": False,
-        },
+    with (
+        patch(
+            "open_webui.routers.mcp.get_user_mcp_server_connections",
+            return_value=connections,
+        ),
+        patch(
+            "open_webui.routers.mcp.execute_mcp_tool",
+            return_value={
+                "content": [{"type": "text", "text": "Debug text content #1"}],
+                "structuredContent": {"counter": 1},
+                "isError": False,
+            },
+        ),
     ):
         response = asyncio.run(
             call_tool(
                 request,
-                CallToolRequest(server_id="0", tool_name="debug-tool", arguments={"level": "info"}),
+                CallToolRequest(
+                    server_id="0", tool_name="debug-tool", arguments={"level": "info"}
+                ),
                 user,
             )
         )
@@ -1695,6 +1909,7 @@ def test_http_client_falls_back_to_legacy_sse_transport():
         "tools/call",
     ]
 
+
 def _write_stdio_server(tmp_path, script_name: str, body: str) -> str:
     script_path = tmp_path / script_name
     script_path.write_text(textwrap.dedent(body), encoding="utf-8")
@@ -1707,7 +1922,8 @@ def test_mcp_stdio_client_lifecycle_and_call(tmp_path, monkeypatch):
     monkeypatch.setattr(
         mcp_mod,
         "DEFAULT_STDIO_ALLOWED_COMMANDS",
-        mcp_mod.DEFAULT_STDIO_ALLOWED_COMMANDS | {pathlib.Path(sys.executable).name.lower()},
+        mcp_mod.DEFAULT_STDIO_ALLOWED_COMMANDS
+        | {pathlib.Path(sys.executable).name.lower()},
     )
 
     script_path = _write_stdio_server(
@@ -1762,7 +1978,11 @@ def test_mcp_stdio_client_lifecycle_and_call(tmp_path, monkeypatch):
 
     async def run():
         client = mcp_mod.MCPStdioClient(
-            {"transport_type": "stdio", "command": sys.executable, "args": [script_path]}
+            {
+                "transport_type": "stdio",
+                "command": sys.executable,
+                "args": [script_path],
+            }
         )
         try:
             await client.start()
@@ -1788,13 +2008,16 @@ def test_mcp_stdio_client_lifecycle_and_call(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
-def test_mcp_stdio_timeout_marks_client_tainted_and_manager_rebuilds(tmp_path, monkeypatch):
+def test_mcp_stdio_timeout_marks_client_tainted_and_manager_rebuilds(
+    tmp_path, monkeypatch
+):
     from open_webui.utils import mcp as mcp_mod
 
     monkeypatch.setattr(
         mcp_mod,
         "DEFAULT_STDIO_ALLOWED_COMMANDS",
-        mcp_mod.DEFAULT_STDIO_ALLOWED_COMMANDS | {pathlib.Path(sys.executable).name.lower()},
+        mcp_mod.DEFAULT_STDIO_ALLOWED_COMMANDS
+        | {pathlib.Path(sys.executable).name.lower()},
     )
     monkeypatch.setattr(mcp_mod, "MCP_TOOL_CALL_TIMEOUT", 1)
 
@@ -2091,7 +2314,9 @@ def test_validate_stdio_command_requires_git_for_uvx_git_source(monkeypatch):
     monkeypatch.setattr(
         mcp_mod,
         "_resolve_stdio_command",
-        lambda _connection, command: f"/resolved/{command}" if command == "uvx" else None,
+        lambda _connection, command: (
+            f"/resolved/{command}" if command == "uvx" else None
+        ),
     )
 
     with pytest.raises(ValueError, match="Git 源安装"):
@@ -2117,7 +2342,9 @@ def test_validate_stdio_command_requires_git_for_uvx_git_source_with_path(
     uvx_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     uvx_path.chmod(0o755)
 
-    monkeypatch.setattr(mcp_mod, "_resolve_stdio_command", lambda _connection, command: None)
+    monkeypatch.setattr(
+        mcp_mod, "_resolve_stdio_command", lambda _connection, command: None
+    )
 
     with pytest.raises(ValueError, match="Git 源安装"):
         mcp_mod._validate_stdio_command(
@@ -2139,9 +2366,9 @@ def test_get_mcp_runtime_capabilities_reports_preset_commands(monkeypatch):
     monkeypatch.setattr(
         mcp_mod,
         "_resolve_stdio_command",
-        lambda _connection, command: f"/resolved/{command}"
-        if command in {"uvx", "git"}
-        else None,
+        lambda _connection, command: (
+            f"/resolved/{command}" if command in {"uvx", "git"} else None
+        ),
     )
 
     capabilities = mcp_mod.get_mcp_runtime_capabilities()
@@ -2173,7 +2400,8 @@ def test_mcp_stdio_start_failure_includes_stderr(tmp_path, monkeypatch):
     monkeypatch.setattr(
         mcp_mod,
         "DEFAULT_STDIO_ALLOWED_COMMANDS",
-        mcp_mod.DEFAULT_STDIO_ALLOWED_COMMANDS | {pathlib.Path(sys.executable).name.lower()},
+        mcp_mod.DEFAULT_STDIO_ALLOWED_COMMANDS
+        | {pathlib.Path(sys.executable).name.lower()},
     )
 
     script_path = _write_stdio_server(
@@ -2190,7 +2418,11 @@ def test_mcp_stdio_start_failure_includes_stderr(tmp_path, monkeypatch):
 
     async def run():
         client = mcp_mod.MCPStdioClient(
-            {"transport_type": "stdio", "command": sys.executable, "args": [script_path]}
+            {
+                "transport_type": "stdio",
+                "command": sys.executable,
+                "args": [script_path],
+            }
         )
         with pytest.raises(RuntimeError) as exc_info:
             await client.start()
@@ -2202,13 +2434,16 @@ def test_mcp_stdio_start_failure_includes_stderr(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
-def test_mcp_stdio_start_failure_without_stderr_reports_initialize_exit(tmp_path, monkeypatch):
+def test_mcp_stdio_start_failure_without_stderr_reports_initialize_exit(
+    tmp_path, monkeypatch
+):
     from open_webui.utils import mcp as mcp_mod
 
     monkeypatch.setattr(
         mcp_mod,
         "DEFAULT_STDIO_ALLOWED_COMMANDS",
-        mcp_mod.DEFAULT_STDIO_ALLOWED_COMMANDS | {pathlib.Path(sys.executable).name.lower()},
+        mcp_mod.DEFAULT_STDIO_ALLOWED_COMMANDS
+        | {pathlib.Path(sys.executable).name.lower()},
     )
 
     script_path = _write_stdio_server(
@@ -2221,7 +2456,11 @@ def test_mcp_stdio_start_failure_without_stderr_reports_initialize_exit(tmp_path
 
     async def run():
         client = mcp_mod.MCPStdioClient(
-            {"transport_type": "stdio", "command": sys.executable, "args": [script_path]}
+            {
+                "transport_type": "stdio",
+                "command": sys.executable,
+                "args": [script_path],
+            }
         )
         with pytest.raises(RuntimeError) as exc_info:
             await client.start()
@@ -2238,7 +2477,9 @@ def test_mcp_servers_config_get_includes_runtime_capabilities(monkeypatch):
     monkeypatch.setattr(
         configs_router,
         "get_user_mcp_server_connections",
-        lambda _request, _user: [{"transport_type": "http", "url": "http://example.com"}],
+        lambda _request, _user: [
+            {"transport_type": "http", "url": "http://example.com"}
+        ],
     )
     monkeypatch.setattr(
         configs_router,
@@ -2310,7 +2551,9 @@ def test_mcp_servers_config_post_round_trips_headers(monkeypatch):
         "set_user_mcp_server_connections",
         lambda _user, connections: saved.setdefault("connections", connections),
     )
-    monkeypatch.setattr(configs_router, "get_mcp_runtime_capabilities", lambda: {"commands": {}})
+    monkeypatch.setattr(
+        configs_router, "get_mcp_runtime_capabilities", lambda: {"commands": {}}
+    )
     monkeypatch.setattr(configs_router, "get_mcp_runtime_profile", lambda: "custom")
 
     form_data = configs_router.MCPServersConfigForm(
@@ -2351,14 +2594,19 @@ def test_verify_mcp_server_connection_passes_headers_and_session_token(monkeypat
                 {
                     "name": "echo",
                     "description": "Echo",
-                    "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}},
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"text": {"type": "string"}},
+                    },
                 }
             ],
         }
 
     monkeypatch.setattr(configs_router, "get_mcp_server_data", fake_get_mcp_server_data)
 
-    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="session-token")))
+    request = SimpleNamespace(
+        state=SimpleNamespace(token=SimpleNamespace(credentials="session-token"))
+    )
     form_data = configs_router.MCPServerConnection(
         transport_type="http",
         url="http://example.com",
@@ -2382,7 +2630,10 @@ def test_verify_mcp_server_connection_passes_headers_and_session_token(monkeypat
         {
             "name": "echo",
             "description": "Echo",
-            "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}},
+            "inputSchema": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+            },
         }
     ]
 

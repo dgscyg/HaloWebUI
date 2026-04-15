@@ -10,7 +10,6 @@ from typing import Any
 import open_webui.config as config_module
 from open_webui.config import ENABLE_PERSISTENT_CONFIG, REDIS_KEY_PREFIX
 
-
 DB_RESTORE_CONFIRMATION = "RESTORE DATABASE"
 DB_RESTORE_TOKEN_TTL_SECONDS = 15 * 60
 
@@ -71,7 +70,9 @@ def prune_db_restore_tokens(app, now: float | None = None) -> None:
             cleanup_path(payload.get("path"))
 
 
-def create_restore_token(app, *, path: str, filename: str, user_id: str) -> dict[str, Any]:
+def create_restore_token(
+    app, *, path: str, filename: str, user_id: str
+) -> dict[str, Any]:
     _, tokens = ensure_db_restore_state(app)
     prune_db_restore_tokens(app)
 
@@ -133,9 +134,8 @@ def create_sqlite_snapshot(engine, filename: str = "webui.db") -> Path:
     snapshot_path = temp_dir / filename
 
     raw_connection = engine.raw_connection()
-    source_connection = (
-        getattr(raw_connection, "driver_connection", None)
-        or getattr(raw_connection, "connection", raw_connection)
+    source_connection = getattr(raw_connection, "driver_connection", None) or getattr(
+        raw_connection, "connection", raw_connection
     )
     target_connection = sqlite3.connect(snapshot_path)
 
@@ -160,17 +160,23 @@ def inspect_sqlite_backup(file_path: Path) -> dict[str, Any]:
         if integrity_value != "ok":
             raise ValueError(f"SQLite integrity check failed: {integrity_value}")
 
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        )
         tables = [row[0] for row in cursor.fetchall()]
     finally:
         connection.close()
 
     if "config" not in tables or "chat" not in tables:
-        raise ValueError("The uploaded file is not a compatible Halo WebUI SQLite backup.")
+        raise ValueError(
+            "The uploaded file is not a compatible Halo WebUI SQLite backup."
+        )
 
     warnings: list[str] = []
     if "user" not in tables:
-        warnings.append("The backup is missing the user table; please verify the source file.")
+        warnings.append(
+            "The backup is missing the user table; please verify the source file."
+        )
 
     return {
         "summary": {

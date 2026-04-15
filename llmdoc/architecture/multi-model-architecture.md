@@ -91,11 +91,11 @@ user.settings.ui.connections = {
 
 ## 5. 流式响应处理
 
-| 提供商 | 输入格式 | 输出格式 | 转换逻辑 |
-|--------|----------|----------|----------|
-| OpenAI | SSE | SSE | 直接透传 |
-| Anthropic | Anthropic Events | SSE | `anthropic.py` 内转换 |
-| Gemini | NDJSON | SSE | `gemini.py` 内转换 |
-| Ollama | NDJSON | NDJSON | 直接透传 |
+| 提供商    | 输入格式         | 输出格式 | 转换逻辑              |
+| --------- | ---------------- | -------- | --------------------- |
+| OpenAI    | SSE              | SSE      | 直接透传              |
+| Anthropic | Anthropic Events | SSE      | `anthropic.py` 内转换 |
+| Gemini    | NDJSON           | SSE      | `gemini.py` 内转换    |
+| Ollama    | NDJSON           | NDJSON   | 直接透传              |
 
 前端统一使用 `EventSourceParserStream` 解析 SSE 格式。

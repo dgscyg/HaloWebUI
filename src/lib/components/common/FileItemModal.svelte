@@ -88,7 +88,8 @@
 
 						{#if item?.file?.data?.content}
 							<div class="capitalize shrink-0">
-								{getLineCount(item?.file?.data?.content ?? '')} {$i18n.t('extracted lines')}
+								{getLineCount(item?.file?.data?.content ?? '')}
+								{$i18n.t('extracted lines')}
 							</div>
 
 							<div class="flex items-center gap-1 shrink-0">
@@ -105,17 +106,15 @@
 								文件处理模式
 							</div>
 							<Tooltip
-								content={
-									selectedProcessingMode === 'full_context'
-										? $i18n.t(
-												'Inject the entire content as context for comprehensive processing, this is recommended for complex queries.'
-											)
-										: selectedProcessingMode === 'native_file'
-											? '直接把原文件交给支持原生文件输入的模型。'
-											: $i18n.t(
-													'Default to segmented retrieval for focused and relevant content extraction, this is recommended for most cases.'
-												)
-								}
+								content={selectedProcessingMode === 'full_context'
+									? $i18n.t(
+											'Inject the entire content as context for comprehensive processing, this is recommended for complex queries.'
+										)
+									: selectedProcessingMode === 'native_file'
+										? '直接把原文件交给支持原生文件输入的模型。'
+										: $i18n.t(
+												'Default to segmented retrieval for focused and relevant content extraction, this is recommended for most cases.'
+											)}
 							>
 								<HaloSelect
 									value={selectedProcessingMode}

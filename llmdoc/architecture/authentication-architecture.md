@@ -98,6 +98,7 @@ flowchart TD
 ```
 
 示例: 用户属于 `developers` 和 `admins` 两组
+
 - `developers` 组: `{"chat": {"file_upload": true}}`
 - `admins` 组: `{"chat": {"file_upload": false}}`
 - 最终权限: `{"chat": {"file_upload": true}}` (取 true)
@@ -105,6 +106,7 @@ flowchart TD
 ### 4.2 API Key 限制机制
 
 `backend/open_webui/utils/auth.py:211-233`:
+
 - 检查 `ENABLE_API_KEY` 全局开关
 - 支持端点白名单 (`API_KEY_ALLOWED_ENDPOINTS`)
 - 精确匹配或前缀匹配允许的路径
@@ -122,6 +124,7 @@ flowchart TD
 ### 5.3 LDAP 组同步
 
 LDAP 组同步 (`backend/open_webui/routers/auths.py:314-369`) 在每次登录时执行:
+
 - 移除用户不再属于的组
 - 添加用户新加入的组
 - 组名从 DN 中提取 (`cn=devs,ou=groups` -> `devs`)

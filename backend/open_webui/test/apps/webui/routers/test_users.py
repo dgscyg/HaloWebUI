@@ -304,7 +304,9 @@ class TestUsers(AbstractPostgresTest):
                     "ui": {
                         "connections": {
                             "gemini": {
-                                "GEMINI_API_BASE_URLS": ["https://gemini.example.com/v1beta"],
+                                "GEMINI_API_BASE_URLS": [
+                                    "https://gemini.example.com/v1beta"
+                                ],
                                 "GEMINI_API_KEYS": ["gem-key"],
                                 "GEMINI_API_CONFIGS": {"0": {"remark": "Gemini"}},
                             }
@@ -354,7 +356,9 @@ class TestUsers(AbstractPostgresTest):
                     "ui": {
                         "connections": {
                             "gemini": {
-                                "GEMINI_API_BASE_URLS": ["https://gemini.example.com/v1beta"],
+                                "GEMINI_API_BASE_URLS": [
+                                    "https://gemini.example.com/v1beta"
+                                ],
                                 "GEMINI_API_KEYS": ["gem-key"],
                                 "GEMINI_API_CONFIGS": {"0": {"remark": "Gemini"}},
                             }

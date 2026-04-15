@@ -19,14 +19,12 @@ from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.access_control import has_access
 
 
-
 from open_webui.env import (
     AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
     SRC_LOG_LEVELS,
     GLOBAL_LOG_LEVEL,
 )
 from open_webui.models.users import UserModel
-
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -153,7 +151,9 @@ async def _fetch_all_base_models(request: Request, user: UserModel = None):
     if not isinstance(openai_resp, dict):
         openai_models = []
     else:
-        openai_models = openai_resp.get("data", []) if isinstance(openai_resp, dict) else []
+        openai_models = (
+            openai_resp.get("data", []) if isinstance(openai_resp, dict) else []
+        )
 
     # Process ollama
     if isinstance(ollama_resp, dict) and "models" in ollama_resp:
@@ -187,18 +187,28 @@ async def _fetch_all_base_models(request: Request, user: UserModel = None):
     if not isinstance(gemini_resp, dict):
         gemini_models = []
     else:
-        gemini_models = gemini_resp.get("data", []) if isinstance(gemini_resp, dict) else []
+        gemini_models = (
+            gemini_resp.get("data", []) if isinstance(gemini_resp, dict) else []
+        )
 
     # Process anthropic
     if not isinstance(anthropic_resp, dict):
         anthropic_models = []
     else:
-        anthropic_models = anthropic_resp.get("data", []) if isinstance(anthropic_resp, dict) else []
+        anthropic_models = (
+            anthropic_resp.get("data", []) if isinstance(anthropic_resp, dict) else []
+        )
 
     function_models = (
         function_models_resp if isinstance(function_models_resp, list) else []
     )
-    models = function_models + openai_models + ollama_models + gemini_models + anthropic_models
+    models = (
+        function_models
+        + openai_models
+        + ollama_models
+        + gemini_models
+        + anthropic_models
+    )
 
     return models
 
@@ -207,7 +217,9 @@ async def get_all_base_models(request: Request, user: UserModel = None):
     # Per-user cache + stale-while-revalidate keeps model-aware pages responsive even when
     # one upstream connection is temporarily slow.
     cache_enabled = bool(
-        getattr(getattr(request.app.state, "config", None), "ENABLE_BASE_MODELS_CACHE", True)
+        getattr(
+            getattr(request.app.state, "config", None), "ENABLE_BASE_MODELS_CACHE", True
+        )
     )
     if not cache_enabled:
         return await _fetch_all_base_models(request, user=user)
@@ -253,7 +265,9 @@ async def get_all_models(request, user: UserModel = None):
     ]
 
     # Build quick indexes for matching.
-    model_by_id: dict[str, dict] = {m.get("id"): m for m in models if isinstance(m, dict) and m.get("id")}
+    model_by_id: dict[str, dict] = {
+        m.get("id"): m for m in models if isinstance(m, dict) and m.get("id")
+    }
     model_ids = set(model_by_id.keys())
 
     def _can_read_workspace_model(model_row) -> bool:
@@ -269,7 +283,9 @@ async def get_all_models(request, user: UserModel = None):
     # provider base model metadata from that owner's connections so we can route correctly.
     async def _owner_base_models_by_user_id(user_id: str) -> list[dict]:
         try:
-            from open_webui.models.users import Users  # local import to avoid heavy coupling
+            from open_webui.models.users import (
+                Users,
+            )  # local import to avoid heavy coupling
 
             owner = Users.get_user_by_id(user_id)
             if not owner:
@@ -290,7 +306,11 @@ async def get_all_models(request, user: UserModel = None):
             if mid == model_id:
                 return m
             # Ollama ids can vary ('llama3' vs 'llama3:7b'); match on base name.
-            if m.get("owned_by") == "ollama" and isinstance(mid, str) and isinstance(model_id, str):
+            if (
+                m.get("owned_by") == "ollama"
+                and isinstance(mid, str)
+                and isinstance(model_id, str)
+            ):
                 if model_id == mid.split(":")[0]:
                     return m
         return None
@@ -306,7 +326,9 @@ async def get_all_models(request, user: UserModel = None):
         if user and user.role == "user" and not _can_read_workspace_model(custom_model):
             continue
 
-        existing = model_by_id.get(custom_model.id) or _find_model_like(models, custom_model.id)
+        existing = model_by_id.get(custom_model.id) or _find_model_like(
+            models, custom_model.id
+        )
         if existing:
             if custom_model.is_active:
                 existing["name"] = custom_model.name
@@ -331,7 +353,9 @@ async def get_all_models(request, user: UserModel = None):
 
         owner_id = custom_model.user_id
         if owner_id not in owner_base_models_cache:
-            owner_base_models_cache[owner_id] = await _owner_base_models_by_user_id(owner_id)
+            owner_base_models_cache[owner_id] = await _owner_base_models_by_user_id(
+                owner_id
+            )
 
         owner_base_model = _find_model_like(
             owner_base_models_cache.get(owner_id, []), custom_model.id
@@ -366,12 +390,18 @@ async def get_all_models(request, user: UserModel = None):
         pipe = None
         action_ids = []
 
-        base_like = _find_model_like(models, custom_model.base_model_id)  # user's own base models
+        base_like = _find_model_like(
+            models, custom_model.base_model_id
+        )  # user's own base models
         if base_like is None and custom_model.user_id:
             owner_id = custom_model.user_id
             if owner_id not in owner_base_models_cache:
-                owner_base_models_cache[owner_id] = await _owner_base_models_by_user_id(owner_id)
-            base_like = _find_model_like(owner_base_models_cache.get(owner_id, []), custom_model.base_model_id)
+                owner_base_models_cache[owner_id] = await _owner_base_models_by_user_id(
+                    owner_id
+                )
+            base_like = _find_model_like(
+                owner_base_models_cache.get(owner_id, []), custom_model.base_model_id
+            )
 
         if not base_like:
             # Skip orphaned preset models whose upstream/base model no longer exists for the
@@ -469,7 +499,11 @@ async def get_all_models(request, user: UserModel = None):
     log.debug(f"get_all_models() returned {len(models)} models")
 
     # Per-request model map (avoid leaking across users).
-    request.state.MODELS = {model["id"]: model for model in models if isinstance(model, dict) and model.get("id")}
+    request.state.MODELS = {
+        model["id"]: model
+        for model in models
+        if isinstance(model, dict) and model.get("id")
+    }
     return models
 
 

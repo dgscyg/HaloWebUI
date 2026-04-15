@@ -11,15 +11,7 @@
 
 	const dispatch = createEventDispatcher();
 
-	import {
-		config,
-		mobile,
-		models,
-		settings,
-		TTSWorker,
-		activeAudioId,
-		user
-	} from '$lib/stores';
+	import { config, mobile, models, settings, TTSWorker, activeAudioId, user } from '$lib/stores';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
 	import { imageGenerations } from '$lib/apis/images';
 	// [REACTION_FEATURE] Commented out - reaction feature disabled for now
@@ -639,9 +631,15 @@
 		const input = data.prompt_tokens ?? data.input_tokens;
 		const output = data.completion_tokens ?? data.output_tokens;
 		const total = data.total_tokens;
-		const compDetails = (data.completion_tokens_details ?? data.output_tokens_details) as Record<string, unknown> | null;
+		const compDetails = (data.completion_tokens_details ?? data.output_tokens_details) as Record<
+			string,
+			unknown
+		> | null;
 		const reasoning = compDetails?.reasoning_tokens;
-		const promptDetails = (data.prompt_tokens_details ?? data.input_tokens_details) as Record<string, unknown> | null;
+		const promptDetails = (data.prompt_tokens_details ?? data.input_tokens_details) as Record<
+			string,
+			unknown
+		> | null;
 		const cached = promptDetails?.cached_tokens;
 
 		const dk = document.documentElement.classList.contains('dark');
@@ -674,9 +672,10 @@
 		for (const [label, val] of rows) {
 			h += `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">`;
 			h += `<span style="color:${lb}">${label}</span>`;
-			h += val !== null
-				? `<span style="font-weight:500;font-variant-numeric:tabular-nums;color:${vl}">${val}</span>`
-				: `<span style="color:${vl};font-style:italic">未返回</span>`;
+			h +=
+				val !== null
+					? `<span style="font-weight:500;font-variant-numeric:tabular-nums;color:${vl}">${val}</span>`
+					: `<span style="color:${vl};font-style:italic">未返回</span>`;
 			h += `</div>`;
 		}
 		h += `</div></div>`;
@@ -786,14 +785,14 @@
 			class={`shrink-0 ml-0.5 sm:ml-0 ltr:mr-1.5 rtl:ml-1.5 ltr:sm:mr-3 rtl:sm:ml-3 relative z-10`}
 		>
 			<div class="relative">
-					<ModelIcon
-						src={model?.info?.meta?.profile_image_url ??
-							model?.meta?.profile_image_url ??
-							($i18n.language === 'dg-DG' ? `/doge.png` : `${WEBUI_BASE_URL}/static/favicon.png`)}
-						alt="model profile"
-						bare={true}
-						className="size-[26px] sm:size-[34px] rounded-xl -translate-y-[1px] ring-2 ring-white/60 dark:ring-white/20"
-					/>
+				<ModelIcon
+					src={model?.info?.meta?.profile_image_url ??
+						model?.meta?.profile_image_url ??
+						($i18n.language === 'dg-DG' ? `/doge.png` : `${WEBUI_BASE_URL}/static/favicon.png`)}
+					alt="model profile"
+					bare={true}
+					className="size-[26px] sm:size-[34px] rounded-xl -translate-y-[1px] ring-2 ring-white/60 dark:ring-white/20"
+				/>
 				<!-- Status indicator dot -->
 				<div
 					class="absolute -bottom-0.5 -right-0.5 size-1.5 sm:size-2 translate-x-px -translate-y-px bg-green-400 rounded-full ring-1 sm:ring-[1.5px] ring-white dark:ring-gray-900 animate-pulse"
@@ -1126,19 +1125,14 @@
 														);
 													} else if (type === 'ask') {
 														const input = e.detail?.input ?? '';
-														submitMessage(
-															message.id,
-															`\`\`\`\n${content}\n\`\`\`\n${input}`
-														);
+														submitMessage(message.id, `\`\`\`\n${content}\n\`\`\`\n${input}`);
 													}
 												}}
 											/>
 										{/if}
 
 										{#if message?.error}
-											<Error
-												content={message?.error === true ? message.content : message?.error}
-											/>
+											<Error content={message?.error === true ? message.content : message?.error} />
 										{/if}
 
 										{#if message.code_executions}
@@ -1147,128 +1141,128 @@
 									</div>
 
 									<div class="message-outline-toolbar-row flex items-end mt-2 gap-3 flex-wrap">
-						{#if (message?.sources || message?.citations) && (model?.info?.meta?.capabilities?.citations ?? true)}
-							<div class="flex-shrink-0">
-								<Citations
-									bind:this={citationsRef}
-									id={message?.id}
-									sources={message?.sources ?? message?.citations}
-								/>
-							</div>
-						{/if}
-						{#if message.done || siblings.length > 1}
-							<div
-								bind:this={buttonsContainerElement}
-								class="flex items-center gap-0.5 overflow-x-auto buttons text-gray-600 dark:text-gray-300 px-1.5 h-[37px] rounded-xl {isLastMessage
-									? 'visible opacity-100'
-									: 'invisible group-hover/message:visible opacity-0 group-hover/message:opacity-100'} transition-all duration-300 bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl shadow-sm border border-gray-200/50 dark:border-gray-700/50 w-fit min-w-0 max-w-full toolbar-appear"
-							>
-								{#if siblings.length > 1}
-									<div class="flex self-center min-w-fit" dir="ltr">
-										<button
-											class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
-											on:click={() => {
-												showPreviousMessage(message);
-											}}
-										>
-											<ChevronLeft class="size-3.5" strokeWidth={2.5} />
-										</button>
-
-										{#if messageIndexEdit}
-											<div
-												class="text-sm flex justify-center font-semibold self-center dark:text-gray-100 min-w-fit"
-											>
-												<input
-													id="message-index-input-{message.id}"
-													type="number"
-													value={siblings.indexOf(message.id) + 1}
-													min="1"
-													max={siblings.length}
-													on:focus={(e) => {
-														e.target.select();
-													}}
-													on:blur={(e) => {
-														gotoMessage(message, e.target.value - 1);
-														messageIndexEdit = false;
-													}}
-													on:keydown={(e) => {
-														if (e.key === 'Enter') {
-															gotoMessage(message, e.target.value - 1);
-															messageIndexEdit = false;
-														}
-													}}
-													class="bg-transparent font-semibold self-center dark:text-gray-100 min-w-fit outline-hidden"
-												/>/{siblings.length}
-											</div>
-										{:else}
-											<!-- svelte-ignore a11y-no-static-element-interactions -->
-											<div
-												class="text-xs tracking-wider font-medium self-center text-gray-500 dark:text-gray-300 min-w-fit tabular-nums"
-												on:dblclick={async () => {
-													messageIndexEdit = true;
-
-													await tick();
-													const input = document.getElementById(
-														`message-index-input-${message.id}`
-													);
-													if (input) {
-														input.focus();
-														input.select();
-													}
-												}}
-											>
-												{siblings.indexOf(message.id) + 1}/{siblings.length}
+										{#if (message?.sources || message?.citations) && (model?.info?.meta?.capabilities?.citations ?? true)}
+											<div class="flex-shrink-0">
+												<Citations
+													bind:this={citationsRef}
+													id={message?.id}
+													sources={message?.sources ?? message?.citations}
+												/>
 											</div>
 										{/if}
+										{#if message.done || siblings.length > 1}
+											<div
+												bind:this={buttonsContainerElement}
+												class="flex items-center gap-0.5 overflow-x-auto buttons text-gray-600 dark:text-gray-300 px-1.5 h-[37px] rounded-xl {isLastMessage
+													? 'visible opacity-100'
+													: 'invisible group-hover/message:visible opacity-0 group-hover/message:opacity-100'} transition-all duration-300 bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl shadow-sm border border-gray-200/50 dark:border-gray-700/50 w-fit min-w-0 max-w-full toolbar-appear"
+											>
+												{#if siblings.length > 1}
+													<div class="flex self-center min-w-fit" dir="ltr">
+														<button
+															class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
+															on:click={() => {
+																showPreviousMessage(message);
+															}}
+														>
+															<ChevronLeft class="size-3.5" strokeWidth={2.5} />
+														</button>
 
-										<button
-											class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
-											on:click={() => {
-												showNextMessage(message);
-											}}
-										>
-											<ChevronRight class="size-3.5" strokeWidth={2.5} />
-										</button>
-									</div>
-									{#if message.done}
-										<div
-											class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"
-										></div>
-									{/if}
-								{/if}
+														{#if messageIndexEdit}
+															<div
+																class="text-sm flex justify-center font-semibold self-center dark:text-gray-100 min-w-fit"
+															>
+																<input
+																	id="message-index-input-{message.id}"
+																	type="number"
+																	value={siblings.indexOf(message.id) + 1}
+																	min="1"
+																	max={siblings.length}
+																	on:focus={(e) => {
+																		e.target.select();
+																	}}
+																	on:blur={(e) => {
+																		gotoMessage(message, e.target.value - 1);
+																		messageIndexEdit = false;
+																	}}
+																	on:keydown={(e) => {
+																		if (e.key === 'Enter') {
+																			gotoMessage(message, e.target.value - 1);
+																			messageIndexEdit = false;
+																		}
+																	}}
+																	class="bg-transparent font-semibold self-center dark:text-gray-100 min-w-fit outline-hidden"
+																/>/{siblings.length}
+															</div>
+														{:else}
+															<!-- svelte-ignore a11y-no-static-element-interactions -->
+															<div
+																class="text-xs tracking-wider font-medium self-center text-gray-500 dark:text-gray-300 min-w-fit tabular-nums"
+																on:dblclick={async () => {
+																	messageIndexEdit = true;
 
-								{#if message.done}
-									{#if !readOnly}
-										{#if $user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true}
-											<Tooltip content={$i18n.t('Edit')} placement="bottom">
-												<button
-													class="{isLastMessage
-														? 'visible'
-														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-													on:click={() => {
-														editMessageHandler();
-													}}
-												>
-													<PencilLine class="w-4 h-4" strokeWidth={2} />
-												</button>
-											</Tooltip>
-										{/if}
-									{/if}
+																	await tick();
+																	const input = document.getElementById(
+																		`message-index-input-${message.id}`
+																	);
+																	if (input) {
+																		input.focus();
+																		input.select();
+																	}
+																}}
+															>
+																{siblings.indexOf(message.id) + 1}/{siblings.length}
+															</div>
+														{/if}
 
-									<Tooltip content={$i18n.t('Copy')} placement="bottom">
-										<button
-											class="{isLastMessage
-												? 'visible'
-												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 copy-response-button"
-											on:click={() => {
-												copyToClipboard(message.content);
-											}}
-										>
-											<Copy class="w-4 h-4" strokeWidth={2} />
-										</button>
-									</Tooltip>
+														<button
+															class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
+															on:click={() => {
+																showNextMessage(message);
+															}}
+														>
+															<ChevronRight class="size-3.5" strokeWidth={2.5} />
+														</button>
+													</div>
+													{#if message.done}
+														<div
+															class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"
+														></div>
+													{/if}
+												{/if}
 
-									<!-- [REACTION_FEATURE] Commented out - reaction button disabled for now
+												{#if message.done}
+													{#if !readOnly}
+														{#if $user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true}
+															<Tooltip content={$i18n.t('Edit')} placement="bottom">
+																<button
+																	class="{isLastMessage
+																		? 'visible'
+																		: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+																	on:click={() => {
+																		editMessageHandler();
+																	}}
+																>
+																	<PencilLine class="w-4 h-4" strokeWidth={2} />
+																</button>
+															</Tooltip>
+														{/if}
+													{/if}
+
+													<Tooltip content={$i18n.t('Copy')} placement="bottom">
+														<button
+															class="{isLastMessage
+																? 'visible'
+																: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 copy-response-button"
+															on:click={() => {
+																copyToClipboard(message.content);
+															}}
+														>
+															<Copy class="w-4 h-4" strokeWidth={2} />
+														</button>
+													</Tooltip>
+
+													<!-- [REACTION_FEATURE] Commented out - reaction button disabled for now
 								{#if !readOnly}
 									<div>
 										<Tooltip content={$i18n.t('React')} placement="bottom">
@@ -1292,365 +1286,389 @@
 								{/if}
 								-->
 
-									{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
-										<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
-											<button
-												id="speak-button-{message.id}"
-												class="{isLastMessage
-													? 'visible'
-													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-												on:click={() => {
-													if (!loadingSpeech) {
-														toggleSpeakMessage();
-													}
-												}}
-											>
-												{#if loadingSpeech}
-													<svg
-														class=" w-4 h-4"
-														fill="currentColor"
-														viewBox="0 0 24 24"
-														xmlns="http://www.w3.org/2000/svg"
-													>
-														<style>
-															.spinner_S1WN {
-																animation: spinner_MGfb 0.8s linear infinite;
-																animation-delay: -0.8s;
-															}
-
-															.spinner_Km9P {
-																animation-delay: -0.65s;
-															}
-
-															.spinner_JApP {
-																animation-delay: -0.5s;
-															}
-
-															@keyframes spinner_MGfb {
-																93.75%,
-																100% {
-																	opacity: 0.2;
-																}
-															}
-														</style>
-														<circle class="spinner_S1WN" cx="4" cy="12" r="3" />
-														<circle class="spinner_S1WN spinner_Km9P" cx="12" cy="12" r="3" />
-														<circle class="spinner_S1WN spinner_JApP" cx="20" cy="12" r="3" />
-													</svg>
-												{:else if speaking}
-													<VolumeX class="w-4 h-4" strokeWidth={2} />
-												{:else}
-													<Volume2 class="w-4 h-4" strokeWidth={2} />
-												{/if}
-											</button>
-										</Tooltip>
-									{/if}
-
-									{#if $config?.features.enable_image_generation && ($user?.role === 'admin' || $user?.permissions?.features?.image_generation) && !readOnly}
-										<Tooltip content={$i18n.t('Generate Image')} placement="bottom">
-											<button
-												class="{isLastMessage
-													? 'visible'
-													: 'invisible group-hover:visible'}  p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-												on:click={() => {
-													if (!generatingImage) {
-														generateImage(message);
-													}
-												}}
-											>
-												{#if generatingImage}
-													<svg
-														class=" w-4 h-4"
-														fill="currentColor"
-														viewBox="0 0 24 24"
-														xmlns="http://www.w3.org/2000/svg"
-													>
-														<style>
-															.spinner_S1WN {
-																animation: spinner_MGfb 0.8s linear infinite;
-																animation-delay: -0.8s;
-															}
-
-															.spinner_Km9P {
-																animation-delay: -0.65s;
-															}
-
-															.spinner_JApP {
-																animation-delay: -0.5s;
-															}
-
-															@keyframes spinner_MGfb {
-																93.75%,
-																100% {
-																	opacity: 0.2;
-																}
-															}
-														</style>
-														<circle class="spinner_S1WN" cx="4" cy="12" r="3" />
-														<circle class="spinner_S1WN spinner_Km9P" cx="12" cy="12" r="3" />
-														<circle class="spinner_S1WN spinner_JApP" cx="20" cy="12" r="3" />
-													</svg>
-												{:else}
-													<ImagePlus class="w-4 h-4" strokeWidth={2} />
-												{/if}
-											</button>
-										</Tooltip>
-									{/if}
-
-									{#if message.usage}
-										<Tooltip
-											content={formatUsageHtml(message.usage)}
-											placement="bottom"
-											offset={[0, 8]}
-											tippyOptions={{
-												theme: 'none',
-												maxWidth: 'none',
-												duration: [100, 75],
-												onShow(instance) {
-													const box = instance.popper.firstElementChild;
-													if (box) {
-														box.style.background = 'transparent';
-														box.style.border = 'none';
-														box.style.boxShadow = 'none';
-														box.style.borderRadius = '0';
-													}
-													const tc = box?.querySelector('.tippy-content');
-													if (tc) tc.style.padding = '0';
-												}
-											}}
-										>
-											<button
-												class="{isLastMessage
-													? 'visible'
-													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-												id="info-{message.id}"
-											>
-												<Info class="w-4 h-4" strokeWidth={2} />
-											</button>
-										</Tooltip>
-									{/if}
-
-									<div class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"></div>
-
-									{#if !readOnly}
-										{#if isLastMessage}
-											<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
-												<button
-													type="button"
-													id="continue-response-button"
-													class="{isLastMessage
-														? 'visible'
-														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
-													on:click={() => {
-														continueResponse();
-													}}
-												>
-													<PlayCircle class="w-4 h-4" strokeWidth={2} />
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#if $settings?.regenerateMenu ?? true}
-											<Dropdown
-												bind:show={showRegenerateMenu}
-												side="top"
-												align="start"
-												on:change={(e) => {
-													if (!e.detail) regenerateInput = '';
-												}}
-											>
-												<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
-													<button
-														type="button"
-														class="{isLastMessage
-															? 'visible'
-															: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
-														aria-label={$i18n.t('Regenerate')}
-													>
-														<RefreshCw class="w-4 h-4" strokeWidth={2} />
-													</button>
-												</Tooltip>
-
-												<div slot="content">
-													<DropdownMenu.Content
-														class="w-60 rounded-2xl px-1.5 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-														sideOffset={8}
-														side="top"
-														align="start"
-														transition={flyAndScale}
-													>
-														<!-- 自定义指令输入框 -->
-														<div class="px-1.5 py-1.5">
-															<form
-																class="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-xl"
-																on:submit|preventDefault={() => {
-																	if (regenerateInput.trim()) {
-																		showRegenerateMenu = false;
-																		regenerateResponse(message, {
-																			instruction: regenerateInput.trim()
-																		});
-																		regenerateInput = '';
+													{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
+														<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
+															<button
+																id="speak-button-{message.id}"
+																class="{isLastMessage
+																	? 'visible'
+																	: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+																on:click={() => {
+																	if (!loadingSpeech) {
+																		toggleSpeakMessage();
 																	}
 																}}
 															>
-																<input
-																	type="text"
-																	bind:value={regenerateInput}
-																	placeholder={$i18n.t('Request changes to reply...')}
-																	class="w-full bg-transparent text-sm outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500"
-																/>
+																{#if loadingSpeech}
+																	<svg
+																		class=" w-4 h-4"
+																		fill="currentColor"
+																		viewBox="0 0 24 24"
+																		xmlns="http://www.w3.org/2000/svg"
+																	>
+																		<style>
+																			.spinner_S1WN {
+																				animation: spinner_MGfb 0.8s linear infinite;
+																				animation-delay: -0.8s;
+																			}
+
+																			.spinner_Km9P {
+																				animation-delay: -0.65s;
+																			}
+
+																			.spinner_JApP {
+																				animation-delay: -0.5s;
+																			}
+
+																			@keyframes spinner_MGfb {
+																				93.75%,
+																				100% {
+																					opacity: 0.2;
+																				}
+																			}
+																		</style>
+																		<circle class="spinner_S1WN" cx="4" cy="12" r="3" />
+																		<circle
+																			class="spinner_S1WN spinner_Km9P"
+																			cx="12"
+																			cy="12"
+																			r="3"
+																		/>
+																		<circle
+																			class="spinner_S1WN spinner_JApP"
+																			cx="20"
+																			cy="12"
+																			r="3"
+																		/>
+																	</svg>
+																{:else if speaking}
+																	<VolumeX class="w-4 h-4" strokeWidth={2} />
+																{:else}
+																	<Volume2 class="w-4 h-4" strokeWidth={2} />
+																{/if}
+															</button>
+														</Tooltip>
+													{/if}
+
+													{#if $config?.features.enable_image_generation && ($user?.role === 'admin' || $user?.permissions?.features?.image_generation) && !readOnly}
+														<Tooltip content={$i18n.t('Generate Image')} placement="bottom">
+															<button
+																class="{isLastMessage
+																	? 'visible'
+																	: 'invisible group-hover:visible'}  p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+																on:click={() => {
+																	if (!generatingImage) {
+																		generateImage(message);
+																	}
+																}}
+															>
+																{#if generatingImage}
+																	<svg
+																		class=" w-4 h-4"
+																		fill="currentColor"
+																		viewBox="0 0 24 24"
+																		xmlns="http://www.w3.org/2000/svg"
+																	>
+																		<style>
+																			.spinner_S1WN {
+																				animation: spinner_MGfb 0.8s linear infinite;
+																				animation-delay: -0.8s;
+																			}
+
+																			.spinner_Km9P {
+																				animation-delay: -0.65s;
+																			}
+
+																			.spinner_JApP {
+																				animation-delay: -0.5s;
+																			}
+
+																			@keyframes spinner_MGfb {
+																				93.75%,
+																				100% {
+																					opacity: 0.2;
+																				}
+																			}
+																		</style>
+																		<circle class="spinner_S1WN" cx="4" cy="12" r="3" />
+																		<circle
+																			class="spinner_S1WN spinner_Km9P"
+																			cx="12"
+																			cy="12"
+																			r="3"
+																		/>
+																		<circle
+																			class="spinner_S1WN spinner_JApP"
+																			cx="20"
+																			cy="12"
+																			r="3"
+																		/>
+																	</svg>
+																{:else}
+																	<ImagePlus class="w-4 h-4" strokeWidth={2} />
+																{/if}
+															</button>
+														</Tooltip>
+													{/if}
+
+													{#if message.usage}
+														<Tooltip
+															content={formatUsageHtml(message.usage)}
+															placement="bottom"
+															offset={[0, 8]}
+															tippyOptions={{
+																theme: 'none',
+																maxWidth: 'none',
+																duration: [100, 75],
+																onShow(instance) {
+																	const box = instance.popper.firstElementChild;
+																	if (box) {
+																		box.style.background = 'transparent';
+																		box.style.border = 'none';
+																		box.style.boxShadow = 'none';
+																		box.style.borderRadius = '0';
+																	}
+																	const tc = box?.querySelector('.tippy-content');
+																	if (tc) tc.style.padding = '0';
+																}
+															}}
+														>
+															<button
+																class="{isLastMessage
+																	? 'visible'
+																	: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+																id="info-{message.id}"
+															>
+																<Info class="w-4 h-4" strokeWidth={2} />
+															</button>
+														</Tooltip>
+													{/if}
+
+													<div
+														class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"
+													></div>
+
+													{#if !readOnly}
+														{#if isLastMessage}
+															<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
 																<button
-																	type="submit"
-																	class="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors {regenerateInput.trim()
-																		? 'opacity-100'
-																		: 'opacity-30 pointer-events-none'}"
-																	disabled={!regenerateInput.trim()}
+																	type="button"
+																	id="continue-response-button"
+																	class="{isLastMessage
+																		? 'visible'
+																		: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
+																	on:click={() => {
+																		continueResponse();
+																	}}
 																>
-																	<ArrowRight class="w-4 h-4" />
+																	<PlayCircle class="w-4 h-4" strokeWidth={2} />
 																</button>
-															</form>
-														</div>
-
-														<hr class="border-black/5 dark:border-white/5 my-0.5" />
-
-														<!-- 重试 -->
-														<DropdownMenu.Item
-															class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-															on:click={() => {
-																showRegenerateMenu = false;
-																doRegenerate();
-															}}
-														>
-															<RefreshCw class="w-4 h-4 shrink-0" strokeWidth={1.75} />
-															<span>{$i18n.t('Retry')}</span>
-														</DropdownMenu.Item>
-
-														<!-- 添加详细信息 -->
-														<DropdownMenu.Item
-															class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-															on:click={() => {
-																showRegenerateMenu = false;
-																regenerateResponse(message, {
-																	instruction: $i18n.t('Please provide a more detailed response')
-																});
-															}}
-														>
-															<ListPlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
-															<span>{$i18n.t('Add more detail')}</span>
-														</DropdownMenu.Item>
-
-														<!-- 更加简洁 -->
-														<DropdownMenu.Item
-															class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-															on:click={() => {
-																showRegenerateMenu = false;
-																regenerateResponse(message, {
-																	instruction: $i18n.t('Please respond more concisely')
-																});
-															}}
-														>
-															<AlignLeft class="w-4 h-4 shrink-0" strokeWidth={1.75} />
-															<span>{$i18n.t('More concise')}</span>
-														</DropdownMenu.Item>
-
-														<!-- 思考时间更长（条件显示） -->
-														{#if modelSupportsThinking}
-															<DropdownMenu.Item
-																class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-																on:click={() => {
-																	showRegenerateMenu = false;
-																	regenerateResponse(message, { reasoningEffort: 'high' });
-																}}
-															>
-																<Lightbulb class="w-4 h-4 shrink-0" strokeWidth={1.75} />
-																<span>{$i18n.t('Think longer')}</span>
-															</DropdownMenu.Item>
+															</Tooltip>
 														{/if}
 
-														<!-- 搜索网页（条件显示） -->
-														{#if $config?.features?.enable_web_search}
-															<DropdownMenu.Item
-																class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-																on:click={() => {
-																	showRegenerateMenu = false;
-																	regenerateResponse(message, { webSearch: true });
+														{#if $settings?.regenerateMenu ?? true}
+															<Dropdown
+																bind:show={showRegenerateMenu}
+																side="top"
+																align="start"
+																on:change={(e) => {
+																	if (!e.detail) regenerateInput = '';
 																}}
 															>
-																<Globe class="w-4 h-4 shrink-0" strokeWidth={1.75} />
-																<span>{$i18n.t('Search the web')}</span>
-															</DropdownMenu.Item>
-														{/if}
-													</DropdownMenu.Content>
-												</div>
-											</Dropdown>
-										{:else}
-											<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
-												<button
-													type="button"
-													class="{isLastMessage
-														? 'visible'
-														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
-													on:click={() => {
-														doRegenerate();
-													}}
-												>
-													<RefreshCw class="w-4 h-4" strokeWidth={2} />
-												</button>
-											</Tooltip>
-										{/if}
+																<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
+																	<button
+																		type="button"
+																		class="{isLastMessage
+																			? 'visible'
+																			: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
+																		aria-label={$i18n.t('Regenerate')}
+																	>
+																		<RefreshCw class="w-4 h-4" strokeWidth={2} />
+																	</button>
+																</Tooltip>
 
-										<Tooltip content={$i18n.t('Delete')} placement="bottom">
-											<button
-												type="button"
-												id="delete-response-button"
-												class="{isLastMessage
-													? 'visible'
-													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
-												on:click={() => {
-													showDeleteConfirm = true;
-												}}
-											>
-												<Trash2 class="w-4 h-4" strokeWidth={2} />
-											</button>
-										</Tooltip>
+																<div slot="content">
+																	<DropdownMenu.Content
+																		class="w-60 rounded-2xl px-1.5 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+																		sideOffset={8}
+																		side="top"
+																		align="start"
+																		transition={flyAndScale}
+																	>
+																		<!-- 自定义指令输入框 -->
+																		<div class="px-1.5 py-1.5">
+																			<form
+																				class="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-xl"
+																				on:submit|preventDefault={() => {
+																					if (regenerateInput.trim()) {
+																						showRegenerateMenu = false;
+																						regenerateResponse(message, {
+																							instruction: regenerateInput.trim()
+																						});
+																						regenerateInput = '';
+																					}
+																				}}
+																			>
+																				<input
+																					type="text"
+																					bind:value={regenerateInput}
+																					placeholder={$i18n.t('Request changes to reply...')}
+																					class="w-full bg-transparent text-sm outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500"
+																				/>
+																				<button
+																					type="submit"
+																					class="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors {regenerateInput.trim()
+																						? 'opacity-100'
+																						: 'opacity-30 pointer-events-none'}"
+																					disabled={!regenerateInput.trim()}
+																				>
+																					<ArrowRight class="w-4 h-4" />
+																				</button>
+																			</form>
+																		</div>
 
-										{#if isLastMessage}
-											{#each model?.actions ?? [] as action}
-												<Tooltip content={action.name} placement="bottom">
-													<button
-														type="button"
-														class="{isLastMessage
-															? 'visible'
-															: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-														on:click={() => {
-															actionMessage(action.id, message);
-														}}
-													>
-														{#if action.icon_url}
-															<div class="size-4">
-																<img
-																	src={action.icon_url}
-																	class="w-4 h-4 {action.icon_url.includes('svg')
-																		? 'dark:invert-[80%]'
-																		: ''}"
-																	style="fill: currentColor;"
-																	alt={action.name}
-																/>
-															</div>
+																		<hr class="border-black/5 dark:border-white/5 my-0.5" />
+
+																		<!-- 重试 -->
+																		<DropdownMenu.Item
+																			class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+																			on:click={() => {
+																				showRegenerateMenu = false;
+																				doRegenerate();
+																			}}
+																		>
+																			<RefreshCw class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+																			<span>{$i18n.t('Retry')}</span>
+																		</DropdownMenu.Item>
+
+																		<!-- 添加详细信息 -->
+																		<DropdownMenu.Item
+																			class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+																			on:click={() => {
+																				showRegenerateMenu = false;
+																				regenerateResponse(message, {
+																					instruction: $i18n.t(
+																						'Please provide a more detailed response'
+																					)
+																				});
+																			}}
+																		>
+																			<ListPlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+																			<span>{$i18n.t('Add more detail')}</span>
+																		</DropdownMenu.Item>
+
+																		<!-- 更加简洁 -->
+																		<DropdownMenu.Item
+																			class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+																			on:click={() => {
+																				showRegenerateMenu = false;
+																				regenerateResponse(message, {
+																					instruction: $i18n.t('Please respond more concisely')
+																				});
+																			}}
+																		>
+																			<AlignLeft class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+																			<span>{$i18n.t('More concise')}</span>
+																		</DropdownMenu.Item>
+
+																		<!-- 思考时间更长（条件显示） -->
+																		{#if modelSupportsThinking}
+																			<DropdownMenu.Item
+																				class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+																				on:click={() => {
+																					showRegenerateMenu = false;
+																					regenerateResponse(message, { reasoningEffort: 'high' });
+																				}}
+																			>
+																				<Lightbulb class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+																				<span>{$i18n.t('Think longer')}</span>
+																			</DropdownMenu.Item>
+																		{/if}
+
+																		<!-- 搜索网页（条件显示） -->
+																		{#if $config?.features?.enable_web_search}
+																			<DropdownMenu.Item
+																				class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+																				on:click={() => {
+																					showRegenerateMenu = false;
+																					regenerateResponse(message, { webSearch: true });
+																				}}
+																			>
+																				<Globe class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+																				<span>{$i18n.t('Search the web')}</span>
+																			</DropdownMenu.Item>
+																		{/if}
+																	</DropdownMenu.Content>
+																</div>
+															</Dropdown>
 														{:else}
-															<Sparkles strokeWidth="2.1" className="size-4" />
+															<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
+																<button
+																	type="button"
+																	class="{isLastMessage
+																		? 'visible'
+																		: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
+																	on:click={() => {
+																		doRegenerate();
+																	}}
+																>
+																	<RefreshCw class="w-4 h-4" strokeWidth={2} />
+																</button>
+															</Tooltip>
 														{/if}
-													</button>
-												</Tooltip>
-											{/each}
-										{/if}
-									{/if}
-								{/if}
-							</div>
-						{/if}
-					</div>
 
-					<!-- [REACTION_FEATURE] Commented out - reaction display disabled for now
+														<Tooltip content={$i18n.t('Delete')} placement="bottom">
+															<button
+																type="button"
+																id="delete-response-button"
+																class="{isLastMessage
+																	? 'visible'
+																	: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
+																on:click={() => {
+																	showDeleteConfirm = true;
+																}}
+															>
+																<Trash2 class="w-4 h-4" strokeWidth={2} />
+															</button>
+														</Tooltip>
+
+														{#if isLastMessage}
+															{#each model?.actions ?? [] as action}
+																<Tooltip content={action.name} placement="bottom">
+																	<button
+																		type="button"
+																		class="{isLastMessage
+																			? 'visible'
+																			: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+																		on:click={() => {
+																			actionMessage(action.id, message);
+																		}}
+																	>
+																		{#if action.icon_url}
+																			<div class="size-4">
+																				<img
+																					src={action.icon_url}
+																					class="w-4 h-4 {action.icon_url.includes('svg')
+																						? 'dark:invert-[80%]'
+																						: ''}"
+																					style="fill: currentColor;"
+																					alt={action.name}
+																				/>
+																			</div>
+																		{:else}
+																			<Sparkles strokeWidth="2.1" className="size-4" />
+																		{/if}
+																	</button>
+																</Tooltip>
+															{/each}
+														{/if}
+													{/if}
+												{/if}
+											</div>
+										{/if}
+									</div>
+
+									<!-- [REACTION_FEATURE] Commented out - reaction display disabled for now
 					{#if reactions.length > 0}
 						<div class="flex flex-wrap gap-1.5 mt-1.5">
 							{#each reactions as reaction}
@@ -1676,25 +1694,25 @@
 					{/if}
 					-->
 
-					{#if (isLastMessage || ($settings?.keepFollowUpPrompts ?? false)) && message.done && !readOnly && (message?.followUps ?? []).length > 0}
-						<div class="mt-2 flex flex-wrap gap-2">
-							{#each message.followUps as followUp}
-								<button
-									type="button"
-									class="text-xs px-2.5 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-black/5 dark:hover:bg-white/5 transition"
-									on:click={() => {
-										if ($settings?.insertFollowUpPrompt ?? false) {
-											setInputText(followUp);
-										} else {
-											submitMessage(message?.id, followUp);
-										}
-									}}
-								>
-									{followUp}
-								</button>
-							{/each}
-						</div>
-					{/if}
+									{#if (isLastMessage || ($settings?.keepFollowUpPrompts ?? false)) && message.done && !readOnly && (message?.followUps ?? []).length > 0}
+										<div class="mt-2 flex flex-wrap gap-2">
+											{#each message.followUps as followUp}
+												<button
+													type="button"
+													class="text-xs px-2.5 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-black/5 dark:hover:bg-white/5 transition"
+													on:click={() => {
+														if ($settings?.insertFollowUpPrompt ?? false) {
+															setInputText(followUp);
+														} else {
+															submitMessage(message?.id, followUp);
+														}
+													}}
+												>
+													{followUp}
+												</button>
+											{/each}
+										</div>
+									{/if}
 								</div>
 							</div>
 						{/if}
@@ -1703,7 +1721,7 @@
 			</div>
 		</div>
 	</div>
-	{/key}
+{/key}
 
 <style>
 	.message-outline-host {

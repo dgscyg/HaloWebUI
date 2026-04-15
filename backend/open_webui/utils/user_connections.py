@@ -22,7 +22,6 @@ from typing import Any, Optional
 
 from open_webui.models.users import Users, UserModel
 
-
 UI_KEY = "ui"
 CONNECTIONS_KEY = "connections"
 LEGACY_GLOBAL_CONNECTIONS_SEEDED_KEY = "_legacy_global_connections_seeded_v1"
@@ -70,7 +69,9 @@ def _merge_missing(dst: dict, src: dict) -> tuple[dict, bool]:
     return out, changed
 
 
-def _has_provider_values(cfg: Optional[dict], urls_key: str, keys_key: Optional[str], configs_key: str) -> bool:
+def _has_provider_values(
+    cfg: Optional[dict], urls_key: str, keys_key: Optional[str], configs_key: str
+) -> bool:
     if not isinstance(cfg, dict):
         return False
     urls = cfg.get(urls_key) or []
@@ -107,7 +108,10 @@ def maybe_migrate_user_connections(request, user: UserModel) -> UserModel:
     legacy_direct = ui.get("directConnections")
     if isinstance(legacy_direct, dict):
         if "openai" not in connections and _has_provider_values(
-            legacy_direct, "OPENAI_API_BASE_URLS", "OPENAI_API_KEYS", "OPENAI_API_CONFIGS"
+            legacy_direct,
+            "OPENAI_API_BASE_URLS",
+            "OPENAI_API_KEYS",
+            "OPENAI_API_CONFIGS",
         ):
             connections["openai"] = deepcopy(legacy_direct)
             changed = True
@@ -126,39 +130,66 @@ def maybe_migrate_user_connections(request, user: UserModel) -> UserModel:
         cfg = getattr(cfg, "config", None)
         if cfg is not None:
             global_openai = {
-                "OPENAI_API_BASE_URLS": deepcopy(getattr(cfg, "OPENAI_API_BASE_URLS", []) or []),
+                "OPENAI_API_BASE_URLS": deepcopy(
+                    getattr(cfg, "OPENAI_API_BASE_URLS", []) or []
+                ),
                 "OPENAI_API_KEYS": deepcopy(getattr(cfg, "OPENAI_API_KEYS", []) or []),
-                "OPENAI_API_CONFIGS": deepcopy(getattr(cfg, "OPENAI_API_CONFIGS", {}) or {}),
+                "OPENAI_API_CONFIGS": deepcopy(
+                    getattr(cfg, "OPENAI_API_CONFIGS", {}) or {}
+                ),
             }
             global_gemini = {
-                "GEMINI_API_BASE_URLS": deepcopy(getattr(cfg, "GEMINI_API_BASE_URLS", []) or []),
+                "GEMINI_API_BASE_URLS": deepcopy(
+                    getattr(cfg, "GEMINI_API_BASE_URLS", []) or []
+                ),
                 "GEMINI_API_KEYS": deepcopy(getattr(cfg, "GEMINI_API_KEYS", []) or []),
-                "GEMINI_API_CONFIGS": deepcopy(getattr(cfg, "GEMINI_API_CONFIGS", {}) or {}),
+                "GEMINI_API_CONFIGS": deepcopy(
+                    getattr(cfg, "GEMINI_API_CONFIGS", {}) or {}
+                ),
             }
             global_anthropic = {
-                "ANTHROPIC_API_BASE_URLS": deepcopy(getattr(cfg, "ANTHROPIC_API_BASE_URLS", []) or []),
-                "ANTHROPIC_API_KEYS": deepcopy(getattr(cfg, "ANTHROPIC_API_KEYS", []) or []),
-                "ANTHROPIC_API_CONFIGS": deepcopy(getattr(cfg, "ANTHROPIC_API_CONFIGS", {}) or {}),
+                "ANTHROPIC_API_BASE_URLS": deepcopy(
+                    getattr(cfg, "ANTHROPIC_API_BASE_URLS", []) or []
+                ),
+                "ANTHROPIC_API_KEYS": deepcopy(
+                    getattr(cfg, "ANTHROPIC_API_KEYS", []) or []
+                ),
+                "ANTHROPIC_API_CONFIGS": deepcopy(
+                    getattr(cfg, "ANTHROPIC_API_CONFIGS", {}) or {}
+                ),
             }
             global_ollama = {
-                "OLLAMA_BASE_URLS": deepcopy(getattr(cfg, "OLLAMA_BASE_URLS", []) or []),
-                "OLLAMA_API_CONFIGS": deepcopy(getattr(cfg, "OLLAMA_API_CONFIGS", {}) or {}),
+                "OLLAMA_BASE_URLS": deepcopy(
+                    getattr(cfg, "OLLAMA_BASE_URLS", []) or []
+                ),
+                "OLLAMA_API_CONFIGS": deepcopy(
+                    getattr(cfg, "OLLAMA_API_CONFIGS", {}) or {}
+                ),
             }
 
             # Backfill only missing providers once. If openai already came from
             # legacy_direct, keep it.
             if "openai" not in connections and _has_provider_values(
-                global_openai, "OPENAI_API_BASE_URLS", "OPENAI_API_KEYS", "OPENAI_API_CONFIGS"
+                global_openai,
+                "OPENAI_API_BASE_URLS",
+                "OPENAI_API_KEYS",
+                "OPENAI_API_CONFIGS",
             ):
                 connections["openai"] = global_openai
                 changed = True
             if "gemini" not in connections and _has_provider_values(
-                global_gemini, "GEMINI_API_BASE_URLS", "GEMINI_API_KEYS", "GEMINI_API_CONFIGS"
+                global_gemini,
+                "GEMINI_API_BASE_URLS",
+                "GEMINI_API_KEYS",
+                "GEMINI_API_CONFIGS",
             ):
                 connections["gemini"] = global_gemini
                 changed = True
             if "anthropic" not in connections and _has_provider_values(
-                global_anthropic, "ANTHROPIC_API_BASE_URLS", "ANTHROPIC_API_KEYS", "ANTHROPIC_API_CONFIGS"
+                global_anthropic,
+                "ANTHROPIC_API_BASE_URLS",
+                "ANTHROPIC_API_KEYS",
+                "ANTHROPIC_API_CONFIGS",
             ):
                 connections["anthropic"] = global_anthropic
                 changed = True

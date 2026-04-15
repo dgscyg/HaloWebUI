@@ -118,9 +118,7 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
         server_version = server_info.get("version")
         verified_at = server.get("verified_at")
         transport_label = "HTTP" if transport_type == "http" else "stdio"
-        status_label = (
-            f"已验证 {verified_at}" if verified_at else "未验证"
-        )
+        status_label = f"已验证 {verified_at}" if verified_at else "未验证"
         server_name, server_description = get_mcp_server_display_metadata(
             server,
             index=server["idx"],

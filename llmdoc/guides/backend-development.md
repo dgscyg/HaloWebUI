@@ -6,12 +6,12 @@
 
 根据功能域选择或创建路由文件:
 
-| 功能域 | 路由文件 | 路径前缀 |
-|--------|----------|----------|
-| 用户相关 | `routers/users.py` | `/api/v1/users` |
-| 聊天相关 | `routers/chats.py` | `/api/v1/chats` |
+| 功能域   | 路由文件            | 路径前缀         |
+| -------- | ------------------- | ---------------- |
+| 用户相关 | `routers/users.py`  | `/api/v1/users`  |
+| 聊天相关 | `routers/chats.py`  | `/api/v1/chats`  |
 | 模型相关 | `routers/models.py` | `/api/v1/models` |
-| 新功能域 | 创建新文件 | 自定义前缀 |
+| 新功能域 | 创建新文件          | 自定义前缀       |
 
 ## 2. 定义数据模型 (如需)
 
@@ -23,6 +23,7 @@ backend/open_webui/models/
 ```
 
 模型文件结构:
+
 - SQLAlchemy `Base` 类定义表结构
 - Pydantic `BaseModel` 定义 DTO
 - Table 类封装 CRUD 方法
@@ -49,6 +50,7 @@ async def get_your_data(
 ```
 
 认证依赖选项:
+
 - `get_verified_user`: 需要已验证用户
 - `get_admin_user`: 需要管理员权限
 - `get_current_user`: 可选认证

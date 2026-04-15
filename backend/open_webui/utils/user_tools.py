@@ -30,7 +30,6 @@ from typing import Any, Optional
 
 from open_webui.models.users import Users, UserModel
 
-
 TOOLS_KEY = "tools"
 NATIVE_TOOLS_KEY = "native_tools"
 TOOL_SERVER_CONNECTIONS_KEY = "tool_server_connections"
@@ -192,7 +191,9 @@ def get_user_tool_server_connections(request, user: Optional[UserModel]) -> list
     if user and getattr(user, "role", None) == "admin":
         cfg = getattr(getattr(request, "app", None), "state", None)
         cfg = getattr(cfg, "config", None)
-        legacy = getattr(cfg, "TOOL_SERVER_CONNECTIONS", None) if cfg is not None else None
+        legacy = (
+            getattr(cfg, "TOOL_SERVER_CONNECTIONS", None) if cfg is not None else None
+        )
         legacy = legacy if isinstance(legacy, list) else []
         if legacy:
             return deepcopy(legacy)
@@ -200,7 +201,9 @@ def get_user_tool_server_connections(request, user: Optional[UserModel]) -> list
     return []
 
 
-def set_user_tool_server_connections(user: UserModel, connections: list[dict]) -> Optional[UserModel]:
+def set_user_tool_server_connections(
+    user: UserModel, connections: list[dict]
+) -> Optional[UserModel]:
     return _update_tools_settings(user.id, {TOOL_SERVER_CONNECTIONS_KEY: connections})
 
 
@@ -219,14 +222,18 @@ def get_user_mcp_server_connections(request, user: Optional[UserModel]) -> list[
 
     if MCP_SERVER_CONNECTIONS_KEY in tools:
         return _filter_stdio(
-            normalize_mcp_server_connections(_as_list(tools.get(MCP_SERVER_CONNECTIONS_KEY)))
+            normalize_mcp_server_connections(
+                _as_list(tools.get(MCP_SERVER_CONNECTIONS_KEY))
+            )
         )
 
     # Admin migration fallback (read-only)
     if user and role == "admin":
         cfg = getattr(getattr(request, "app", None), "state", None)
         cfg = getattr(cfg, "config", None)
-        legacy = getattr(cfg, "MCP_SERVER_CONNECTIONS", None) if cfg is not None else None
+        legacy = (
+            getattr(cfg, "MCP_SERVER_CONNECTIONS", None) if cfg is not None else None
+        )
         legacy = legacy if isinstance(legacy, list) else []
         if legacy:
             return _filter_stdio(normalize_mcp_server_connections(deepcopy(legacy)))
@@ -234,9 +241,12 @@ def get_user_mcp_server_connections(request, user: Optional[UserModel]) -> list[
     return []
 
 
-def set_user_mcp_server_connections(user: UserModel, connections: list[dict]) -> Optional[UserModel]:
+def set_user_mcp_server_connections(
+    user: UserModel, connections: list[dict]
+) -> Optional[UserModel]:
     return _update_tools_settings(
-        user.id, {MCP_SERVER_CONNECTIONS_KEY: normalize_mcp_server_connections(connections)}
+        user.id,
+        {MCP_SERVER_CONNECTIONS_KEY: normalize_mcp_server_connections(connections)},
     )
 
 
@@ -256,9 +266,7 @@ def get_user_mcp_apps_config(request, user: Optional[UserModel]) -> dict:
             return stored
 
     connections = get_user_mcp_server_connections(request, user)
-    return {
-        MCP_APPS_GLOBAL_ENABLE_KEY: _legacy_mcp_apps_global_enabled(connections)
-    }
+    return {MCP_APPS_GLOBAL_ENABLE_KEY: _legacy_mcp_apps_global_enabled(connections)}
 
 
 def set_user_mcp_apps_config(user: UserModel, apps_config: dict) -> Optional[UserModel]:
@@ -294,10 +302,7 @@ def normalize_mcp_server_connection(connection: Any) -> dict:
     if mcp_apps:
         normalized[MCP_APPS_KEY] = mcp_apps
 
-    if (
-        "apps_enabled" in normalized
-        and MCP_APPS_GLOBAL_ENABLE_KEY not in mcp_apps
-    ):
+    if "apps_enabled" in normalized and MCP_APPS_GLOBAL_ENABLE_KEY not in mcp_apps:
         mcp_apps[MCP_APPS_GLOBAL_ENABLE_KEY] = _as_bool(
             normalized["apps_enabled"], default=False
         )
@@ -364,7 +369,9 @@ def _native_defaults_from_global(request) -> dict:
         "ENABLE_URL_FETCH": _get_bool("ENABLE_URL_FETCH", True),
         "ENABLE_URL_FETCH_RENDERED": _get_bool("ENABLE_URL_FETCH_RENDERED", False),
         "ENABLE_LIST_KNOWLEDGE_BASES": _get_bool("ENABLE_LIST_KNOWLEDGE_BASES", True),
-        "ENABLE_SEARCH_KNOWLEDGE_BASES": _get_bool("ENABLE_SEARCH_KNOWLEDGE_BASES", True),
+        "ENABLE_SEARCH_KNOWLEDGE_BASES": _get_bool(
+            "ENABLE_SEARCH_KNOWLEDGE_BASES", True
+        ),
         "ENABLE_QUERY_KNOWLEDGE_FILES": _get_bool("ENABLE_QUERY_KNOWLEDGE_FILES", True),
         "ENABLE_VIEW_KNOWLEDGE_FILE": _get_bool("ENABLE_VIEW_KNOWLEDGE_FILE", True),
         "ENABLE_IMAGE_GENERATION_TOOL": _get_bool("ENABLE_IMAGE_GENERATION_TOOL", True),
@@ -423,7 +430,9 @@ def get_user_native_tools_config(request, user: Optional[UserModel]) -> dict:
     return effective
 
 
-def set_user_native_tools_config(user: UserModel, native_cfg: dict) -> Optional[UserModel]:
+def set_user_native_tools_config(
+    user: UserModel, native_cfg: dict
+) -> Optional[UserModel]:
     """
     Persist a full NativeToolsConfigForm payload under user.settings.tools.native_tools.
     """

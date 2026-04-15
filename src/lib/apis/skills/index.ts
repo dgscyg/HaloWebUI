@@ -52,11 +52,7 @@ export interface SkillImportResult {
 	status: SkillImportStatus;
 }
 
-const requestJson = async <T>(
-	path: string,
-	token: string,
-	init: RequestInit = {}
-): Promise<T> => {
+const requestJson = async <T>(path: string, token: string, init: RequestInit = {}): Promise<T> => {
 	let error = null;
 	const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
 

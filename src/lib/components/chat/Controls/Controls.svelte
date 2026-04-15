@@ -488,11 +488,11 @@
 				title={$i18n.t('Valves')}
 				buttonClassName="w-full px-3 py-2.5 rounded-xl hover:bg-gray-100/60 dark:hover:bg-white/[0.04] transition-colors duration-200"
 			>
-					<div class="text-sm px-3 pb-3" slot="content">
-						<Valves show={showValves} preferredContext={currentValvesContext} />
-					</div>
-				</Collapsible>
-			</div>
+				<div class="text-sm px-3 pb-3" slot="content">
+					<Valves show={showValves} preferredContext={currentValvesContext} />
+				</div>
+			</Collapsible>
+		</div>
 
 		{#if $user?.role === 'admin' || $user?.permissions.chat?.controls}
 			<!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -527,7 +527,9 @@
 									: $i18n.t('Inheriting Global System Prompt')}
 							</span>
 							{#if systemModified || systemAck}
-								<span class="inline-flex items-center rounded-full border border-teal-200/80 bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:border-teal-800/70 dark:bg-teal-950/40 dark:text-teal-300">
+								<span
+									class="inline-flex items-center rounded-full border border-teal-200/80 bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:border-teal-800/70 dark:bg-teal-950/40 dark:text-teal-300"
+								>
 									{systemModified ? '已调整' : '已应用'}
 								</span>
 							{/if}
@@ -559,8 +561,12 @@
 					<div class="px-3 pb-3" slot="content">
 						<div class="space-y-3">
 							{#if !hasCurrentChatSystemPromptOverride}
-								<div class="rounded-xl border border-sky-200/80 bg-sky-50/70 p-3 dark:border-sky-800/60 dark:bg-sky-950/20">
-									<div class="flex items-center gap-2 text-[11px] font-medium text-sky-700 dark:text-sky-300">
+								<div
+									class="rounded-xl border border-sky-200/80 bg-sky-50/70 p-3 dark:border-sky-800/60 dark:bg-sky-950/20"
+								>
+									<div
+										class="flex items-center gap-2 text-[11px] font-medium text-sky-700 dark:text-sky-300"
+									>
 										<svg
 											xmlns="http://www.w3.org/2000/svg"
 											viewBox="0 0 20 20"
@@ -573,14 +579,20 @@
 												clip-rule="evenodd"
 											/>
 										</svg>
-										{$i18n.t('Current effective content comes from the global default system prompt.')}
+										{$i18n.t(
+											'Current effective content comes from the global default system prompt.'
+										)}
 									</div>
 									{#if hasGlobalSystemPrompt}
-										<div class="mt-2 max-h-44 overflow-y-auto rounded-lg border border-sky-200/80 bg-white/90 px-3 py-2 text-xs leading-5 whitespace-pre-wrap text-gray-700 dark:border-sky-800/60 dark:bg-gray-900/70 dark:text-gray-200">
+										<div
+											class="mt-2 max-h-44 overflow-y-auto rounded-lg border border-sky-200/80 bg-white/90 px-3 py-2 text-xs leading-5 whitespace-pre-wrap text-gray-700 dark:border-sky-800/60 dark:bg-gray-900/70 dark:text-gray-200"
+										>
 											{globalSystemPrompt}
 										</div>
 									{:else}
-										<div class="mt-2 rounded-lg border border-dashed border-sky-200/80 bg-white/70 px-3 py-2 text-xs leading-5 text-sky-700/90 dark:border-sky-800/60 dark:bg-gray-900/50 dark:text-sky-300/90">
+										<div
+											class="mt-2 rounded-lg border border-dashed border-sky-200/80 bg-white/70 px-3 py-2 text-xs leading-5 text-sky-700/90 dark:border-sky-800/60 dark:bg-gray-900/50 dark:text-sky-300/90"
+										>
 											{$i18n.t('No global default system prompt is set yet.')}
 										</div>
 									{/if}
@@ -589,7 +601,9 @@
 
 							<div class="space-y-2">
 								<div class="flex items-center justify-between gap-2">
-									<div class="text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
+									<div
+										class="text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400"
+									>
 										{$i18n.t('Override for This Chat')}
 									</div>
 									<div class="text-[11px] text-gray-400 dark:text-gray-500">

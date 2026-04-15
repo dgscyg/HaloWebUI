@@ -11,13 +11,13 @@
 
 ## 3. 技术栈
 
-| 技术 | 版本/说明 |
-|------|----------|
-| 框架 | SvelteKit (Svelte 4) |
-| 语言 | TypeScript |
-| 样式 | Tailwind CSS |
-| 状态管理 | Svelte Stores (writable) |
-| 实时通信 | Socket.IO Client |
+| 技术     | 版本/说明                     |
+| -------- | ----------------------------- |
+| 框架     | SvelteKit (Svelte 4)          |
+| 语言     | TypeScript                    |
+| 样式     | Tailwind CSS                  |
+| 状态管理 | Svelte Stores (writable)      |
+| 实时通信 | Socket.IO Client              |
 | 流式处理 | EventSourceParserStream (SSE) |
 
 ## 4. 核心目录结构

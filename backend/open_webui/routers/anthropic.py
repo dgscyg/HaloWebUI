@@ -97,7 +97,9 @@ def _format_anthropic_upstream_error(
     return "\n".join([part for part in parts if part])
 
 
-def _get_anthropic_user_config(connection_user: Optional[UserModel]) -> tuple[list[str], list[str], dict]:
+def _get_anthropic_user_config(
+    connection_user: Optional[UserModel],
+) -> tuple[list[str], list[str], dict]:
     """
     Resolve Anthropic connection config for a given user.
 
@@ -122,6 +124,7 @@ def _get_anthropic_user_config(connection_user: Optional[UserModel]) -> tuple[li
             keys = keys + [""] * (len(base_urls) - len(keys))
 
     return base_urls, keys, configs
+
 
 # Official beta header required for Files API.
 ANTHROPIC_BETA_FILES_API = "files-api-2025-04-14"
@@ -310,7 +313,9 @@ def _normalize_anthropic_model_text(model_id: str) -> str:
     return text
 
 
-def _parse_anthropic_model_signature(model_id: str) -> tuple[Optional[str], Optional[int], Optional[int], bool]:
+def _parse_anthropic_model_signature(
+    model_id: str,
+) -> tuple[Optional[str], Optional[int], Optional[int], bool]:
     text = _normalize_anthropic_model_text(model_id)
     is_mythos = "mythos" in text
 
@@ -354,7 +359,9 @@ def _extract_model_meta_output_cap(model_meta: Any) -> Optional[int]:
     return None
 
 
-def _build_anthropic_model_profile(model_id: str, model_meta: Any = None) -> dict[str, Any]:
+def _build_anthropic_model_profile(
+    model_id: str, model_meta: Any = None
+) -> dict[str, Any]:
     family, major, minor, is_mythos = _parse_anthropic_model_signature(model_id)
     max_output_cap = _extract_model_meta_output_cap(model_meta)
 
@@ -395,7 +402,9 @@ def _build_anthropic_model_profile(model_id: str, model_meta: Any = None) -> dic
     }
 
 
-def _normalize_reasoning_effort_value(value: Any) -> tuple[Optional[str], Optional[int]]:
+def _normalize_reasoning_effort_value(
+    value: Any,
+) -> tuple[Optional[str], Optional[int]]:
     if value is None:
         return None, None
 
@@ -472,7 +481,9 @@ def _estimate_requested_thinking_budget(payload: dict) -> Optional[int]:
     if isinstance(explicit_thinking, dict):
         etype = str(explicit_thinking.get("type") or "").lower()
         if etype == "enabled":
-            explicit_budget = _coerce_positive_int(explicit_thinking.get("budget_tokens"))
+            explicit_budget = _coerce_positive_int(
+                explicit_thinking.get("budget_tokens")
+            )
             return explicit_budget or 8192
         if etype == "adaptive":
             return None
@@ -576,7 +587,10 @@ def _normalize_final_anthropic_payload(
                 output_config.get("effort")
             )
             if normalized_effort:
-                payload["output_config"] = {**output_config, "effort": normalized_effort}
+                payload["output_config"] = {
+                    **output_config,
+                    "effort": normalized_effort,
+                }
             else:
                 payload.pop("output_config", None)
         else:
@@ -596,7 +610,9 @@ def _resolve_thinking_payload(
         thinking = dict(explicit_thinking)
         etype = str(thinking.get("type") or "").lower()
         if etype == "enabled":
-            explicit_budget = _coerce_positive_int(thinking.get("budget_tokens")) or 8192
+            explicit_budget = (
+                _coerce_positive_int(thinking.get("budget_tokens")) or 8192
+            )
             thinking["budget_tokens"] = explicit_budget
             thinking_budget = explicit_budget
         return thinking, None, thinking_budget, etype in {"enabled", "adaptive"}
@@ -617,7 +633,9 @@ def _resolve_thinking_payload(
         return None, None, None, False
 
     if model_profile.get("supports_effort"):
-        normalized_effort = _normalize_effort_for_supported_model(reasoning_effort) or "medium"
+        normalized_effort = (
+            _normalize_effort_for_supported_model(reasoning_effort) or "medium"
+        )
         return (
             {"type": "adaptive"},
             {"effort": normalized_effort},
@@ -698,9 +716,7 @@ def _apply_cc_format(headers: dict, payload: dict, url: str) -> str:
     uid = payload.get("metadata", {}).get("user_id", "anonymous")
     cc_hash = hashlib.sha256(uid.encode()).hexdigest()
     cc_session = str(uuid.uuid4())
-    payload["metadata"] = {
-        "user_id": f"user_{cc_hash}_account__session_{cc_session}"
-    }
+    payload["metadata"] = {"user_id": f"user_{cc_hash}_account__session_{cc_session}"}
 
     # Ensure thinking is adaptive (CC uses adaptive, not enabled with budget).
     # Preserve display mode when we already resolved one upstream.
@@ -711,9 +727,15 @@ def _apply_cc_format(headers: dict, payload: dict, url: str) -> str:
             thinking_display = current_display.strip()
 
     if "thinking" not in payload:
-        payload["thinking"] = {"type": "adaptive", **({"display": thinking_display} if thinking_display else {})}
+        payload["thinking"] = {
+            "type": "adaptive",
+            **({"display": thinking_display} if thinking_display else {}),
+        }
     elif isinstance(payload.get("thinking"), dict):
-        payload["thinking"] = {"type": "adaptive", **({"display": thinking_display} if thinking_display else {})}
+        payload["thinking"] = {
+            "type": "adaptive",
+            **({"display": thinking_display} if thinking_display else {}),
+        }
 
     # Ensure max_tokens is set (CC default)
     if "max_tokens" not in payload:
@@ -736,7 +758,8 @@ def _apply_cc_format(headers: dict, payload: dict, url: str) -> str:
         system_blocks = payload.get("system")
         if isinstance(system_blocks, list):
             payload["system"] = [
-                sb for sb in system_blocks
+                sb
+                for sb in system_blocks
                 if not (
                     isinstance(sb, dict)
                     and sb.get("type") == "text"
@@ -755,10 +778,23 @@ def _apply_cc_format(headers: dict, payload: dict, url: str) -> str:
 # reverse-map in the response so the middleware sees original names.
 
 _CC_SPEC_TOOL_NAMES = [
-    "WebSearch", "WebFetch", "Bash", "Read", "Edit", "Write",
-    "Grep", "Glob", "TodoWrite", "NotebookEdit", "Skill",
-    "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
-    "KillShell", "Task", "TaskOutput",
+    "WebSearch",
+    "WebFetch",
+    "Bash",
+    "Read",
+    "Edit",
+    "Write",
+    "Grep",
+    "Glob",
+    "TodoWrite",
+    "NotebookEdit",
+    "Skill",
+    "AskUserQuestion",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "KillShell",
+    "Task",
+    "TaskOutput",
 ]
 
 # Preferred mappings (semantic fit)
@@ -946,7 +982,9 @@ async def _post_preserve_method(
                 redirect_url = urljoin(current_url, resp.headers["Location"])
                 log.info(
                     "[ANTHROPIC] POST redirect %s: %s -> %s",
-                    resp.status, current_url, redirect_url,
+                    resp.status,
+                    current_url,
+                    redirect_url,
                 )
                 resp.release()
                 resp = None
@@ -1004,7 +1042,9 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
         "ANTHROPIC_API_BASE_URLS": getattr(
             request.app.state.config, "ANTHROPIC_API_BASE_URLS", []
         ),
-        "ANTHROPIC_API_KEYS": getattr(request.app.state.config, "ANTHROPIC_API_KEYS", []),
+        "ANTHROPIC_API_KEYS": getattr(
+            request.app.state.config, "ANTHROPIC_API_KEYS", []
+        ),
         "ANTHROPIC_API_CONFIGS": getattr(
             request.app.state.config, "ANTHROPIC_API_CONFIGS", {}
         ),
@@ -1134,7 +1174,9 @@ class HealthCheckForm(BaseModel):
 
 @router.post("/verify")
 async def verify_connection(
-    request: Request, form_data: ConnectionVerificationForm, user=Depends(get_verified_user)
+    request: Request,
+    form_data: ConnectionVerificationForm,
+    user=Depends(get_verified_user),
 ):
     url = form_data.url
     key = form_data.key
@@ -1174,9 +1216,13 @@ async def health_check_connection(
                     break
 
     if not chosen_model:
-        raise HTTPException(status_code=400, detail="Anthropic: No compatible model found")
+        raise HTTPException(
+            status_code=400, detail="Anthropic: No compatible model found"
+        )
 
-    resolved_prefix = (cfg.get("_resolved_prefix_id") or cfg.get("prefix_id") or "").strip() or None
+    resolved_prefix = (
+        cfg.get("_resolved_prefix_id") or cfg.get("prefix_id") or ""
+    ).strip() or None
     chosen_model = _strip_connection_prefix(str(chosen_model), resolved_prefix)
     chosen_model = _resolve_proxy_model_alias(chosen_model, url)
 
@@ -1352,7 +1398,11 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
             if prefix_id:
                 prefix = f"{prefix_id}."
                 model_ids = [
-                    (m[len(prefix) :] if isinstance(m, str) and m.startswith(prefix) else m)
+                    (
+                        m[len(prefix) :]
+                        if isinstance(m, str) and m.startswith(prefix)
+                        else m
+                    )
                     for m in model_ids
                 ]
 
@@ -1419,7 +1469,11 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
         connection_icon = (api_config.get("icon") or "").strip()
 
         # Convert upstream /models response into OpenAI-style list.
-        if isinstance(response, dict) and response.get("object") == "list" and isinstance(response.get("data"), list):
+        if (
+            isinstance(response, dict)
+            and response.get("object") == "list"
+            and isinstance(response.get("data"), list)
+        ):
             model_list = response
         elif isinstance(response, dict) and isinstance(response.get("data"), list):
             model_list = {
@@ -1560,7 +1614,9 @@ def _strip_connection_prefix(model_id: str, prefix_id: Optional[str]) -> str:
     return model_id
 
 
-def _resolve_connection_by_model_id(connection_user: Optional[UserModel], model_id: str) -> tuple[int, str, str, dict]:
+def _resolve_connection_by_model_id(
+    connection_user: Optional[UserModel], model_id: str
+) -> tuple[int, str, str, dict]:
     base_urls, keys, cfgs = _get_anthropic_user_config(connection_user)
 
     chosen_idx = 0
@@ -1642,7 +1698,9 @@ async def _openai_content_to_anthropic_blocks(content: Any) -> list[dict]:
 
         if ptype == "image_url":
             image_url = part.get("image_url") or {}
-            url = image_url.get("url") if isinstance(image_url, dict) else str(image_url)
+            url = (
+                image_url.get("url") if isinstance(image_url, dict) else str(image_url)
+            )
 
             if not url:
                 continue
@@ -1690,7 +1748,8 @@ def _openai_tools_to_anthropic(tools: list[dict]) -> list[dict]:
             {
                 "name": str(name),
                 "description": str(fn.get("description") or ""),
-                "input_schema": fn.get("parameters") or {"type": "object", "properties": {}},
+                "input_schema": fn.get("parameters")
+                or {"type": "object", "properties": {}},
             }
         )
     return anthropic_tools
@@ -1762,10 +1821,15 @@ async def _upload_file_to_anthropic(
                         err = data.get("error")
                         if isinstance(err, dict):
                             msg = err.get("message")
-                    raise HTTPException(status_code=response.status, detail=msg or str(data)[:500])
+                    raise HTTPException(
+                        status_code=response.status, detail=msg or str(data)[:500]
+                    )
 
                 if not isinstance(data, dict) or not data.get("id"):
-                    raise HTTPException(status_code=500, detail="Invalid response from Anthropic Files API")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Invalid response from Anthropic Files API",
+                    )
                 return str(data["id"])
 
 
@@ -1786,7 +1850,9 @@ def _get_cached_file_id(file_meta: dict, conn_key: str) -> Optional[str]:
         return None
 
 
-def _set_cached_file_id(file_id: str, file_meta: dict, conn_key: str, remote_file_id: str) -> dict:
+def _set_cached_file_id(
+    file_id: str, file_meta: dict, conn_key: str, remote_file_id: str
+) -> dict:
     meta = dict(file_meta or {})
     anth = dict(meta.get("anthropic") or {})
     files_map = dict(anth.get("files") or {})
@@ -1839,7 +1905,10 @@ async def _build_attachment_blocks(
             continue
         if f.get("type") != "file":
             continue
-        if str(f.get("processing_mode") or "").strip().lower() != FILE_PROCESSING_MODE_NATIVE_FILE:
+        if (
+            str(f.get("processing_mode") or "").strip().lower()
+            != FILE_PROCESSING_MODE_NATIVE_FILE
+        ):
             continue
 
         fid = f.get("id") or (f.get("file") or {}).get("id")
@@ -1855,10 +1924,15 @@ async def _build_attachment_blocks(
             continue
 
         filename = file_obj.filename or "file"
-        content_type = (file_obj.meta or {}).get("content_type") or "application/octet-stream"
+        content_type = (file_obj.meta or {}).get(
+            "content_type"
+        ) or "application/octet-stream"
 
         # If format isn't supported by Anthropic document blocks, fall back to extracted text.
-        if content_type not in SUPPORTED_DOCUMENT_MIME_TYPES and content_type not in SUPPORTED_IMAGE_MIME_TYPES:
+        if (
+            content_type not in SUPPORTED_DOCUMENT_MIME_TYPES
+            and content_type not in SUPPORTED_IMAGE_MIME_TYPES
+        ):
             extracted = (file_obj.data or {}).get("content") or ""
             if extracted:
                 text = f"[File: {filename}]\n{extracted}"
@@ -1946,7 +2020,9 @@ def _anthropic_message_to_openai(
                     name = tool_reverse_map[name]
                 inp = block.get("input")
                 try:
-                    args = json.dumps(inp if inp is not None else {}, ensure_ascii=False)
+                    args = json.dumps(
+                        inp if inp is not None else {}, ensure_ascii=False
+                    )
                 except Exception:
                     args = json.dumps({"_raw": str(inp)}, ensure_ascii=False)
                 tool_calls.append(
@@ -1973,7 +2049,9 @@ def _anthropic_message_to_openai(
                 "cache_creation_input_tokens"
             )
         if usage.get("cache_read_input_tokens") is not None:
-            openai_usage["cache_read_input_tokens"] = usage.get("cache_read_input_tokens")
+            openai_usage["cache_read_input_tokens"] = usage.get(
+                "cache_read_input_tokens"
+            )
 
     finish_reason = "stop"
     stop_reason = message.get("stop_reason") if isinstance(message, dict) else None
@@ -2068,9 +2146,11 @@ async def generate_chat_completion(
     upstream_model_id = _resolve_proxy_model_alias(upstream_model_id, base_url)
     model_profile = _build_anthropic_model_profile(
         upstream_model_id,
-        (request_model_entry or {}).get("anthropic")
-        if isinstance(request_model_entry, dict)
-        else None,
+        (
+            (request_model_entry or {}).get("anthropic")
+            if isinstance(request_model_entry, dict)
+            else None
+        ),
     )
 
     if not base_url:
@@ -2125,9 +2205,13 @@ async def generate_chat_completion(
                         continue
                     fn = tc.get("function") or {}
                     name = (fn.get("name") if isinstance(fn, dict) else None) or ""
-                    args = (fn.get("arguments") if isinstance(fn, dict) else None) or "{}"
+                    args = (
+                        fn.get("arguments") if isinstance(fn, dict) else None
+                    ) or "{}"
                     try:
-                        inp = json.loads(args) if isinstance(args, str) else (args or {})
+                        inp = (
+                            json.loads(args) if isinstance(args, str) else (args or {})
+                        )
                     except Exception:
                         inp = {"_raw": str(args)}
                     blocks.append(
@@ -2171,7 +2255,9 @@ async def generate_chat_completion(
                 if isinstance(content_blocks, list):
                     m["content"] = attachment_blocks + content_blocks
                 else:
-                    m["content"] = attachment_blocks + [{"type": "text", "text": str(content_blocks)}]
+                    m["content"] = attachment_blocks + [
+                        {"type": "text", "text": str(content_blocks)}
+                    ]
                 break
         else:
             anthropic_messages.insert(0, {"role": "user", "content": attachment_blocks})
@@ -2185,8 +2271,8 @@ async def generate_chat_completion(
         "max_tokens": max_tokens,
     }
 
-    thinking, output_config, thinking_budget, thinking_enabled = _resolve_thinking_payload(
-        payload, model_profile=model_profile
+    thinking, output_config, thinking_budget, thinking_enabled = (
+        _resolve_thinking_payload(payload, model_profile=model_profile)
     )
     if thinking is not None:
         anthropic_payload["thinking"] = thinking
@@ -2231,8 +2317,8 @@ async def generate_chat_completion(
         custom_params,
         forbidden_keys=_EXTRA_BODY_FORBIDDEN_KEYS,
     )
-    anthropic_payload, thinking_budget, thinking_enabled = _normalize_final_anthropic_payload(
-        anthropic_payload, model_profile
+    anthropic_payload, thinking_budget, thinking_enabled = (
+        _normalize_final_anthropic_payload(anthropic_payload, model_profile)
     )
     max_tokens = anthropic_payload.get("max_tokens")
 
@@ -2290,7 +2376,9 @@ async def generate_chat_completion(
                     actual_url = messages_url
                     cc_tool_reverse: dict[str, str] = {}
                     if _needs_cc_format(upstream_model_id, base_url):
-                        actual_url = _apply_cc_format(headers, anthropic_payload, messages_url)
+                        actual_url = _apply_cc_format(
+                            headers, anthropic_payload, messages_url
+                        )
                         cc_tool_reverse = _apply_cc_tool_names(anthropic_payload)
 
                     # DEBUG: log outgoing headers and payload keys
@@ -2301,7 +2389,9 @@ async def generate_chat_completion(
                             _safe_hdrs[k] = v[:20] + "..."
                         else:
                             _safe_hdrs[k] = v
-                    log.info(f"[ANTHROPIC DEBUG] POST {actual_url} headers={_safe_hdrs}")
+                    log.info(
+                        f"[ANTHROPIC DEBUG] POST {actual_url} headers={_safe_hdrs}"
+                    )
                     # Dump full payload body (redact long message content)
                     _dump = dict(anthropic_payload)
                     _dump_msgs = []
@@ -2311,18 +2401,33 @@ async def generate_chat_completion(
                             _mc = _mc[:200] + "...(truncated)"
                         elif isinstance(_mc, list):
                             _mc = [
-                                {**b, "text": b["text"][:200] + "...(truncated)"} if isinstance(b, dict) and isinstance(b.get("text"), str) and len(b.get("text", "")) > 200 else b
+                                (
+                                    {**b, "text": b["text"][:200] + "...(truncated)"}
+                                    if isinstance(b, dict)
+                                    and isinstance(b.get("text"), str)
+                                    and len(b.get("text", "")) > 200
+                                    else b
+                                )
                                 for b in _mc
                             ]
                         _dump_msgs.append({**_m, "content": _mc})
                     _dump["messages"] = _dump_msgs
-                    log.info(f"[ANTHROPIC DEBUG] FULL BODY: {json.dumps(_dump, ensure_ascii=False, default=str)}")
+                    log.info(
+                        f"[ANTHROPIC DEBUG] FULL BODY: {json.dumps(_dump, ensure_ascii=False, default=str)}"
+                    )
 
-                    async with _post_preserve_method(session, actual_url, json_data=anthropic_payload, headers=headers) as response:
+                    async with _post_preserve_method(
+                        session,
+                        actual_url,
+                        json_data=anthropic_payload,
+                        headers=headers,
+                    ) as response:
                         log.info(f"[ANTHROPIC DEBUG] response status={response.status}")
                         if response.status >= 400:
                             err_text = await response.text()
-                            log.warning(f"[ANTHROPIC DEBUG] ERROR {response.status}: {err_text[:500]}")
+                            log.warning(
+                                f"[ANTHROPIC DEBUG] ERROR {response.status}: {err_text[:500]}"
+                            )
                             error_chunk = {
                                 "error": {
                                     "message": _format_anthropic_upstream_error(
@@ -2349,7 +2454,9 @@ async def generate_chat_completion(
                             if not chunk_str:
                                 continue
                             if not _first_chunk_logged:
-                                log.info(f"[ANTHROPIC DEBUG] first chunk: {chunk_str[:500]}")
+                                log.info(
+                                    f"[ANTHROPIC DEBUG] first chunk: {chunk_str[:500]}"
+                                )
                                 _first_chunk_logged = True
                             buf += chunk_str
 
@@ -2384,22 +2491,39 @@ async def generate_chat_completion(
 
                                 if ev_type == "message_start":
                                     msg = ev.get("message") or {}
-                                    usage = msg.get("usage") if isinstance(msg, dict) else {}
-                                    if isinstance(usage, dict) and usage.get("input_tokens") is not None:
-                                        prompt_tokens = int(usage.get("input_tokens") or 0)
+                                    usage = (
+                                        msg.get("usage")
+                                        if isinstance(msg, dict)
+                                        else {}
+                                    )
+                                    if (
+                                        isinstance(usage, dict)
+                                        and usage.get("input_tokens") is not None
+                                    ):
+                                        prompt_tokens = int(
+                                            usage.get("input_tokens") or 0
+                                        )
                                     continue
 
                                 if ev_type == "content_block_start":
                                     idx = ev.get("index")
                                     cb = ev.get("content_block") or {}
-                                    if isinstance(idx, int) and isinstance(cb, dict) and cb.get("type") == "tool_use":
+                                    if (
+                                        isinstance(idx, int)
+                                        and isinstance(cb, dict)
+                                        and cb.get("type") == "tool_use"
+                                    ):
                                         tool_name = cb.get("name") or ""
                                         # Reverse-map CC spec name back to original
-                                        if cc_tool_reverse and tool_name in cc_tool_reverse:
+                                        if (
+                                            cc_tool_reverse
+                                            and tool_name in cc_tool_reverse
+                                        ):
                                             tool_name = cc_tool_reverse[tool_name]
                                         tool_call = {
                                             "index": next_tool_call_index,
-                                            "id": cb.get("id") or f"toolu_{uuid.uuid4().hex}",
+                                            "id": cb.get("id")
+                                            or f"toolu_{uuid.uuid4().hex}",
                                             "type": "function",
                                             "function": {
                                                 "name": tool_name,
@@ -2408,7 +2532,11 @@ async def generate_chat_completion(
                                         }
                                         tool_block_index_to_call[idx] = tool_call
                                         next_tool_call_index += 1
-                                        tool_chunk = _openai_chunk(stream_id, model_for_openai, {"tool_calls": [tool_call]})
+                                        tool_chunk = _openai_chunk(
+                                            stream_id,
+                                            model_for_openai,
+                                            {"tool_calls": [tool_call]},
+                                        )
                                         yield f"data: {json.dumps(tool_chunk, ensure_ascii=False)}\n\n"
                                     continue
 
@@ -2422,7 +2550,9 @@ async def generate_chat_completion(
                                     if d_type == "text_delta":
                                         text = delta.get("text") or ""
                                         if text:
-                                            for content_chunk in _yield_content_chunks(str(text), stream_id, model_for_openai):
+                                            for content_chunk in _yield_content_chunks(
+                                                str(text), stream_id, model_for_openai
+                                            ):
                                                 yield content_chunk
                                         continue
 
@@ -2439,7 +2569,11 @@ async def generate_chat_completion(
 
                                     if d_type == "input_json_delta":
                                         partial = delta.get("partial_json") or ""
-                                        if isinstance(idx, int) and idx in tool_block_index_to_call and partial:
+                                        if (
+                                            isinstance(idx, int)
+                                            and idx in tool_block_index_to_call
+                                            and partial
+                                        ):
                                             tool_call = tool_block_index_to_call[idx]
                                             delta_call = {
                                                 "index": tool_call.get("index"),
@@ -2447,7 +2581,11 @@ async def generate_chat_completion(
                                                 "type": "function",
                                                 "function": {"arguments": str(partial)},
                                             }
-                                            tool_chunk = _openai_chunk(stream_id, model_for_openai, {"tool_calls": [delta_call]})
+                                            tool_chunk = _openai_chunk(
+                                                stream_id,
+                                                model_for_openai,
+                                                {"tool_calls": [delta_call]},
+                                            )
                                             yield f"data: {json.dumps(tool_chunk, ensure_ascii=False)}\n\n"
                                         continue
 
@@ -2455,11 +2593,20 @@ async def generate_chat_completion(
 
                                 if ev_type == "message_delta":
                                     delta = ev.get("delta") or {}
-                                    stop_reason = (delta.get("stop_reason") if isinstance(delta, dict) else None) or None
+                                    stop_reason = (
+                                        delta.get("stop_reason")
+                                        if isinstance(delta, dict)
+                                        else None
+                                    ) or None
 
                                     usage = ev.get("usage") or {}
-                                    if isinstance(usage, dict) and usage.get("output_tokens") is not None:
-                                        completion_tokens = int(usage.get("output_tokens") or 0)
+                                    if (
+                                        isinstance(usage, dict)
+                                        and usage.get("output_tokens") is not None
+                                    ):
+                                        completion_tokens = int(
+                                            usage.get("output_tokens") or 0
+                                        )
 
                                     if stop_reason:
                                         finish = "stop"
@@ -2469,14 +2616,24 @@ async def generate_chat_completion(
                                             finish = "length"
 
                                         usage_obj = None
-                                        if prompt_tokens is not None and completion_tokens is not None:
+                                        if (
+                                            prompt_tokens is not None
+                                            and completion_tokens is not None
+                                        ):
                                             usage_obj = {
                                                 "prompt_tokens": prompt_tokens,
                                                 "completion_tokens": completion_tokens,
-                                                "total_tokens": prompt_tokens + completion_tokens,
+                                                "total_tokens": prompt_tokens
+                                                + completion_tokens,
                                             }
 
-                                        fin_chunk = _openai_chunk(stream_id, model_for_openai, {}, finish_reason=finish, usage=usage_obj)
+                                        fin_chunk = _openai_chunk(
+                                            stream_id,
+                                            model_for_openai,
+                                            {},
+                                            finish_reason=finish,
+                                            usage=usage_obj,
+                                        )
                                         yield f"data: {json.dumps(fin_chunk, ensure_ascii=False)}\n\n"
                                     continue
 
@@ -2531,7 +2688,9 @@ async def generate_chat_completion(
             _clean_beta_list(headers.get("anthropic-beta")),
         )
 
-        async with _post_preserve_method(session, actual_url_ns, json_data=anthropic_payload, headers=headers) as response:
+        async with _post_preserve_method(
+            session, actual_url_ns, json_data=anthropic_payload, headers=headers
+        ) as response:
             data = await response.json(content_type=None)
             if response.status >= 400:
                 raise HTTPException(

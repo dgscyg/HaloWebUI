@@ -13,14 +13,14 @@
 
 数据库实现:
 
-| 文件 | 客户端类 | 特点 |
-|------|----------|------|
-| `vector/dbs/chroma.py` | `ChromaClient` | 默认选择，HNSW 索引，支持本地/HTTP 模式 |
-| `vector/dbs/qdrant.py` | `QdrantClient` | 远程连接，API Key 认证，集合前缀支持 |
-| `vector/dbs/milvus.py` | `MilvusClient` | 自定义索引类型，Token 认证 |
-| `vector/dbs/pgvector.py` | `PgvectorClient` | PostgreSQL 扩展，ivfflat 索引 |
-| `vector/dbs/opensearch.py` | `OpenSearchClient` | knn_vector 类型，FAISS 引擎，HNSW 算法 |
-| `vector/dbs/elasticsearch.py` | `ElasticsearchClient` | dense_vector 类型，cosine 相似度 |
+| 文件                          | 客户端类              | 特点                                    |
+| ----------------------------- | --------------------- | --------------------------------------- |
+| `vector/dbs/chroma.py`        | `ChromaClient`        | 默认选择，HNSW 索引，支持本地/HTTP 模式 |
+| `vector/dbs/qdrant.py`        | `QdrantClient`        | 远程连接，API Key 认证，集合前缀支持    |
+| `vector/dbs/milvus.py`        | `MilvusClient`        | 自定义索引类型，Token 认证              |
+| `vector/dbs/pgvector.py`      | `PgvectorClient`      | PostgreSQL 扩展，ivfflat 索引           |
+| `vector/dbs/opensearch.py`    | `OpenSearchClient`    | knn_vector 类型，FAISS 引擎，HNSW 算法  |
+| `vector/dbs/elasticsearch.py` | `ElasticsearchClient` | dense_vector 类型，cosine 相似度        |
 
 ### 嵌入引擎
 
@@ -32,11 +32,11 @@
 
 ### 重排序引擎
 
-| 文件 | 类 | 引擎类型 |
-|------|-----|----------|
-| `retrieval/models/jina.py` | `JinaReranker` | Jina API 远程重排序 |
-| `retrieval/models/colbert.py` | `ColBERT` | ColBERT 本地重排序 |
-| `retrieval/runtime.py:157-172` | CrossEncoder | sentence-transformers 本地重排序 |
+| 文件                           | 类             | 引擎类型                         |
+| ------------------------------ | -------------- | -------------------------------- |
+| `retrieval/models/jina.py`     | `JinaReranker` | Jina API 远程重排序              |
+| `retrieval/models/colbert.py`  | `ColBERT`      | ColBERT 本地重排序               |
+| `retrieval/runtime.py:157-172` | CrossEncoder   | sentence-transformers 本地重排序 |
 
 `backend/open_webui/retrieval/utils.py:794-863` (`RerankCompressor`): LangChain 文档压缩器，整合重排序模型或余弦相似度计算。
 
@@ -53,6 +53,7 @@
 ### 数据模型
 
 `backend/open_webui/retrieval/vector/main.py:5-19`:
+
 - `VectorItem`: 向量项 (id, text, vector, metadata)
 - `GetResult`: 获取结果 (ids, documents, metadatas)
 - `SearchResult`: 搜索结果 (含 distances)

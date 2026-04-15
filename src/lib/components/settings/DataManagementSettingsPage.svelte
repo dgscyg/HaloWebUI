@@ -18,11 +18,7 @@
 		importChatsBatch
 	} from '$lib/apis/chats';
 	import { exportConfig, importConfig } from '$lib/apis/configs';
-	import {
-		downloadDatabase,
-		inspectDatabaseRestore,
-		restoreDatabase
-	} from '$lib/apis/utils';
+	import { downloadDatabase, inspectDatabaseRestore, restoreDatabase } from '$lib/apis/utils';
 	import { convertOpenAIChats, getImportOrigin } from '$lib/utils';
 
 	const { saveAs } = fileSaver;
@@ -265,8 +261,7 @@
 						meta: isRecord(item.meta) ? item.meta : {},
 						pinned: Boolean(item.pinned),
 						folder_id: typeof item.folder_id === 'string' ? item.folder_id : null,
-						assistant_id:
-							typeof item.assistant_id === 'string' ? item.assistant_id : null,
+						assistant_id: typeof item.assistant_id === 'string' ? item.assistant_id : null,
 						title:
 							typeof item.title === 'string'
 								? item.title
@@ -330,12 +325,7 @@
 		const file = target?.files?.[0];
 		if (!file) return;
 
-		setOperationState(
-			'chatImport',
-			'validating',
-			$i18n.t('Checking chat file...'),
-			file.name
-		);
+		setOperationState('chatImport', 'validating', $i18n.t('Checking chat file...'), file.name);
 
 		try {
 			const rawContent = JSON.parse(await readFileText(file));
@@ -712,10 +702,7 @@
 	const runDatabaseRestore = async () => {
 		if (!databaseRestoreDraft) return;
 
-		if (
-			databaseRestoreConfirmationInput.trim() !==
-			databaseRestoreDraft.confirmationPhrase
-		) {
+		if (databaseRestoreConfirmationInput.trim() !== databaseRestoreDraft.confirmationPhrase) {
 			setOperationState(
 				'databaseRestore',
 				'warning',
@@ -755,12 +742,7 @@
 			}, 500);
 		} catch (error) {
 			const detail = formatError(error, $i18n.t('Failed to restore database.'));
-			setOperationState(
-				'databaseRestore',
-				'error',
-				$i18n.t('Failed to restore database.'),
-				detail
-			);
+			setOperationState('databaseRestore', 'error', $i18n.t('Failed to restore database.'), detail);
 			toast.error(detail);
 		}
 	};
@@ -870,10 +852,16 @@
 	<div class="max-w-6xl mx-auto space-y-6">
 		<section class="glass-section p-5 space-y-5">
 			<div class="@container flex flex-col gap-5">
-				<div class="flex flex-col gap-4 @[64rem]:flex-row @[64rem]:items-start @[64rem]:justify-between">
+				<div
+					class="flex flex-col gap-4 @[64rem]:flex-row @[64rem]:items-start @[64rem]:justify-between"
+				>
 					<div class="min-w-0 @[64rem]:flex-1">
-						<div class="inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full border border-gray-200/80 bg-white/80 px-3.5 text-xs font-medium leading-none text-gray-600 dark:border-gray-700/80 dark:bg-gray-900/70 dark:text-gray-300">
-							<span class="leading-none text-gray-400 dark:text-gray-500">{$i18n.t('Settings')}</span>
+						<div
+							class="inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full border border-gray-200/80 bg-white/80 px-3.5 text-xs font-medium leading-none text-gray-600 dark:border-gray-700/80 dark:bg-gray-900/70 dark:text-gray-300"
+						>
+							<span class="leading-none text-gray-400 dark:text-gray-500"
+								>{$i18n.t('Settings')}</span
+							>
 							<span class="leading-none text-gray-300 dark:text-gray-600">/</span>
 							<span class="leading-none text-gray-900 dark:text-white">{$i18n.t('Database')}</span>
 						</div>
@@ -881,17 +869,54 @@
 						<div class="mt-3 flex items-start gap-3">
 							<div class="glass-icon-badge {activeTabMeta.badgeColor}">
 								{#if selectedTab === 'chatManagement'}
-									<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px] {activeTabMeta.iconColor}">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2z" />
-										<path stroke-linecap="round" stroke-linejoin="round" d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke-width="1.5"
+										stroke="currentColor"
+										class="size-[18px] {activeTabMeta.iconColor}"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2z"
+										/>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"
+										/>
 									</svg>
 								{:else if selectedTab === 'backups'}
-									<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px] {activeTabMeta.iconColor}">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke-width="1.5"
+										stroke="currentColor"
+										class="size-[18px] {activeTabMeta.iconColor}"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"
+										/>
 									</svg>
 								{:else}
-									<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px] {activeTabMeta.iconColor}">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke-width="1.5"
+										stroke="currentColor"
+										class="size-[18px] {activeTabMeta.iconColor}"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+										/>
 									</svg>
 								{/if}
 							</div>
@@ -906,21 +931,66 @@
 						</div>
 					</div>
 
-					<div class="inline-flex max-w-full flex-wrap items-center gap-2 self-start rounded-2xl bg-gray-100 p-1 dark:bg-gray-850 @[64rem]:ml-auto @[64rem]:mt-11 @[64rem]:flex-nowrap @[64rem]:justify-end @[64rem]:shrink-0">
+					<div
+						class="inline-flex max-w-full flex-wrap items-center gap-2 self-start rounded-2xl bg-gray-100 p-1 dark:bg-gray-850 @[64rem]:ml-auto @[64rem]:mt-11 @[64rem]:flex-nowrap @[64rem]:justify-end @[64rem]:shrink-0"
+					>
 						{#each visibleTabs as tab}
-							<button type="button" class={`flex min-w-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all ${selectedTab === tab ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}`} on:click={() => { selectedTab = tab; }}>
+							<button
+								type="button"
+								class={`flex min-w-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all ${selectedTab === tab ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}`}
+								on:click={() => {
+									selectedTab = tab;
+								}}
+							>
 								{#if tab === 'chatManagement'}
-									<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2z" />
-										<path stroke-linecap="round" stroke-linejoin="round" d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke-width="1.5"
+										stroke="currentColor"
+										class="size-4"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2z"
+										/>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"
+										/>
 									</svg>
 								{:else if tab === 'backups'}
-									<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke-width="1.5"
+										stroke="currentColor"
+										class="size-4"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"
+										/>
 									</svg>
 								{:else}
-									<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke-width="1.5"
+										stroke="currentColor"
+										class="size-4"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+										/>
 									</svg>
 								{/if}
 								<span>{tabMeta[tab].label}</span>
@@ -938,7 +1008,9 @@
 						<div class="text-sm font-medium text-gray-500 dark:text-gray-400">
 							{$i18n.t('Import / Export')}
 						</div>
-						<span class="{badgeClass} border-blue-200/70 bg-blue-50/80 text-blue-700 dark:border-blue-800/40 dark:bg-blue-950/20 dark:text-blue-300">
+						<span
+							class="{badgeClass} border-blue-200/70 bg-blue-50/80 text-blue-700 dark:border-blue-800/40 dark:bg-blue-950/20 dark:text-blue-300"
+						>
 							{$i18n.t('Current user only')}
 						</span>
 					</div>
@@ -951,13 +1023,20 @@
 										{$i18n.t('Import chat history from a JSON file')}
 									</div>
 								</div>
-								<button class={btnNeutral} type="button" on:click={() => chatImportInputElement?.click()} disabled={operationStates.chatImport.phase === 'running'}>
+								<button
+									class={btnNeutral}
+									type="button"
+									on:click={() => chatImportInputElement?.click()}
+									disabled={operationStates.chatImport.phase === 'running'}
+								>
 									{$i18n.t('Select File')}
 								</button>
 							</div>
 
 							{#if chatImportDraft}
-								<div class="rounded-2xl border border-gray-200/70 bg-white/70 p-3 space-y-3 dark:border-gray-800/40 dark:bg-gray-900/40">
+								<div
+									class="rounded-2xl border border-gray-200/70 bg-white/70 p-3 space-y-3 dark:border-gray-800/40 dark:bg-gray-900/40"
+								>
 									<div class="space-y-1">
 										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
 											{$i18n.t('Selected file')}
@@ -966,7 +1045,9 @@
 											{chatImportDraft.fileName}
 										</div>
 										<div class="text-xs text-gray-500 dark:text-gray-400">
-											{$i18n.t('Source')}: {chatImportDraft.origin === 'openai' ? 'OpenAI' : 'Halo WebUI'}
+											{$i18n.t('Source')}: {chatImportDraft.origin === 'openai'
+												? 'OpenAI'
+												: 'Halo WebUI'}
 											· {$i18n.t('Found {{count}} chats.', { count: chatImportDraft.count })}
 										</div>
 									</div>
@@ -980,7 +1061,11 @@
 												type="button"
 												class={`${modeButtonBase} ${chatImportDraft.mode === 'merge' ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800/40 dark:bg-blue-950/20 dark:text-blue-300' : 'border-gray-200 bg-white text-gray-600 dark:border-gray-800/40 dark:bg-gray-900/40 dark:text-gray-300'}`}
 												on:click={() => {
-													chatImportDraft = { ...chatImportDraft, mode: 'merge', confirmReplace: false };
+													chatImportDraft = {
+														...chatImportDraft,
+														mode: 'merge',
+														confirmReplace: false
+													};
 												}}
 											>
 												{$i18n.t('Merge with current chats')}
@@ -998,7 +1083,9 @@
 									</div>
 
 									{#if chatImportDraft.invalidCount > 0}
-										<div class="rounded-xl border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300">
+										<div
+											class="rounded-xl border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300"
+										>
 											{$i18n.t('Skipped {{count}} invalid entries during precheck.', {
 												count: chatImportDraft.invalidCount
 											})}
@@ -1006,17 +1093,25 @@
 									{/if}
 
 									{#if chatImportDraft.mode === 'replace'}
-										<div class="rounded-xl border border-orange-200/70 bg-orange-50/80 px-3 py-2 space-y-2 dark:border-orange-800/40 dark:bg-orange-950/20">
+										<div
+											class="rounded-xl border border-orange-200/70 bg-orange-50/80 px-3 py-2 space-y-2 dark:border-orange-800/40 dark:bg-orange-950/20"
+										>
 											<div class="text-xs font-medium text-orange-700 dark:text-orange-300">
 												{$i18n.t('This will replace all current chats for your account.')}
 											</div>
-											<label class="flex items-center gap-2 text-xs text-orange-700 dark:text-orange-300">
+											<label
+												class="flex items-center gap-2 text-xs text-orange-700 dark:text-orange-300"
+											>
 												<input
 													type="checkbox"
 													class="rounded border-orange-300 text-orange-600 focus:ring-orange-200 dark:border-orange-700 dark:bg-gray-900"
 													bind:checked={chatImportDraft.confirmReplace}
 												/>
-												<span>{$i18n.t('I understand that this operation cannot be undone from the UI.')}</span>
+												<span
+													>{$i18n.t(
+														'I understand that this operation cannot be undone from the UI.'
+													)}</span
+												>
 											</label>
 										</div>
 									{/if}
@@ -1031,7 +1126,9 @@
 											on:click={runChatImport}
 											disabled={operationStates.chatImport.phase === 'running'}
 										>
-											{$i18n.t(chatImportDraft.mode === 'replace' ? 'Start restore' : 'Start import')}
+											{$i18n.t(
+												chatImportDraft.mode === 'replace' ? 'Start restore' : 'Start import'
+											)}
 										</button>
 									</div>
 								</div>
@@ -1053,8 +1150,15 @@
 										{$i18n.t('Export your chat history to a JSON file')}
 									</div>
 								</div>
-								<button class={btnNeutral} type="button" on:click={exportChats} disabled={operationStates.chatExport.phase === 'running'}>
-									{$i18n.t(operationStates.chatExport.phase === 'running' ? 'Exporting...' : 'Export')}
+								<button
+									class={btnNeutral}
+									type="button"
+									on:click={exportChats}
+									disabled={operationStates.chatExport.phase === 'running'}
+								>
+									{$i18n.t(
+										operationStates.chatExport.phase === 'running' ? 'Exporting...' : 'Export'
+									)}
 								</button>
 							</div>
 							<DataManagementStatus
@@ -1070,7 +1174,9 @@
 						<div class="text-sm font-medium text-gray-500 dark:text-gray-400">
 							{$i18n.t('Chat Archive')}
 						</div>
-						<span class="{badgeClass} border-blue-200/70 bg-blue-50/80 text-blue-700 dark:border-blue-800/40 dark:bg-blue-950/20 dark:text-blue-300">
+						<span
+							class="{badgeClass} border-blue-200/70 bg-blue-50/80 text-blue-700 dark:border-blue-800/40 dark:bg-blue-950/20 dark:text-blue-300"
+						>
 							{$i18n.t('Current user only')}
 						</span>
 					</div>
@@ -1082,7 +1188,11 @@
 									{$i18n.t('View and manage your archived conversations')}
 								</div>
 							</div>
-							<button class={btnNeutral} type="button" on:click={() => (showArchivedChatsModal = true)}>
+							<button
+								class={btnNeutral}
+								type="button"
+								on:click={() => (showArchivedChatsModal = true)}
+							>
 								{$i18n.t('View')}
 							</button>
 						</div>
@@ -1097,10 +1207,16 @@
 								</div>
 								{#if showArchiveConfirm}
 									<div class="shrink-0 flex items-center gap-1.5">
-										<span class="text-xs text-orange-600/80 dark:text-orange-400/80 whitespace-nowrap">
+										<span
+											class="text-xs text-orange-600/80 dark:text-orange-400/80 whitespace-nowrap"
+										>
 											{$i18n.t('Are you sure?')}
 										</span>
-										<button class={btnSmall} type="button" on:click={() => (showArchiveConfirm = false)}>
+										<button
+											class={btnSmall}
+											type="button"
+											on:click={() => (showArchiveConfirm = false)}
+										>
 											{$i18n.t('Cancel')}
 										</button>
 										<button
@@ -1115,7 +1231,12 @@
 										</button>
 									</div>
 								{:else}
-									<button class={btnWarn} type="button" on:click={() => (showArchiveConfirm = true)} disabled={operationStates.archiveAll.phase === 'running'}>
+									<button
+										class={btnWarn}
+										type="button"
+										on:click={() => (showArchiveConfirm = true)}
+										disabled={operationStates.archiveAll.phase === 'running'}
+									>
 										{$i18n.t('Archive All')}
 									</button>
 								{/if}
@@ -1137,7 +1258,9 @@
 						<div class="text-sm font-medium text-gray-500 dark:text-gray-400">
 							{$i18n.t('Configuration')}
 						</div>
-						<span class="{badgeClass} border-emerald-200/70 bg-emerald-50/80 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+						<span
+							class="{badgeClass} border-emerald-200/70 bg-emerald-50/80 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300"
+						>
 							{$i18n.t('Admin only')}
 						</span>
 					</div>
@@ -1150,13 +1273,20 @@
 										{$i18n.t('Import your application configuration from a JSON file')}
 									</div>
 								</div>
-								<button class={btnNeutral} type="button" on:click={() => configImportInputElement?.click()} disabled={operationStates.configImport.phase === 'running'}>
+								<button
+									class={btnNeutral}
+									type="button"
+									on:click={() => configImportInputElement?.click()}
+									disabled={operationStates.configImport.phase === 'running'}
+								>
 									{$i18n.t('Select File')}
 								</button>
 							</div>
 
 							{#if configImportDraft}
-								<div class="rounded-2xl border border-gray-200/70 bg-white/70 p-3 space-y-3 dark:border-gray-800/40 dark:bg-gray-900/40">
+								<div
+									class="rounded-2xl border border-gray-200/70 bg-white/70 p-3 space-y-3 dark:border-gray-800/40 dark:bg-gray-900/40"
+								>
 									<div class="space-y-1">
 										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
 											{$i18n.t('Selected file')}
@@ -1174,7 +1304,9 @@
 									{#if configImportDraft.topLevelKeys.length > 0}
 										<div class="flex flex-wrap gap-2">
 											{#each configImportDraft.topLevelKeys.slice(0, 6) as key}
-												<span class="{badgeClass} border-gray-200/70 bg-gray-50/80 text-gray-600 dark:border-gray-800/40 dark:bg-gray-900/50 dark:text-gray-300">
+												<span
+													class="{badgeClass} border-gray-200/70 bg-gray-50/80 text-gray-600 dark:border-gray-800/40 dark:bg-gray-900/50 dark:text-gray-300"
+												>
 													{key}
 												</span>
 											{/each}
@@ -1190,7 +1322,11 @@
 												type="button"
 												class={`${modeButtonBase} ${configImportDraft.mode === 'merge' ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800/40 dark:bg-blue-950/20 dark:text-blue-300' : 'border-gray-200 bg-white text-gray-600 dark:border-gray-800/40 dark:bg-gray-900/40 dark:text-gray-300'}`}
 												on:click={() => {
-													configImportDraft = { ...configImportDraft, mode: 'merge', confirmReplace: false };
+													configImportDraft = {
+														...configImportDraft,
+														mode: 'merge',
+														confirmReplace: false
+													};
 												}}
 											>
 												{$i18n.t('Merge with current config')}
@@ -1208,17 +1344,25 @@
 									</div>
 
 									{#if configImportDraft.mode === 'replace'}
-										<div class="rounded-xl border border-orange-200/70 bg-orange-50/80 px-3 py-2 space-y-2 dark:border-orange-800/40 dark:bg-orange-950/20">
+										<div
+											class="rounded-xl border border-orange-200/70 bg-orange-50/80 px-3 py-2 space-y-2 dark:border-orange-800/40 dark:bg-orange-950/20"
+										>
 											<div class="text-xs font-medium text-orange-700 dark:text-orange-300">
 												{$i18n.t('This will replace the current application configuration.')}
 											</div>
-											<label class="flex items-center gap-2 text-xs text-orange-700 dark:text-orange-300">
+											<label
+												class="flex items-center gap-2 text-xs text-orange-700 dark:text-orange-300"
+											>
 												<input
 													type="checkbox"
 													class="rounded border-orange-300 text-orange-600 focus:ring-orange-200 dark:border-orange-700 dark:bg-gray-900"
 													bind:checked={configImportDraft.confirmReplace}
 												/>
-												<span>{$i18n.t('I understand that this operation can change system behavior immediately.')}</span>
+												<span
+													>{$i18n.t(
+														'I understand that this operation can change system behavior immediately.'
+													)}</span
+												>
 											</label>
 										</div>
 									{/if}
@@ -1233,7 +1377,9 @@
 											on:click={runConfigImport}
 											disabled={operationStates.configImport.phase === 'running'}
 										>
-											{$i18n.t(configImportDraft.mode === 'replace' ? 'Start restore' : 'Start import')}
+											{$i18n.t(
+												configImportDraft.mode === 'replace' ? 'Start restore' : 'Start import'
+											)}
 										</button>
 									</div>
 								</div>
@@ -1255,8 +1401,15 @@
 										{$i18n.t('Export your current application configuration to a JSON file')}
 									</div>
 								</div>
-								<button class={btnNeutral} type="button" on:click={exportConfigToFile} disabled={operationStates.configExport.phase === 'running'}>
-									{$i18n.t(operationStates.configExport.phase === 'running' ? 'Exporting...' : 'Export')}
+								<button
+									class={btnNeutral}
+									type="button"
+									on:click={exportConfigToFile}
+									disabled={operationStates.configExport.phase === 'running'}
+								>
+									{$i18n.t(
+										operationStates.configExport.phase === 'running' ? 'Exporting...' : 'Export'
+									)}
 								</button>
 							</div>
 							<DataManagementStatus
@@ -1273,10 +1426,14 @@
 							<div class="text-sm font-medium text-gray-500 dark:text-gray-400">
 								{$i18n.t('Database')}
 							</div>
-							<span class="{badgeClass} border-red-200/70 bg-red-50/80 text-red-700 dark:border-red-800/40 dark:bg-red-950/20 dark:text-red-300">
+							<span
+								class="{badgeClass} border-red-200/70 bg-red-50/80 text-red-700 dark:border-red-800/40 dark:bg-red-950/20 dark:text-red-300"
+							>
 								{$i18n.t('Entire system data')}
 							</span>
-							<span class="{badgeClass} border-orange-200/70 bg-orange-50/80 text-orange-700 dark:border-orange-800/40 dark:bg-orange-950/20 dark:text-orange-300">
+							<span
+								class="{badgeClass} border-orange-200/70 bg-orange-50/80 text-orange-700 dark:border-orange-800/40 dark:bg-orange-950/20 dark:text-orange-300"
+							>
 								{$i18n.t('Restore replaces current data')}
 							</span>
 						</div>
@@ -1286,11 +1443,20 @@
 									<div class="min-w-0">
 										<div class="text-sm font-medium">{$i18n.t('Export Database')}</div>
 										<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-											{$i18n.t('Export the complete SQLite database backup, containing all system data')}
+											{$i18n.t(
+												'Export the complete SQLite database backup, containing all system data'
+											)}
 										</div>
 									</div>
-									<button class={btnNeutral} type="button" on:click={exportDatabase} disabled={operationStates.databaseExport.phase === 'running'}>
-										{$i18n.t(operationStates.databaseExport.phase === 'running' ? 'Exporting...' : 'Export')}
+									<button
+										class={btnNeutral}
+										type="button"
+										on:click={exportDatabase}
+										disabled={operationStates.databaseExport.phase === 'running'}
+									>
+										{$i18n.t(
+											operationStates.databaseExport.phase === 'running' ? 'Exporting...' : 'Export'
+										)}
 									</button>
 								</div>
 								<DataManagementStatus
@@ -1313,20 +1479,25 @@
 										class={btnNeutral}
 										type="button"
 										on:click={() => databaseRestoreInputElement?.click()}
-										disabled={!databaseRestoreSupport.supported || operationStates.databaseRestore.phase === 'running'}
+										disabled={!databaseRestoreSupport.supported ||
+											operationStates.databaseRestore.phase === 'running'}
 									>
 										{$i18n.t('Import')}
 									</button>
 								</div>
 
 								{#if !databaseRestoreSupport.supported}
-									<div class="rounded-xl border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300">
+									<div
+										class="rounded-xl border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300"
+									>
 										{getRestoreUnavailableMessage()}
 									</div>
 								{/if}
 
 								{#if databaseRestoreDraft}
-									<div class="rounded-2xl border border-red-200/70 bg-red-50/40 p-3 space-y-3 dark:border-red-800/40 dark:bg-red-950/10">
+									<div
+										class="rounded-2xl border border-red-200/70 bg-red-50/40 p-3 space-y-3 dark:border-red-800/40 dark:bg-red-950/10"
+									>
 										<div class="space-y-1">
 											<div class="text-xs font-medium text-red-700 dark:text-red-300">
 												{$i18n.t('Backup file')}
@@ -1335,22 +1506,29 @@
 												{databaseRestoreDraft.fileName}
 											</div>
 											<div class="text-xs text-gray-500 dark:text-gray-400">
-												{formatBytes(databaseRestoreDraft.fileSize)} · {$i18n.t('Found {{count}} tables in the backup.', {
-													count: databaseRestoreDraft.summary.table_count
-												})}
+												{formatBytes(databaseRestoreDraft.fileSize)} · {$i18n.t(
+													'Found {{count}} tables in the backup.',
+													{
+														count: databaseRestoreDraft.summary.table_count
+													}
+												)}
 											</div>
 										</div>
 
 										<div class="flex flex-wrap gap-2">
 											{#each databaseRestoreDraft.summary.tables_preview as tableName}
-												<span class="{badgeClass} border-red-200/70 bg-white/80 text-red-700 dark:border-red-800/40 dark:bg-gray-900/60 dark:text-red-300">
+												<span
+													class="{badgeClass} border-red-200/70 bg-white/80 text-red-700 dark:border-red-800/40 dark:bg-gray-900/60 dark:text-red-300"
+												>
 													{tableName}
 												</span>
 											{/each}
 										</div>
 
 										{#if databaseRestoreDraft.warnings.length > 0}
-											<div class="rounded-xl border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 space-y-1 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300">
+											<div
+												class="rounded-xl border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 space-y-1 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300"
+											>
 												{#each databaseRestoreDraft.warnings as warning}
 													<div>{warning}</div>
 												{/each}
@@ -1380,7 +1558,12 @@
 											<button class={btnSmall} type="button" on:click={resetDatabaseRestoreDraft}>
 												{$i18n.t('Cancel')}
 											</button>
-											<button class={btnDanger} type="button" on:click={runDatabaseRestore} disabled={operationStates.databaseRestore.phase === 'running'}>
+											<button
+												class={btnDanger}
+												type="button"
+												on:click={runDatabaseRestore}
+												disabled={operationStates.databaseRestore.phase === 'running'}
+											>
 												{$i18n.t('Start restore')}
 											</button>
 										</div>
@@ -1403,8 +1586,17 @@
 											{$i18n.t('Export all users chat records in JSON format')}
 										</div>
 									</div>
-									<button class={btnNeutral} type="button" on:click={exportAllUserChats} disabled={operationStates.allUserChatsExport.phase === 'running'}>
-										{$i18n.t(operationStates.allUserChatsExport.phase === 'running' ? 'Exporting...' : 'Export')}
+									<button
+										class={btnNeutral}
+										type="button"
+										on:click={exportAllUserChats}
+										disabled={operationStates.allUserChatsExport.phase === 'running'}
+									>
+										{$i18n.t(
+											operationStates.allUserChatsExport.phase === 'running'
+												? 'Exporting...'
+												: 'Export'
+										)}
 									</button>
 								</div>
 								<DataManagementStatus
@@ -1419,20 +1611,37 @@
 				</div>
 			</section>
 		{:else if selectedTab === 'dangerZone'}
-			<section class="scroll-mt-2 p-5 space-y-5 transition-all duration-300 glass-section border-red-200/60 dark:border-red-800/30">
+			<section
+				class="scroll-mt-2 p-5 space-y-5 transition-all duration-300 glass-section border-red-200/60 dark:border-red-800/30"
+			>
 				<div class="flex flex-wrap items-center gap-3">
 					<div class="glass-icon-badge bg-red-50 dark:bg-red-950/30">
-						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px] text-red-500 dark:text-red-400">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="1.5"
+							stroke="currentColor"
+							class="size-[18px] text-red-500 dark:text-red-400"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+							/>
 						</svg>
 					</div>
 					<div class="text-base font-semibold text-red-600 dark:text-red-400">
 						{$i18n.t('Danger Zone')}
 					</div>
-					<span class="{badgeClass} border-red-200/70 bg-red-50/80 text-red-700 dark:border-red-800/40 dark:bg-red-950/20 dark:text-red-300">
+					<span
+						class="{badgeClass} border-red-200/70 bg-red-50/80 text-red-700 dark:border-red-800/40 dark:bg-red-950/20 dark:text-red-300"
+					>
 						{$i18n.t('Cannot be undone')}
 					</span>
-					<span class="{badgeClass} border-orange-200/70 bg-orange-50/80 text-orange-700 dark:border-orange-800/40 dark:bg-orange-950/20 dark:text-orange-300">
+					<span
+						class="{badgeClass} border-orange-200/70 bg-orange-50/80 text-orange-700 dark:border-orange-800/40 dark:bg-orange-950/20 dark:text-orange-300"
+					>
 						{$i18n.t('Current user only')}
 					</span>
 				</div>
@@ -1445,7 +1654,9 @@
 									{$i18n.t('Delete All Chats')}
 								</div>
 								<div class="text-xs text-red-500/70 dark:text-red-400/70 mt-0.5">
-									{$i18n.t('Permanently delete all of your chat records. This action cannot be undone.')}
+									{$i18n.t(
+										'Permanently delete all of your chat records. This action cannot be undone.'
+									)}
 								</div>
 							</div>
 							{#if showDeleteConfirm}
@@ -1453,7 +1664,11 @@
 									<span class="text-xs text-red-600/70 dark:text-red-400/80 whitespace-nowrap">
 										{$i18n.t('Are you sure?')}
 									</span>
-									<button class={btnSmall} type="button" on:click={() => (showDeleteConfirm = false)}>
+									<button
+										class={btnSmall}
+										type="button"
+										on:click={() => (showDeleteConfirm = false)}
+									>
 										{$i18n.t('Cancel')}
 									</button>
 									<button
@@ -1468,7 +1683,12 @@
 									</button>
 								</div>
 							{:else}
-								<button class={btnDanger} type="button" on:click={() => (showDeleteConfirm = true)} disabled={operationStates.deleteAll.phase === 'running'}>
+								<button
+									class={btnDanger}
+									type="button"
+									on:click={() => (showDeleteConfirm = true)}
+									disabled={operationStates.deleteAll.phase === 'running'}
+								>
 									{$i18n.t('Delete All')}
 								</button>
 							{/if}

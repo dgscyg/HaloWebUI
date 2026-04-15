@@ -12,10 +12,7 @@
 </script>
 
 <div class="message-outline-root">
-	<div
-		class="message-outline-body"
-		style="--outline-count:{headings.length}"
-	>
+	<div class="message-outline-body" style="--outline-count:{headings.length}">
 		{#each headings as heading (heading.id)}
 			<button
 				type="button"

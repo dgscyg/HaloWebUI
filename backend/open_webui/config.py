@@ -84,7 +84,9 @@ def _get_reranking_api_base_url_default() -> str:
         os.getenv("RAG_RERANKING_API_BASE_URL")
         or get_config_value("rag.external_reranker_url")
         or os.getenv("RAG_EXTERNAL_RERANKER_URL", "")
-        or LITE_PRESET_DEFAULTS.get(LITE_PRESET, {}).get("RAG_RERANKING_API_BASE_URL", "")
+        or LITE_PRESET_DEFAULTS.get(LITE_PRESET, {}).get(
+            "RAG_RERANKING_API_BASE_URL", ""
+        )
     )
 
 
@@ -122,7 +124,9 @@ def _get_default_file_processing_mode() -> str:
 
     bypass_flag = get_config_value("rag.bypass_embedding_and_retrieval")
     if bypass_flag is None:
-        bypass_flag = os.environ.get("BYPASS_EMBEDDING_AND_RETRIEVAL", "False").lower() == "true"
+        bypass_flag = (
+            os.environ.get("BYPASS_EMBEDDING_AND_RETRIEVAL", "False").lower() == "true"
+        )
 
     return (
         FILE_PROCESSING_MODE_FULL_CONTEXT
@@ -133,8 +137,7 @@ def _get_default_file_processing_mode() -> str:
 
 def _get_default_document_provider() -> str:
     configured = normalize_document_provider(
-        os.getenv("DOCUMENT_PROVIDER")
-        or get_config_value("rag.document_provider"),
+        os.getenv("DOCUMENT_PROVIDER") or get_config_value("rag.document_provider"),
         "",
     )
     if configured:
@@ -162,6 +165,7 @@ def _get_default_document_provider_configs() -> dict:
         return defaults
 
     return build_default_document_provider_configs()
+
 
 ####################################
 # Config helpers
@@ -283,7 +287,9 @@ WEB_SEARCH_NUMERIC_CONFIG_DEFAULTS = {
 }
 
 
-def _get_config_parent(config: dict, config_path: str) -> tuple[Optional[dict], Optional[str]]:
+def _get_config_parent(
+    config: dict, config_path: str
+) -> tuple[Optional[dict], Optional[str]]:
     path_parts = config_path.split(".")
     cur_config = config
     for key in path_parts[:-1]:
@@ -913,7 +919,9 @@ def load_oauth_providers():
                 )
 
             if OAUTH_TOKEN_ENDPOINT_AUTH_METHOD:
-                client_kwargs["token_endpoint_auth_method"] = OAUTH_TOKEN_ENDPOINT_AUTH_METHOD
+                client_kwargs["token_endpoint_auth_method"] = (
+                    OAUTH_TOKEN_ENDPOINT_AUTH_METHOD
+                )
 
             client.register(
                 name="oidc",
@@ -1270,7 +1278,9 @@ if ANTHROPIC_API_BASE_URL == "":
     ANTHROPIC_API_BASE_URL = DEFAULT_ANTHROPIC_API_BASE_URL
 
 ANTHROPIC_API_KEYS = os.environ.get("ANTHROPIC_API_KEYS", "")
-ANTHROPIC_API_KEYS = ANTHROPIC_API_KEYS if ANTHROPIC_API_KEYS != "" else ANTHROPIC_API_KEY
+ANTHROPIC_API_KEYS = (
+    ANTHROPIC_API_KEYS if ANTHROPIC_API_KEYS != "" else ANTHROPIC_API_KEY
+)
 
 ANTHROPIC_API_KEYS = [key.strip() for key in ANTHROPIC_API_KEYS.split(";")]
 ANTHROPIC_API_KEYS = PersistentConfig(
@@ -1281,9 +1291,7 @@ ANTHROPIC_API_KEYS = PersistentConfig(
 
 ANTHROPIC_API_BASE_URLS = os.environ.get("ANTHROPIC_API_BASE_URLS", "")
 ANTHROPIC_API_BASE_URLS = (
-    ANTHROPIC_API_BASE_URLS
-    if ANTHROPIC_API_BASE_URLS != ""
-    else ANTHROPIC_API_BASE_URL
+    ANTHROPIC_API_BASE_URLS if ANTHROPIC_API_BASE_URLS != "" else ANTHROPIC_API_BASE_URL
 )
 
 ANTHROPIC_API_BASE_URLS = [
@@ -2442,7 +2450,8 @@ DATALAB_MARKER_STRIP_EXISTING_OCR = PersistentConfig(
 DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION = PersistentConfig(
     "DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION",
     "rag.datalab_marker_disable_image_extraction",
-    os.environ.get("DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION", "false").lower() == "true",
+    os.environ.get("DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION", "false").lower()
+    == "true",
 )
 
 DATALAB_MARKER_FORMAT_LINES = PersistentConfig(
@@ -2602,7 +2611,8 @@ ENABLE_RAG_HYBRID_SEARCH = PersistentConfig(
 ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = PersistentConfig(
     "ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS",
     "rag.enable_hybrid_search_enriched_texts",
-    os.environ.get("ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS", "False").lower() == "true",
+    os.environ.get("ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS", "False").lower()
+    == "true",
 )
 
 RAG_HYBRID_SEARCH_BM25_WEIGHT = PersistentConfig(
@@ -2660,7 +2670,11 @@ FILE_IMAGE_COMPRESSION_HEIGHT = PersistentConfig(
 RAG_ALLOWED_FILE_EXTENSIONS = PersistentConfig(
     "RAG_ALLOWED_FILE_EXTENSIONS",
     "rag.file.allowed_extensions",
-    [ext.strip() for ext in os.environ.get("RAG_ALLOWED_FILE_EXTENSIONS", "").split(",") if ext.strip()],
+    [
+        ext.strip()
+        for ext in os.environ.get("RAG_ALLOWED_FILE_EXTENSIONS", "").split(",")
+        if ext.strip()
+    ],
 )
 
 RAG_EMBEDDING_ENGINE = PersistentConfig(

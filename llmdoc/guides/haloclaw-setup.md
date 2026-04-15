@@ -47,11 +47,11 @@ POST /api/v1/haloclaw/gateways
 
 **平台配置说明**:
 
-| 平台 | 必需配置字段 |
-|------|-------------|
-| Telegram | `bot_token` |
-| 企业微信 | `corp_id`, `agent_id`, `secret`, `token`, `aes_key` |
-| 飞书 | `app_id`, `app_secret`, `verification_token`, `encrypt_key`(可选) |
+| 平台     | 必需配置字段                                                      |
+| -------- | ----------------------------------------------------------------- |
+| Telegram | `bot_token`                                                       |
+| 企业微信 | `corp_id`, `agent_id`, `secret`, `token`, `aes_key`               |
+| 飞书     | `app_id`, `app_secret`, `verification_token`, `encrypt_key`(可选) |
 
 ### 4. 配置 Webhook（仅企业微信/飞书）
 
@@ -89,10 +89,10 @@ GET /api/v1/haloclaw/gateways/{gateway_id}/logs
 
 ```json
 {
-  "access_policy": {
-    "dm_policy": "allowlist",
-    "allowlist": ["user_id_1", "user_id_2"]
-  }
+	"access_policy": {
+		"dm_policy": "allowlist",
+		"allowlist": ["user_id_1", "user_id_2"]
+	}
 }
 ```
 
@@ -100,17 +100,17 @@ GET /api/v1/haloclaw/gateways/{gateway_id}/logs
 
 ```json
 {
-  "access_policy": {
-    "group_policy": "mention"
-  }
+	"access_policy": {
+		"group_policy": "mention"
+	}
 }
 ```
 
-| 群聊策略 | 行为 |
-|----------|------|
-| `mention` | 仅在被 @提及时响应（默认） |
-| `all` | 响应所有消息 |
-| `disabled` | 群聊中不响应 |
+| 群聊策略   | 行为                       |
+| ---------- | -------------------------- |
+| `mention`  | 仅在被 @提及时响应（默认） |
+| `all`      | 响应所有消息               |
+| `disabled` | 群聊中不响应               |
 
 ## 工具调用配置
 
@@ -118,10 +118,10 @@ GET /api/v1/haloclaw/gateways/{gateway_id}/logs
 
 ```json
 {
-  "meta": {
-    "tool_ids": ["web_search", "calculator"],
-    "max_tool_rounds": 5
-  }
+	"meta": {
+		"tool_ids": ["web_search", "calculator"],
+		"max_tool_rounds": 5
+	}
 }
 ```
 

@@ -8,7 +8,7 @@
 ## 2. 核心组件
 
 - `backend/open_webui/haloclaw/models.py` (HaloClawGateway, HaloClawExternalUser, HaloClawMessageLog): 数据库模型定义和 CRUD 操作。
-- `backend/open_webui/haloclaw/dispatcher.py` (handle_message, _FakeRequest): 核心消息分发器，连接外部消息到 AI 管道。
+- `backend/open_webui/haloclaw/dispatcher.py` (handle_message, \_FakeRequest): 核心消息分发器，连接外部消息到 AI 管道。
 - `backend/open_webui/haloclaw/lifecycle.py` (startup_haloclaw, shutdown_haloclaw): 网关生命周期管理。
 - `backend/open_webui/haloclaw/router.py` (APIRouter): 管理 API 和 Webhook 端点。
 - `backend/open_webui/haloclaw/adapters/base.py` (BaseAdapter): 适配器抽象基类。
@@ -42,13 +42,13 @@
 
 `backend/open_webui/haloclaw/adapters/base.py:5-55`
 
-| 方法 | 说明 |
-|------|------|
-| `start()` | 启动适配器（开始监听消息） |
-| `stop()` | 停止适配器（清理资源） |
-| `send_message(chat_id, text)` | 发送文本消息 |
-| `edit_message(chat_id, msg_id, text)` | 编辑已发送消息 |
-| `send_photo(chat_id, image_url)` | 发送图片（可选实现） |
+| 方法                                  | 说明                       |
+| ------------------------------------- | -------------------------- |
+| `start()`                             | 启动适配器（开始监听消息） |
+| `stop()`                              | 停止适配器（清理资源）     |
+| `send_message(chat_id, text)`         | 发送文本消息               |
+| `edit_message(chat_id, msg_id, text)` | 编辑已发送消息             |
+| `send_photo(chat_id, image_url)`      | 发送图片（可选实现）       |
 
 ## 4. 消息流程图
 
@@ -112,43 +112,43 @@ flowchart TD
 
 `backend/open_webui/haloclaw/models.py:21-39`
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | Text | 网关唯一标识 |
-| user_id | Text | 网关所有者（HaloWebUI 用户） |
-| platform | Text | 平台类型：telegram/wechat_work/feishu |
-| name | Text | 网关显示名称 |
-| config | JSONField | 平台特定配置（token、secret 等） |
-| default_model_id | Text | 网关默认模型 |
-| system_prompt | Text | 系统提示词 |
-| access_policy | JSONField | 访问策略（白名单/黑名单/群聊策略） |
-| enabled | Boolean | 是否启用 |
+| 字段             | 类型      | 说明                                  |
+| ---------------- | --------- | ------------------------------------- |
+| id               | Text      | 网关唯一标识                          |
+| user_id          | Text      | 网关所有者（HaloWebUI 用户）          |
+| platform         | Text      | 平台类型：telegram/wechat_work/feishu |
+| name             | Text      | 网关显示名称                          |
+| config           | JSONField | 平台特定配置（token、secret 等）      |
+| default_model_id | Text      | 网关默认模型                          |
+| system_prompt    | Text      | 系统提示词                            |
+| access_policy    | JSONField | 访问策略（白名单/黑名单/群聊策略）    |
+| enabled          | Boolean   | 是否启用                              |
 
 ### 5.2 HaloClawExternalUser
 
 `backend/open_webui/haloclaw/models.py:41-58`
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | Text | 用户唯一标识 |
-| gateway_id | Text | 所属网关 |
-| platform_user_id | Text | 平台用户 ID |
-| halo_user_id | Text | 关联的 HaloWebUI 用户（可选） |
-| model_override | Text | 用户模型覆盖 |
-| is_blocked | Boolean | 是否被拉黑 |
+| 字段             | 类型    | 说明                          |
+| ---------------- | ------- | ----------------------------- |
+| id               | Text    | 用户唯一标识                  |
+| gateway_id       | Text    | 所属网关                      |
+| platform_user_id | Text    | 平台用户 ID                   |
+| halo_user_id     | Text    | 关联的 HaloWebUI 用户（可选） |
+| model_override   | Text    | 用户模型覆盖                  |
+| is_blocked       | Boolean | 是否被拉黑                    |
 
 ### 5.3 HaloClawMessageLog
 
 `backend/open_webui/haloclaw/models.py:60-79`
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| direction | Text | inbound/outbound |
-| role | Text | user/assistant |
-| content | Text | 消息内容摘要 |
-| model_id | Text | 使用的模型 ID |
-| prompt_tokens | Integer | 输入 token 数 |
-| completion_tokens | Integer | 输出 token 数 |
+| 字段              | 类型    | 说明             |
+| ----------------- | ------- | ---------------- |
+| direction         | Text    | inbound/outbound |
+| role              | Text    | user/assistant   |
+| content           | Text    | 消息内容摘要     |
+| model_id          | Text    | 使用的模型 ID    |
+| prompt_tokens     | Integer | 输入 token 数    |
+| completion_tokens | Integer | 输出 token 数    |
 
 ## 6. 生命周期管理
 

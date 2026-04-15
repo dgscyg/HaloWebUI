@@ -1009,7 +1009,12 @@
 			} else {
 				syncReasoningUiState(null, null);
 			}
-		} else if (hasSingleModelSelection && defaultEffort !== null && paramEffort === null && paramTokens === null) {
+		} else if (
+			hasSingleModelSelection &&
+			defaultEffort !== null &&
+			paramEffort === null &&
+			paramTokens === null
+		) {
 			setSharedReasoningState({ effort: defaultEffort, tokens: null });
 		} else if (paramTokens !== null && paramTokens > 0) {
 			setSharedReasoningState({ effort: null, tokens: paramTokens, syncParams: false });
@@ -2051,7 +2056,9 @@
 
 				if (chat.assistant_id) {
 					if ($models.length === 0) {
-						await ensureModels(localStorage.token, { reason: 'chat-assistant-scene' }).catch(() => {});
+						await ensureModels(localStorage.token, { reason: 'chat-assistant-scene' }).catch(
+							() => {}
+						);
 						await tick();
 					}
 
@@ -3870,14 +3877,19 @@
 		let _chatId = $chatId;
 
 		if (!$temporaryChatEnabled) {
-			chat = await createNewChat(localStorage.token, {
-				id: _chatId,
-				title: $i18n.t('New Chat'),
-				system: $settings.system ?? undefined,
-				tags: [],
-				timestamp: Date.now(),
-				...buildPersistedChatData(history)
-			}, null, $selectedAssistantScene?.id ?? null);
+			chat = await createNewChat(
+				localStorage.token,
+				{
+					id: _chatId,
+					title: $i18n.t('New Chat'),
+					system: $settings.system ?? undefined,
+					tags: [],
+					timestamp: Date.now(),
+					...buildPersistedChatData(history)
+				},
+				null,
+				$selectedAssistantScene?.id ?? null
+			);
 
 			_chatId = chat.id;
 			await chatId.set(_chatId);

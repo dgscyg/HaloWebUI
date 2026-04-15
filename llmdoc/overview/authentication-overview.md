@@ -22,12 +22,12 @@
 
 ### 2.3 OAuth/OIDC 提供商
 
-| 提供商 | 配置前缀 | 说明 |
-|--------|----------|------|
-| Google | `GOOGLE_OAUTH_*` | 支持 OpenID Connect |
-| Microsoft | `MICROSOFT_OAUTH_*` | 支持 Azure AD 集成 |
-| GitHub | `GITHUB_OAUTH_*` | 支持公开/私有邮箱 |
-| 飞书 | `FEISHU_*` | 企业内部应用集成 |
+| 提供商    | 配置前缀                                 | 说明                 |
+| --------- | ---------------------------------------- | -------------------- |
+| Google    | `GOOGLE_OAUTH_*`                         | 支持 OpenID Connect  |
+| Microsoft | `MICROSOFT_OAUTH_*`                      | 支持 Azure AD 集成   |
+| GitHub    | `GITHUB_OAUTH_*`                         | 支持公开/私有邮箱    |
+| 飞书      | `FEISHU_*`                               | 企业内部应用集成     |
 | 通用 OIDC | `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | 兼容任意 OIDC 提供商 |
 
 ### 2.4 LDAP 认证
@@ -61,10 +61,10 @@
 
 ### 3.2 用户角色
 
-| 角色 | 说明 |
-|------|------|
-| `admin` | 系统管理员，拥有所有权限 |
-| `user` | 普通用户，受权限配置约束 |
+| 角色      | 说明                       |
+| --------- | -------------------------- |
+| `admin`   | 系统管理员，拥有所有权限   |
+| `user`    | 普通用户，受权限配置约束   |
 | `pending` | 待审核用户，无系统访问权限 |
 
 ### 3.3 权限结构

@@ -70,7 +70,6 @@ from open_webui.utils.native_web_search import (
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access
 
-
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["OPENAI"])
 
@@ -97,9 +96,7 @@ def _is_official_openai_connection(url: str) -> bool:
     return host == "api.openai.com" or host.endswith(".openai.com")
 
 
-def _is_azure_openai_connection(
-    url: str, api_config: Optional[dict] = None
-) -> bool:
+def _is_azure_openai_connection(url: str, api_config: Optional[dict] = None) -> bool:
     if bool((api_config or {}).get("azure")):
         return True
 
@@ -175,14 +172,14 @@ def _normalize_azure_openai_base_url(
     elif path.endswith("/v1"):
         azure_path = f"{path[: -len('/v1')]}/openai/v1"
     else:
-        azure_path = f"{path}{AZURE_OPENAI_V1_SEGMENT}" if path else AZURE_OPENAI_V1_SEGMENT
+        azure_path = (
+            f"{path}{AZURE_OPENAI_V1_SEGMENT}" if path else AZURE_OPENAI_V1_SEGMENT
+        )
 
     return _replace_url_path_and_query(parsed, azure_path, "")
 
 
-def _get_azure_openai_resource_url(
-    url: str, api_config: Optional[dict] = None
-) -> str:
+def _get_azure_openai_resource_url(url: str, api_config: Optional[dict] = None) -> str:
     normalized_url = (url or "").strip().rstrip("/")
     if not normalized_url:
         return normalized_url
@@ -207,7 +204,9 @@ def _append_query_param(url: str, key: str, value: Optional[str]) -> str:
         return url
 
     parsed = urlparse(url)
-    query = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True) if k != key]
+    query = [
+        (k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True) if k != key
+    ]
     query.append((key, value))
     return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
 
@@ -233,7 +232,9 @@ def _get_azure_openai_chat_completions_urls(
     urls: list[str] = []
     resource_url = _get_azure_openai_resource_url(url, api_config)
     api_version = _get_azure_api_version(api_config)
-    urls.append(f"{resource_url}{AZURE_OPENAI_V1_SEGMENT}{OPENAI_CHAT_COMPLETIONS_SUFFIX}")
+    urls.append(
+        f"{resource_url}{AZURE_OPENAI_V1_SEGMENT}{OPENAI_CHAT_COMPLETIONS_SUFFIX}"
+    )
 
     if api_version and model_id:
         deployment = quote(str(model_id).strip(), safe="")
@@ -278,9 +279,7 @@ def _get_openai_models_url(url: str, api_config: Optional[dict] = None) -> str:
 
     if _is_force_mode_connection(normalized_url, api_config):
         if normalized_url.endswith(OPENAI_CHAT_COMPLETIONS_SUFFIX):
-            return (
-                f"{normalized_url[:-len(OPENAI_CHAT_COMPLETIONS_SUFFIX)]}/models"
-            )
+            return f"{normalized_url[:-len(OPENAI_CHAT_COMPLETIONS_SUFFIX)]}/models"
         return normalized_url
 
     return f"{normalized_url}/models"
@@ -291,9 +290,7 @@ def _get_openai_chat_completions_url(
 ) -> str:
     normalized_url = (url or "").rstrip("/")
     if _is_azure_openai_connection(normalized_url, api_config):
-        candidates = _get_azure_openai_chat_completions_urls(
-            normalized_url, api_config
-        )
+        candidates = _get_azure_openai_chat_completions_urls(normalized_url, api_config)
         return candidates[0] if candidates else normalized_url
     if _is_force_mode_connection(normalized_url, api_config):
         return normalized_url
@@ -321,7 +318,9 @@ def _coerce_bool(value: object, default: bool = False) -> bool:
     return default
 
 
-def _get_openai_user_config(connection_user: Optional[UserModel]) -> tuple[list[str], list[str], dict]:
+def _get_openai_user_config(
+    connection_user: Optional[UserModel],
+) -> tuple[list[str], list[str], dict]:
     """
     Resolve OpenAI-compatible connection config for a given user.
 
@@ -364,7 +363,12 @@ def _resolve_openai_connection_by_model_id(
     chosen_cfg = (cfgs.get("0") or {}) if isinstance(cfgs, dict) else {}
     chosen_prefix = (chosen_cfg.get("prefix_id") or "").strip() or None
 
-    if isinstance(model_id, str) and "." in model_id and len(base_urls) > 1 and isinstance(cfgs, dict):
+    if (
+        isinstance(model_id, str)
+        and "." in model_id
+        and len(base_urls) > 1
+        and isinstance(cfgs, dict)
+    ):
         maybe_prefix, _rest = model_id.split(".", 1)
         for idx, _url in enumerate(base_urls):
             c = cfgs.get(str(idx), {}) or {}
@@ -608,9 +612,10 @@ def _has_explicit_reasoning_summary_setting(chat_payload: Optional[dict]) -> boo
     if not isinstance(chat_payload, dict):
         return False
 
-    if isinstance(chat_payload.get("reasoning_summary"), str) and chat_payload.get(
-        "reasoning_summary", ""
-    ).strip():
+    if (
+        isinstance(chat_payload.get("reasoning_summary"), str)
+        and chat_payload.get("reasoning_summary", "").strip()
+    ):
         return True
 
     reasoning = chat_payload.get("reasoning")
@@ -697,7 +702,8 @@ def _build_upstream_headers(
             pass
         elif auth_type in {"api-key", "x-api-key"} or (
             _is_azure_openai_connection(base_url, api_config)
-            and auth_type not in {"bearer", "authorization", "azure_ad", "microsoft_entra_id"}
+            and auth_type
+            not in {"bearer", "authorization", "azure_ad", "microsoft_entra_id"}
         ):
             headers["api-key"] = key
         else:
@@ -920,7 +926,9 @@ def _apply_native_web_search_support_to_models_response(
                 ),
                 model_name=model.get("name") or "",
             )
-            model["native_web_search_supported"] = model_support.get("supported") is True
+            model["native_web_search_supported"] = (
+                model_support.get("supported") is True
+            )
             model["native_web_search_support"] = dict(model_support)
 
     meta = body.get("_openwebui")
@@ -972,7 +980,8 @@ def _looks_like_models_listing_unsupported(status: int, body) -> bool:
         return True
 
     if "models" in text and any(
-        term in text for term in ("not found", "unsupported", "not support", "unknown", "no route")
+        term in text
+        for term in ("not found", "unsupported", "not support", "unknown", "no route")
     ):
         return True
 
@@ -1063,9 +1072,7 @@ def _build_native_file_input_probe_cache_key(
         "url": (url or "").rstrip("/"),
         "auth_type": str(cfg.get("auth_type") or ""),
         "headers": cfg.get("headers") or {},
-        "prefix_id": str(
-            cfg.get("_resolved_prefix_id") or cfg.get("prefix_id") or ""
-        ),
+        "prefix_id": str(cfg.get("_resolved_prefix_id") or cfg.get("prefix_id") or ""),
         "azure": bool(cfg.get("azure")),
         "force_mode": bool(cfg.get("force_mode")),
     }
@@ -1083,13 +1090,18 @@ async def _probe_responses_support_for_native_file_inputs(
 ) -> dict[str, Any]:
     cache_key = _build_native_file_input_probe_cache_key(url, api_config)
     cached_result = _NATIVE_FILE_INPUT_PROBE_CACHE.get(cache_key)
-    if cached_result and (time.time() - cached_result[0]) < _NATIVE_FILE_INPUT_PROBE_TTL_SECONDS:
+    if (
+        cached_result
+        and (time.time() - cached_result[0]) < _NATIVE_FILE_INPUT_PROBE_TTL_SECONDS
+    ):
         return dict(cached_result[1])
 
     cfg = api_config or {}
     headers = _build_upstream_headers(url, key or "", cfg, user=user)
     chosen_model = str(model_id or "gpt-4o-mini")
-    prefix_id = str(cfg.get("_resolved_prefix_id") or cfg.get("prefix_id") or "").strip()
+    prefix_id = str(
+        cfg.get("_resolved_prefix_id") or cfg.get("prefix_id") or ""
+    ).strip()
     if prefix_id:
         prefix = f"{prefix_id}."
         if chosen_model.startswith(prefix):
@@ -1127,7 +1139,9 @@ async def _probe_responses_support_for_native_file_inputs(
                         "http_status": response.status,
                         "body_preview": body_text,
                     }
-                elif _looks_like_responses_endpoint_unsupported(response.status, body_text):
+                elif _looks_like_responses_endpoint_unsupported(
+                    response.status, body_text
+                ):
                     result = {
                         "supported": False,
                         "status": NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
@@ -1175,9 +1189,8 @@ def _looks_like_chat_completions_endpoint_unsupported(status: int, body) -> bool
     if not text:
         return False
 
-    return (
-        "chat/completions" in text
-        and any(term in text for term in ("not found", "unknown", "unsupported", "no route"))
+    return "chat/completions" in text and any(
+        term in text for term in ("not found", "unknown", "unsupported", "no route")
     )
 
 
@@ -1204,7 +1217,9 @@ def _build_chat_completion_request_attempts(
             next_payload.pop("model", None)
         attempts.append((request_url, next_payload))
 
-    return attempts or [(_get_openai_chat_completions_url(url, api_config), payload_dict)]
+    return attempts or [
+        (_get_openai_chat_completions_url(url, api_config), payload_dict)
+    ]
 
 
 def _format_responses_upstream_error(
@@ -1266,7 +1281,9 @@ async def send_get_request(
         async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
             async with session.get(
                 url,
-                headers=_build_upstream_headers(url, key or "", api_config or {}, user=user),
+                headers=_build_upstream_headers(
+                    url, key or "", api_config or {}, user=user
+                ),
             ) as response:
                 body = await _safe_read_upstream_body(response)
                 if response.status == 200:
@@ -1360,7 +1377,9 @@ async def update_config(
 ):
     # Preserve existing per-URL prefix_id to avoid breaking chats when admins edit connections.
     # prefix_id is an internal stable identifier used for uniqueness/routing and should not be user-editable.
-    prev_urls = list(getattr(request.app.state.config, "OPENAI_API_BASE_URLS", []) or [])
+    prev_urls = list(
+        getattr(request.app.state.config, "OPENAI_API_BASE_URLS", []) or []
+    )
     prev_cfgs = getattr(request.app.state.config, "OPENAI_API_CONFIGS", {}) or {}
     prev_prefix_by_url: dict[str, str] = {}
     prev_empty_urls: set[str] = set()
@@ -1371,7 +1390,11 @@ async def update_config(
             continue
         cfg = prev_cfgs.get(str(idx), prev_cfgs.get(prev_url, {})) or {}
         raw = cfg.get("prefix_id", None)
-        prefix = (raw or "").strip() if isinstance(raw, str) else (str(raw).strip() if raw is not None else "")
+        prefix = (
+            (raw or "").strip()
+            if isinstance(raw, str)
+            else (str(raw).strip() if raw is not None else "")
+        )
         if prefix:
             prev_prefix_by_url.setdefault(url_key, prefix)
         else:
@@ -1678,7 +1701,12 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
             if prefix_id:
                 prefix = f"{prefix_id}."
                 model_ids = [
-                    (m[len(prefix) :] if isinstance(m, str) and m.startswith(prefix) else m) for m in model_ids
+                    (
+                        m[len(prefix) :]
+                        if isinstance(m, str) and m.startswith(prefix)
+                        else m
+                    )
+                    for m in model_ids
                 ]
 
             model_list = {
@@ -1746,7 +1774,9 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
         tags = api_config.get("tags", [])
         connection_icon = (api_config.get("icon") or "").strip()
 
-        for model in response if isinstance(response, list) else response.get("data", []):
+        for model in (
+            response if isinstance(response, list) else response.get("data", [])
+        ):
             original_id = model.get("id") or model.get("name") or ""
 
             # Avoid showing/stacking internal prefixes in display names.
@@ -1781,7 +1811,9 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
                 model["id"] = f"{prefix_id}.{original_id}"
 
         if tags:
-            for model in response if isinstance(response, list) else response.get("data", []):
+            for model in (
+                response if isinstance(response, list) else response.get("data", [])
+            ):
                 model["tags"] = tags
 
     log.debug(f"get_all_models:responses() {responses}")
@@ -1890,13 +1922,17 @@ async def get_models(
                         else:
                             raise HTTPException(
                                 status_code=400,
-                                detail=_extract_upstream_error_detail(r.status, response_data),
+                                detail=_extract_upstream_error_detail(
+                                    r.status, response_data
+                                ),
                             )
 
                     if response_data is None:
                         pass
                     else:
-                        normalized_response = _normalize_openai_models_response(response_data)
+                        normalized_response = _normalize_openai_models_response(
+                            response_data
+                        )
                         if normalized_response is None:
                             raise HTTPException(
                                 status_code=400,
@@ -2017,7 +2053,9 @@ async def verify_connection(
                 response_body = await _safe_read_upstream_body(r)
 
                 if r.status == 200:
-                    normalized_response = _normalize_openai_models_response(response_body)
+                    normalized_response = _normalize_openai_models_response(
+                        response_body
+                    )
                     if normalized_response is not None:
                         return _apply_native_web_search_support_to_models_response(
                             normalized_response,
@@ -2130,11 +2168,17 @@ async def health_check_connection(
                 is_o1_o3 = payload_dict["model"].lower().startswith(("o1", "o3-"))
                 if is_o1_o3:
                     payload_dict = openai_o1_o3_handler(payload_dict)
-                elif "api.openai.com" not in url and "max_completion_tokens" in payload_dict:
+                elif (
+                    "api.openai.com" not in url
+                    and "max_completion_tokens" in payload_dict
+                ):
                     payload_dict["max_tokens"] = payload_dict["max_completion_tokens"]
                     del payload_dict["max_completion_tokens"]
 
-                if "max_tokens" in payload_dict and "max_completion_tokens" in payload_dict:
+                if (
+                    "max_tokens" in payload_dict
+                    and "max_completion_tokens" in payload_dict
+                ):
                     del payload_dict["max_tokens"]
 
                 request_attempts = _build_chat_completion_request_attempts(
@@ -2291,7 +2335,11 @@ async def verify_responses_connection(
 
             body_text = _stringify_upstream_body(body)
             supports_responses = r.status < 400 and isinstance(body, dict)
-            endpoint_supported = None if supports_responses else not _looks_like_responses_endpoint_unsupported(r.status, body_text)
+            endpoint_supported = (
+                None
+                if supports_responses
+                else not _looks_like_responses_endpoint_unsupported(r.status, body_text)
+            )
 
             return {
                 "ok": supports_responses,
@@ -2354,12 +2402,16 @@ async def generate_chat_completion(
                 )
 
     # Resolve connection config from the *connection owner* (defaults to the requester).
-    connection_user = getattr(getattr(request, "state", None), "connection_user", None) or user
+    connection_user = (
+        getattr(getattr(request, "state", None), "connection_user", None) or user
+    )
     base_urls, keys, cfgs = _get_openai_user_config(connection_user)
     if not base_urls:
         raise HTTPException(status_code=404, detail="No connections configured")
 
-    idx, url, key, api_config = _resolve_openai_connection_by_model_id(model_id, base_urls, keys, cfgs)
+    idx, url, key, api_config = _resolve_openai_connection_by_model_id(
+        model_id, base_urls, keys, cfgs
+    )
     if not url:
         raise HTTPException(status_code=404, detail="Connection not found")
 
@@ -2397,10 +2449,10 @@ async def generate_chat_completion(
     payload_dict = None
     auto_reasoning_summary_applied = False
     if use_responses_api:
-        web_search_tool_type = _get_native_web_search_tool_type(api_config) if native_web_search else None
-        default_reasoning_summary = _get_default_responses_reasoning_summary(
-            api_config
+        web_search_tool_type = (
+            _get_native_web_search_tool_type(api_config) if native_web_search else None
         )
+        default_reasoning_summary = _get_default_responses_reasoning_summary(api_config)
         payload_dict = convert_chat_completions_to_responses_payload(
             payload,
             native_web_search_tool_type=web_search_tool_type,
@@ -2447,7 +2499,11 @@ async def generate_chat_completion(
         else _build_chat_completion_request_attempts(
             url=url,
             api_config=api_config,
-            model_id=payload_dict.get("model") if isinstance(payload_dict, dict) else model_id,
+            model_id=(
+                payload_dict.get("model")
+                if isinstance(payload_dict, dict)
+                else model_id
+            ),
             payload_dict=payload_dict,
         )
     )
@@ -2456,12 +2512,24 @@ async def generate_chat_completion(
     payload_json = json.dumps(payload_dict, ensure_ascii=False, default=str)
 
     # ── Diagnostic logging: key info at INFO, details at DEBUG ──
-    _diag_keys = sorted(payload_dict.keys()) if isinstance(payload_dict, dict) else "N/A"
-    _msg_count = len(payload_dict.get("messages", [])) if isinstance(payload_dict, dict) else "?"
-    _tools_count = len(payload_dict.get("tools", [])) if isinstance(payload_dict, dict) and payload_dict.get("tools") else 0
-    _reasoning_info = payload_dict.get("reasoning") if isinstance(payload_dict, dict) else None
+    _diag_keys = (
+        sorted(payload_dict.keys()) if isinstance(payload_dict, dict) else "N/A"
+    )
+    _msg_count = (
+        len(payload_dict.get("messages", [])) if isinstance(payload_dict, dict) else "?"
+    )
+    _tools_count = (
+        len(payload_dict.get("tools", []))
+        if isinstance(payload_dict, dict) and payload_dict.get("tools")
+        else 0
+    )
+    _reasoning_info = (
+        payload_dict.get("reasoning") if isinstance(payload_dict, dict) else None
+    )
     _store_info = payload_dict.get("store") if isinstance(payload_dict, dict) else None
-    _include_info = payload_dict.get("include") if isinstance(payload_dict, dict) else None
+    _include_info = (
+        payload_dict.get("include") if isinstance(payload_dict, dict) else None
+    )
     log.info(
         "[UPSTREAM REQUEST] POST %s | model=%s | payload_keys=%s | messages=%s | tools=%s | size=%d | reasoning=%s | store=%s | include=%s | native_file_inputs=%s | responses=%s",
         request_url,
@@ -2489,13 +2557,25 @@ async def generate_chat_completion(
                 _diag_msgs = []
                 for m in _diag_payload["messages"]:
                     _dm = {**m} if isinstance(m, dict) else m
-                    if isinstance(_dm, dict) and isinstance(_dm.get("content"), str) and len(_dm["content"]) > 200:
-                        _dm["content"] = _dm["content"][:200] + f"...[truncated, total {len(m['content'])} chars]"
+                    if (
+                        isinstance(_dm, dict)
+                        and isinstance(_dm.get("content"), str)
+                        and len(_dm["content"]) > 200
+                    ):
+                        _dm["content"] = (
+                            _dm["content"][:200]
+                            + f"...[truncated, total {len(m['content'])} chars]"
+                        )
                     _diag_msgs.append(_dm)
                 _diag_payload["messages"] = _diag_msgs
             if "tools" in _diag_payload and _diag_payload["tools"]:
-                _diag_payload["tools"] = f"[{len(_diag_payload['tools'])} tools, omitted]"
-            log.debug("[UPSTREAM REQUEST] payload=%s", json.dumps(_diag_payload, ensure_ascii=False, default=str)[:4000])
+                _diag_payload["tools"] = (
+                    f"[{len(_diag_payload['tools'])} tools, omitted]"
+                )
+            log.debug(
+                "[UPSTREAM REQUEST] payload=%s",
+                json.dumps(_diag_payload, ensure_ascii=False, default=str)[:4000],
+            )
 
     r = None
     session = None
@@ -2516,7 +2596,11 @@ async def generate_chat_completion(
                     "[UPSTREAM RETRY] reason=%s | url=%s | model=%s",
                     retry_reason,
                     request_url,
-                    payload_dict.get("model", "?") if isinstance(payload_dict, dict) else "?",
+                    (
+                        payload_dict.get("model", "?")
+                        if isinstance(payload_dict, dict)
+                        else "?"
+                    ),
                 )
 
             r = await session.request(
@@ -2550,16 +2634,17 @@ async def generate_chat_completion(
         # instead of letting downstream guess from an empty stream.
         if not use_responses_api and r.status >= 400:
             response = await _safe_read_upstream_body(r)
-            if (
-                attempt_idx + 1 < len(request_attempts)
-                and _looks_like_chat_completions_endpoint_unsupported(r.status, response)
-            ):
+            if attempt_idx + 1 < len(
+                request_attempts
+            ) and _looks_like_chat_completions_endpoint_unsupported(r.status, response):
                 attempt_idx += 1
                 request_url, payload_dict = request_attempts[attempt_idx]
                 payload_json = json.dumps(payload_dict, ensure_ascii=False, default=str)
                 response = None
                 r.close()
-                await _send_current_request(retry_reason="azure_chat_completions_fallback")
+                await _send_current_request(
+                    retry_reason="azure_chat_completions_fallback"
+                )
                 if r.status >= 400:
                     response = await _safe_read_upstream_body(r)
 
@@ -2603,7 +2688,12 @@ async def generate_chat_completion(
             content_type = r.headers.get("Content-Type", "") or ""
             looks_streaming = any(
                 t in content_type.lower()
-                for t in ("text/event-stream", "application/x-ndjson", "application/ndjson", "application/jsonl")
+                for t in (
+                    "text/event-stream",
+                    "application/x-ndjson",
+                    "application/ndjson",
+                    "application/jsonl",
+                )
             )
 
             if r.status >= 400:
@@ -2706,7 +2796,11 @@ async def generate_chat_completion(
 
                 async def one_shot_sse():
                     try:
-                        choice0 = (cc.get("choices") or [{}])[0] if isinstance(cc.get("choices"), list) else {}
+                        choice0 = (
+                            (cc.get("choices") or [{}])[0]
+                            if isinstance(cc.get("choices"), list)
+                            else {}
+                        )
                         msg = choice0.get("message") or {}
                         normalized_messages = (
                             choice0.get("messages")
@@ -2719,7 +2813,8 @@ async def generate_chat_completion(
                         tool_role_messages = [
                             message
                             for message in normalized_messages
-                            if isinstance(message, dict) and message.get("role") == "tool"
+                            if isinstance(message, dict)
+                            and message.get("role") == "tool"
                         ]
                         delta = {}
                         if content:
@@ -2736,7 +2831,13 @@ async def generate_chat_completion(
                                     "object": "chat.completion.chunk",
                                     "created": created,
                                     "model": model_id,
-                                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                                    "choices": [
+                                        {
+                                            "index": 0,
+                                            "delta": delta,
+                                            "finish_reason": None,
+                                        }
+                                    ],
                                 },
                                 ensure_ascii=False,
                             )
@@ -2782,7 +2883,9 @@ async def generate_chat_completion(
                                         {
                                             "index": 0,
                                             "delta": {},
-                                            "finish_reason": "tool_calls" if tool_calls else "stop",
+                                            "finish_reason": (
+                                                "tool_calls" if tool_calls else "stop"
+                                            ),
                                         }
                                     ],
                                 },
@@ -2832,7 +2935,9 @@ async def generate_chat_completion(
                     # raw chunk, or none if the line is still incomplete.
                     while b"\n" in _buf:
                         line_bytes, _buf = _buf.split(b"\n", 1)
-                        line_bytes += b"\n"  # restore the delimiter the downstream expects
+                        line_bytes += (
+                            b"\n"  # restore the delimiter the downstream expects
+                        )
 
                         _line_count += 1
                         _text = line_bytes.decode("utf-8", errors="replace")
@@ -2843,7 +2948,10 @@ async def generate_chat_completion(
                             log.info("[SSE RAW %d] %s", _line_count, _stripped[:500])
 
                         # Parse data lines for diagnostics
-                        if _stripped.startswith("data:") and _stripped != "data: [DONE]":
+                        if (
+                            _stripped.startswith("data:")
+                            and _stripped != "data: [DONE]"
+                        ):
                             _data_count += 1
                             _last_data_line = _stripped[:500]
                             if _first_data_line is None:
@@ -2869,11 +2977,15 @@ async def generate_chat_completion(
                             if _data_count <= 3 or _data_count % 20 == 0:
                                 log.info(
                                     "[SSE DATA #%d] finish_reason=%s content_so_far=%d chunk=%s",
-                                    _data_count, _last_finish_reason, _total_content_len,
+                                    _data_count,
+                                    _last_finish_reason,
+                                    _total_content_len,
                                     _stripped[:200],
                                 )
                             else:
-                                log.debug("[SSE DATA #%d] %s", _data_count, _stripped[:300])
+                                log.debug(
+                                    "[SSE DATA #%d] %s", _data_count, _stripped[:300]
+                                )
 
                         elif _stripped == "data: [DONE]":
                             log.info("[SSE] Received data: [DONE]")
@@ -2889,9 +3001,15 @@ async def generate_chat_completion(
                 log.info(
                     "[SSE DONE] total_lines=%d data_events=%d "
                     "finish_reason=%s content_len=%d usage=%s",
-                    _line_count, _data_count,
-                    _last_finish_reason, _total_content_len,
-                    json.dumps(_last_usage, ensure_ascii=False)[:300] if _last_usage else "(none)",
+                    _line_count,
+                    _data_count,
+                    _last_finish_reason,
+                    _total_content_len,
+                    (
+                        json.dumps(_last_usage, ensure_ascii=False)[:300]
+                        if _last_usage
+                        else "(none)"
+                    ),
                 )
                 if _last_data_line:
                     log.info("[SSE LAST DATA] %s", _last_data_line[:500])
@@ -2899,7 +3017,8 @@ async def generate_chat_completion(
                     log.warning(
                         "[SSE ABNORMAL FINISH] finish_reason=%s — "
                         "response may be truncated! content_len=%d",
-                        _last_finish_reason, _total_content_len,
+                        _last_finish_reason,
+                        _total_content_len,
                     )
 
             return StreamingResponse(
@@ -2919,7 +3038,11 @@ async def generate_chat_completion(
             response = await r.text()
 
         if log.isEnabledFor(logging.DEBUG):
-            _resp_preview = json.dumps(response, ensure_ascii=False, default=str)[:2000] if isinstance(response, dict) else str(response)[:2000]
+            _resp_preview = (
+                json.dumps(response, ensure_ascii=False, default=str)[:2000]
+                if isinstance(response, dict)
+                else str(response)[:2000]
+            )
             log.debug("[UPSTREAM RESPONSE BODY] %s", _resp_preview)
 
         r.raise_for_status()

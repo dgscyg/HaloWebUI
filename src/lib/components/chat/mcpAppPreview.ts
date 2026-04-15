@@ -155,10 +155,7 @@ const normalizePayload = (
 	const title = getString(
 		payload?.title ?? payload?.name ?? invocation?.title ?? resourceId ?? appId
 	);
-	const resultPayload =
-		context.toolResult !== undefined
-			? context.toolResult
-			: value;
+	const resultPayload = context.toolResult !== undefined ? context.toolResult : value;
 	const structuredContent =
 		payload && Object.prototype.hasOwnProperty.call(payload, 'structuredContent')
 			? payload.structuredContent

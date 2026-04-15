@@ -262,9 +262,10 @@
 
 	// Items actually rendered in DOM — capped by renderLimit for progressive rendering
 	// When searching, always show all results (search results are small)
-	$: visibleItems = searchValue || renderLimit >= filteredItems.length
-		? filteredItems
-		: filteredItems.slice(0, renderLimit);
+	$: visibleItems =
+		searchValue || renderLimit >= filteredItems.length
+			? filteredItems
+			: filteredItems.slice(0, renderLimit);
 
 	$: if (selectedTag !== '' || selectedConnectionType !== '') {
 		resetView();
@@ -515,7 +516,9 @@
 				<span class="text-gray-400 dark:text-gray-500">{placeholder}</span>
 			{/if}
 		</span>
-		<span class="shrink-0 ml-0.5 text-gray-400 dark:text-gray-500 transition-colors duration-200 hover:text-gray-600 dark:hover:text-gray-300">
+		<span
+			class="shrink-0 ml-0.5 text-gray-400 dark:text-gray-500 transition-colors duration-200 hover:text-gray-600 dark:hover:text-gray-300"
+		>
 			<ChevronDown className="size-3.5" strokeWidth="2.5" />
 		</span>
 	</DropdownMenu.Trigger>
@@ -669,7 +672,7 @@
 						selectedModelIdx
 							? 'bg-gray-100 dark:bg-gray-800'
 							: ''}"
-					style="content-visibility:auto;contain-intrinsic-size:auto 52px"
+						style="content-visibility:auto;contain-intrinsic-size:auto 52px"
 						data-arrow-selected={index === selectedModelIdx}
 						data-value={item.value}
 						on:pointerenter={() => {
@@ -724,9 +727,7 @@
 										</div>
 
 										{#if item.model?.info?.meta?.description}
-											<Tooltip
-												content={getDescriptionHtml(item.model?.info?.meta?.description)}
-											>
+											<Tooltip content={getDescriptionHtml(item.model?.info?.meta?.description)}>
 												<div class="shrink-0 translate-y-[1px]">
 													<svg
 														xmlns="http://www.w3.org/2000/svg"
@@ -804,9 +805,7 @@
 							<div
 								role="button"
 								tabindex="-1"
-								title={pinnedModelSet.has(item.value)
-									? $i18n.t('取消置顶')
-									: $i18n.t('置顶模型')}
+								title={pinnedModelSet.has(item.value) ? $i18n.t('取消置顶') : $i18n.t('置顶模型')}
 								class="p-1.5 rounded-lg {pinnedModelSet.has(item.value)
 									? 'text-blue-500 dark:text-blue-400 bg-blue-50/90 dark:bg-blue-900/20'
 									: 'opacity-0 group-hover/item:opacity-100 text-gray-400 hover:text-blue-500 dark:hover:text-blue-300 hover:bg-blue-50/70 dark:hover:bg-blue-900/15'} cursor-pointer transition-colors duration-150"

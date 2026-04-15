@@ -1,4 +1,7 @@
-from open_webui.utils.data_management import deep_merge_dict, get_database_restore_support
+from open_webui.utils.data_management import (
+    deep_merge_dict,
+    get_database_restore_support,
+)
 
 
 def test_deep_merge_dict_recursively_merges_nested_objects():
@@ -26,5 +29,10 @@ def test_get_database_restore_support_reports_expected_reason():
         "supported": True,
         "reason": None,
     }
-    assert get_database_restore_support("postgresql", 1)["reason"] == "backend_not_sqlite"
-    assert get_database_restore_support("sqlite", 2)["reason"] == "multiple_workers_not_supported"
+    assert (
+        get_database_restore_support("postgresql", 1)["reason"] == "backend_not_sqlite"
+    )
+    assert (
+        get_database_restore_support("sqlite", 2)["reason"]
+        == "multiple_workers_not_supported"
+    )
