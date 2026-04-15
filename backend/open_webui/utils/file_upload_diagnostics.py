@@ -295,6 +295,17 @@ def classify_file_upload_error(
     if "not supported" in lowered and "file" in lowered:
         return make_unsupported_binary_diagnostic(filename)
 
+    if lowered.startswith("primary provider `") and "fallback provider `" in lowered:
+        return make_file_upload_diagnostic(
+            "document_provider_fallback_failed",
+            title="Document provider fallback failed.",
+            message=message,
+            hint=(
+                "Check the configured document provider, fallback parser, and upstream "
+                "service response before trying again."
+            ),
+        )
+
     return make_file_upload_diagnostic(
         "file_processing_failed",
         title="File processing failed.",

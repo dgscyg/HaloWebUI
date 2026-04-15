@@ -29,6 +29,10 @@ const FFMPEG_MISSING_PATTERNS = [
 	/No such file or directory: 'ffprobe'/i,
 	/No such file or directory: 'ffmpeg'/i
 ];
+const WRAPPED_ERROR_RE = /^\[ERROR:\s*(.*)\]$/i;
+const UPSTREAM_NO_IMAGE_PATTERNS = [
+	/^Upstream image generation completed but returned no images\.?$/i
+];
 
 const getErrorText = (error: unknown): string => {
 	if (typeof error === 'string') {
@@ -53,7 +57,11 @@ const getErrorText = (error: unknown): string => {
 };
 
 export const localizeCommonError = (error: unknown, t: Translate): string => {
-	const message = getErrorText(error).trim();
+	let message = getErrorText(error).trim();
+	const wrappedMatch = message.match(WRAPPED_ERROR_RE);
+	if (wrappedMatch?.[1]) {
+		message = wrappedMatch[1].trim();
+	}
 
 	if (!message) {
 		return message;
@@ -92,6 +100,10 @@ export const localizeCommonError = (error: unknown, t: Translate): string => {
 		return t(
 			'Audio transcription requires ffmpeg to be installed on the server. Please contact the administrator to install it.'
 		);
+	}
+
+	if (UPSTREAM_NO_IMAGE_PATTERNS.some((pattern) => pattern.test(message))) {
+		return t('Upstream image generation completed but returned no images.');
 	}
 
 	return message;

@@ -25,11 +25,13 @@
 	import { localizeCommonError } from '$lib/utils/common-errors';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import {
+		getTemporaryChatAccess,
 		getTemporaryChatNavigationPath,
 		persistTemporaryChatOverride
 	} from '$lib/utils/temporary-chat';
 	import { ensureModels, refreshModels } from '$lib/services/models';
-	import { updateUserSettings } from '$lib/apis/users';
+	import { getErrorDetail } from '$lib/apis/response';
+	import { saveUserSettingsPatch } from '$lib/utils/user-settings';
 
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -44,6 +46,16 @@
 		localizeCommonError(error, (key, options) => $i18n.t(key, options));
 
 	const showError = (error: unknown) => toast.error(formatError(error));
+	const showSettingsSaveError = (error: unknown) => {
+		const isConflict = (error as { status?: number })?.status === 409;
+		toast.error(
+			isConflict
+				? $i18n.t(
+						'Settings changed in another tab. The latest settings have been reloaded; please review and save again.'
+					)
+				: getErrorDetail(error, $i18n.t('Failed to update settings'))
+		);
+	};
 
 	export let id = '';
 	export let value = '';
@@ -101,12 +113,20 @@
 	}
 
 	const togglePinModel = async (modelId: string) => {
+		const previousSettings = $settings ?? {};
 		const current = $settings?.pinnedModels ?? [];
 		const updated = current.includes(modelId)
 			? current.filter((id: string) => id !== modelId)
 			: [...current, modelId];
-		settings.set({ ...$settings, pinnedModels: updated });
-		await updateUserSettings(localStorage.token, { ui: { ...$settings, pinnedModels: updated } });
+		settings.set({ ...previousSettings, pinnedModels: updated });
+		try {
+			await saveUserSettingsPatch(localStorage.token, { pinnedModels: updated });
+		} catch (error) {
+			if ((error as { status?: number })?.status !== 409) {
+				settings.set(previousSettings);
+			}
+			showSettingsSaveError(error);
+		}
 	};
 
 	$: userDefaultModelId =
@@ -118,26 +138,40 @@
 
 	const setDefaultModel = async (modelId: string) => {
 		value = modelId;
-		const nextSettings = { ...$settings, models: [modelId] };
+		const previousSettings = $settings ?? {};
+		const nextSettings = { ...previousSettings, models: [modelId] };
 		settings.set(nextSettings);
-		await updateUserSettings(localStorage.token, { ui: nextSettings });
-		toast.success($i18n.t('Default model updated'));
-		show = false;
+		try {
+			await saveUserSettingsPatch(localStorage.token, { models: [modelId] });
+			toast.success($i18n.t('Default model updated'));
+			show = false;
+		} catch (error) {
+			if ((error as { status?: number })?.status !== 409) {
+				settings.set(previousSettings);
+			}
+			showSettingsSaveError(error);
+		}
 	};
 
 	const clearDefaultModel = async () => {
-		const currentSettings = $settings ?? {};
-		const { models: _models, ...nextSettings } = currentSettings;
+		const previousSettings = $settings ?? {};
+		const nextSettings = { ...previousSettings, models: [] };
 		settings.set(nextSettings);
-		await updateUserSettings(localStorage.token, { ui: nextSettings });
-		toast.success($i18n.t('Default model cleared'));
-		show = false;
+		try {
+			await saveUserSettingsPatch(localStorage.token, { models: [] });
+			toast.success($i18n.t('Default model cleared'));
+			show = false;
+		} catch (error) {
+			if ((error as { status?: number })?.status !== 409) {
+				settings.set(previousSettings);
+			}
+			showSettingsSaveError(error);
+		}
 	};
 
 	const applyTemporaryChatMode = async (enabled: boolean) => {
 		const defaultEnabled = $settings?.temporaryChatByDefault ?? false;
-		const allowed = $user?.role === 'user' ? ($user?.permissions?.chat?.temporary ?? true) : true;
-		const enforced = allowed && ($user?.permissions?.chat?.temporary_enforced ?? false);
+		const { allowed, enforced } = getTemporaryChatAccess($user);
 		const nextEnabled = allowed ? (enforced ? true : enabled) : false;
 
 		persistTemporaryChatOverride(nextEnabled, { defaultEnabled, enforced, allowed });

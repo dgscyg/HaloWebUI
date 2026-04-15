@@ -33,6 +33,13 @@ export type ImageUsageConfig = {
 	};
 };
 
+export type ImageGenerationConfig = {
+	MODEL: string;
+	IMAGE_SIZE: string;
+	IMAGE_STEPS: number;
+	IMAGE_MODEL_FILTER_REGEX?: string | null;
+};
+
 export type ImageGenerationModel = {
 	id: string;
 	name?: string;
@@ -166,7 +173,9 @@ export const verifyConfigUrl = async (token: string = '') => {
 	return res;
 };
 
-export const getImageGenerationConfig = async (token: string = '') => {
+export const getImageGenerationConfig = async (
+	token: string = ''
+): Promise<ImageGenerationConfig> => {
 	let error = null;
 
 	const res = await fetch(`${IMAGES_API_BASE_URL}/image/config`, {
@@ -192,10 +201,13 @@ export const getImageGenerationConfig = async (token: string = '') => {
 		throw error;
 	}
 
-	return res;
+	return res as ImageGenerationConfig;
 };
 
-export const updateImageGenerationConfig = async (token: string = '', config: object) => {
+export const updateImageGenerationConfig = async (
+	token: string = '',
+	config: ImageGenerationConfig
+): Promise<ImageGenerationConfig> => {
 	let error = null;
 
 	const res = await fetch(`${IMAGES_API_BASE_URL}/image/config/update`, {
@@ -222,7 +234,7 @@ export const updateImageGenerationConfig = async (token: string = '', config: ob
 		throw error;
 	}
 
-	return res;
+	return res as ImageGenerationConfig;
 };
 
 export const getImageGenerationModels = async (

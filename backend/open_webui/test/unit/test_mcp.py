@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import pathlib
 import sys
@@ -22,6 +23,7 @@ def test_mcp_streamable_http_client_json_and_sse():
     from open_webui.utils.mcp import MCPStreamableHttpClient
 
     seen_session_headers = []
+    seen_custom_headers = []
 
     async def handler(request: web.Request):
         payload = await request.json()
@@ -29,6 +31,7 @@ def test_mcp_streamable_http_client_json_and_sse():
 
         # Record session header usage across requests.
         seen_session_headers.append(request.headers.get("Mcp-Session-Id"))
+        seen_custom_headers.append(request.headers.get("X-Custom-Header"))
 
         if method == "initialize":
             return web.json_response(
@@ -105,7 +108,9 @@ def test_mcp_streamable_http_client_json_and_sse():
         url = f"http://127.0.0.1:{port}/"
 
         try:
-            client = MCPStreamableHttpClient(url)
+            client = MCPStreamableHttpClient(
+                url, request_headers={"X-Custom-Header": "present-on-all-requests"}
+            )
             init = await client.initialize()
             assert init.get("serverInfo", {}).get("name") == "TestMCP"
 
@@ -129,6 +134,8 @@ def test_mcp_streamable_http_client_json_and_sse():
     # First request (initialize) has no session id; subsequent ones should.
     assert seen_session_headers[0] in (None, "")
     assert any(h == "sess_123" for h in seen_session_headers[1:])
+    assert seen_custom_headers
+    assert all(h == "present-on-all-requests" for h in seen_custom_headers)
 
 
 def test_get_tools_exposes_mcp_tool_and_routes_call(monkeypatch):
@@ -1528,6 +1535,166 @@ def test_mcp_router_call_tool_preserves_mcp_content_shape():
     }
 
 
+def test_http_client_falls_back_to_legacy_sse_transport():
+    from aiohttp import web
+
+    from open_webui.utils.mcp import MCPHttpClient
+
+    root_post_calls = 0
+    sse_connects = 0
+    posted_methods = []
+    outbound_events: asyncio.Queue = asyncio.Queue()
+
+    async def sse_handler(request: web.Request):
+        nonlocal sse_connects
+        sse_connects += 1
+
+        resp = web.StreamResponse(
+            status=200,
+            headers={"Content-Type": "text/event-stream"},
+        )
+        await resp.prepare(request)
+        await resp.write(b"event: endpoint\ndata: /messages\n\n")
+
+        try:
+            while True:
+                event = await outbound_events.get()
+                if event is None:
+                    break
+
+                event_type, payload = event
+                body = json.dumps(payload)
+                await resp.write(
+                    f"event: {event_type}\ndata: {body}\n\n".encode("utf-8")
+                )
+        except (ConnectionResetError, RuntimeError):
+            pass
+        finally:
+            with contextlib.suppress(Exception):
+                await resp.write_eof()
+
+        return resp
+
+    async def root_post_handler(_request: web.Request):
+        nonlocal root_post_calls
+        root_post_calls += 1
+        return web.Response(status=405, text="Method Not Allowed")
+
+    async def message_post_handler(request: web.Request):
+        payload = await request.json()
+        method = payload.get("method")
+        posted_methods.append(method)
+
+        if method == "initialize":
+            await outbound_events.put(
+                (
+                    "message",
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload.get("id"),
+                        "result": {
+                            "protocolVersion": "2024-11-05",
+                            "serverInfo": {"name": "LegacySSE", "version": "0.1.0"},
+                            "capabilities": {"tools": {}},
+                        },
+                    },
+                )
+            )
+        elif method == "tools/list":
+            await outbound_events.put(
+                (
+                    "message",
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload.get("id"),
+                        "result": {
+                            "tools": [
+                                {
+                                    "name": "legacy_echo",
+                                    "description": "echo via legacy sse",
+                                    "inputSchema": {"type": "object"},
+                                }
+                            ]
+                        },
+                    },
+                )
+            )
+        elif method == "tools/call":
+            await outbound_events.put(
+                (
+                    "message",
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "notifications/message",
+                        "params": {"level": "info", "data": "legacy progress"},
+                    },
+                )
+            )
+            await outbound_events.put(
+                (
+                    "message",
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload.get("id"),
+                        "result": {
+                            "content": [{"type": "text", "text": "legacy-ok"}],
+                            "name": (payload.get("params") or {}).get("name"),
+                        },
+                    },
+                )
+            )
+
+        return web.Response(status=202)
+
+    async def run():
+        app = web.Application()
+        app.router.add_get("/sse", sse_handler)
+        app.router.add_post("/sse", root_post_handler)
+        app.router.add_post("/messages", message_post_handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        url = f"http://127.0.0.1:{port}/sse"
+
+        client = MCPHttpClient(url)
+        try:
+            init = await client.initialize()
+            assert init.get("serverInfo", {}).get("name") == "LegacySSE"
+
+            await client.notify_initialized()
+            tools = await client.list_tools()
+            assert tools[0]["name"] == "legacy_echo"
+
+            notifications = []
+
+            async def on_notification(msg):
+                notifications.append(msg)
+
+            result = await client.call_tool(
+                "legacy_echo",
+                {"x": 1},
+                on_notification=on_notification,
+            )
+            assert result["content"][0]["text"] == "legacy-ok"
+            assert notifications[0]["method"] == "notifications/message"
+        finally:
+            await outbound_events.put(None)
+            await client.close()
+            await runner.cleanup()
+
+    asyncio.run(run())
+
+    assert root_post_calls == 1
+    assert sse_connects == 1
+    assert posted_methods == [
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+        "tools/call",
+    ]
+
 def _write_stdio_server(tmp_path, script_name: str, body: str) -> str:
     script_path = tmp_path / script_name
     script_path.write_text(textwrap.dedent(body), encoding="utf-8")
@@ -1745,6 +1912,39 @@ def test_get_mcp_servers_data_strict_selected_rejects_invalid_index():
     asyncio.run(run())
 
 
+def test_build_mcp_http_request_headers_merges_custom_headers_with_auth():
+    from open_webui.utils import mcp as mcp_mod
+
+    headers = mcp_mod._build_mcp_http_request_headers(
+        {
+            "transport_type": "http",
+            "auth_type": "bearer",
+            "key": "secret-token",
+            "headers": {"X-API-Key": "abc123", "X-Trace": 7},
+        },
+        None,
+    )
+
+    assert headers["Authorization"] == "Bearer secret-token"
+    assert headers["X-API-Key"] == "abc123"
+    assert headers["X-Trace"] == "7"
+
+
+def test_build_mcp_http_request_headers_custom_authorization_overrides_auto_auth():
+    from open_webui.utils import mcp as mcp_mod
+
+    headers = mcp_mod._build_mcp_http_request_headers(
+        {
+            "transport_type": "http",
+            "auth_type": "session",
+            "headers": {"Authorization": "Basic override-me-not"},
+        },
+        "session-token",
+    )
+
+    assert headers["Authorization"] == "Basic override-me-not"
+
+
 def test_mcp_server_connection_validates_transport_fields():
     from pydantic import ValidationError
 
@@ -1768,3 +1968,468 @@ def test_mcp_server_connection_validates_transport_fields():
     )
     assert stdio_conn.transport_type == "stdio"
     assert stdio_conn.command == "python"
+
+
+def test_mcp_server_connection_normalizes_http_headers_and_drops_stdio_headers():
+    from open_webui.routers.configs import MCPServerConnection
+
+    http_conn = MCPServerConnection(
+        transport_type="http",
+        url="http://example.com",
+        headers={
+            " X-Api-Key ": "abc",
+            "X-Trace": 123,
+            "": "ignored",
+        },
+    )
+    assert http_conn.headers == {"X-Api-Key": "abc", "X-Trace": "123"}
+
+    stdio_conn = MCPServerConnection(
+        transport_type="stdio",
+        command="python",
+        headers={"X-Api-Key": "should-be-dropped"},
+    )
+    assert stdio_conn.headers == {}
+
+
+def test_mcp_server_connection_rejects_reserved_duplicate_and_multiline_headers():
+    from pydantic import ValidationError
+
+    from open_webui.routers.configs import MCPServerConnection
+
+    with pytest.raises(ValidationError, match="保留头"):
+        MCPServerConnection(
+            transport_type="http",
+            url="http://example.com",
+            headers={"Content-Type": "application/json"},
+        )
+
+    with pytest.raises(ValidationError, match="重复"):
+        MCPServerConnection(
+            transport_type="http",
+            url="http://example.com",
+            headers={"X-API-Key": "a", "x-api-key": "b"},
+        )
+
+    with pytest.raises(ValidationError, match="换行符"):
+        MCPServerConnection(
+            transport_type="http",
+            url="http://example.com",
+            headers={"X-API-Key": "line1\nline2"},
+        )
+
+
+def test_validate_stdio_command_uses_connection_env_path(tmp_path, monkeypatch):
+    from open_webui.utils import mcp as mcp_mod
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    uvx_path = bin_dir / "uvx"
+    uvx_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    uvx_path.chmod(0o755)
+
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+
+    resolved = mcp_mod._validate_stdio_command(
+        {"transport_type": "stdio", "command": "uvx", "env": {"PATH": str(bin_dir)}}
+    )
+
+    assert resolved == str(uvx_path)
+
+
+def test_validate_stdio_command_falls_back_to_home_local_bin(tmp_path, monkeypatch):
+    from open_webui.utils import mcp as mcp_mod
+
+    home_dir = tmp_path / "home"
+    bin_dir = home_dir / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    uvx_path = bin_dir / "uvx"
+    uvx_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    uvx_path.chmod(0o755)
+
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv("HOME", str(home_dir))
+
+    resolved = mcp_mod._validate_stdio_command(
+        {"transport_type": "stdio", "command": "uvx"}
+    )
+
+    assert resolved == str(uvx_path)
+
+
+def test_get_derived_stdio_runtime_requirements_detects_git_source():
+    from open_webui.utils import mcp as mcp_mod
+
+    assert mcp_mod._get_derived_stdio_runtime_requirements(
+        {
+            "transport_type": "stdio",
+            "command": "uvx",
+            "args": [
+                "--native-tls",
+                "--from",
+                "git+https://github.com/example/server.git",
+                "example-server",
+            ],
+        }
+    ) == ["git"]
+
+    assert (
+        mcp_mod._get_derived_stdio_runtime_requirements(
+            {
+                "transport_type": "stdio",
+                "command": "uvx",
+                "args": ["mcp-server-fetch"],
+            }
+        )
+        == []
+    )
+
+
+def test_validate_stdio_command_requires_git_for_uvx_git_source(monkeypatch):
+    from open_webui.utils import mcp as mcp_mod
+
+    monkeypatch.setattr(
+        mcp_mod,
+        "_resolve_stdio_command",
+        lambda _connection, command: f"/resolved/{command}" if command == "uvx" else None,
+    )
+
+    with pytest.raises(ValueError, match="Git 源安装"):
+        mcp_mod._validate_stdio_command(
+            {
+                "transport_type": "stdio",
+                "command": "uvx",
+                "args": [
+                    "--from",
+                    "git+https://github.com/example/server.git",
+                    "example-server",
+                ],
+            }
+        )
+
+
+def test_validate_stdio_command_requires_git_for_uvx_git_source_with_path(
+    tmp_path, monkeypatch
+):
+    from open_webui.utils import mcp as mcp_mod
+
+    uvx_path = tmp_path / "uvx"
+    uvx_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    uvx_path.chmod(0o755)
+
+    monkeypatch.setattr(mcp_mod, "_resolve_stdio_command", lambda _connection, command: None)
+
+    with pytest.raises(ValueError, match="Git 源安装"):
+        mcp_mod._validate_stdio_command(
+            {
+                "transport_type": "stdio",
+                "command": str(uvx_path),
+                "args": [
+                    "--from",
+                    "git+https://github.com/example/server.git",
+                    "example-server",
+                ],
+            }
+        )
+
+
+def test_get_mcp_runtime_capabilities_reports_preset_commands(monkeypatch):
+    from open_webui.utils import mcp as mcp_mod
+
+    monkeypatch.setattr(
+        mcp_mod,
+        "_resolve_stdio_command",
+        lambda _connection, command: f"/resolved/{command}"
+        if command in {"uvx", "git"}
+        else None,
+    )
+
+    capabilities = mcp_mod.get_mcp_runtime_capabilities()
+
+    assert capabilities["commands"]["uvx"]["available"] is True
+    assert capabilities["commands"]["uvx"]["message"] is None
+    assert capabilities["commands"]["git"]["available"] is True
+    assert capabilities["commands"]["git"]["message"] is None
+    assert capabilities["commands"]["npx"]["available"] is False
+    assert "Node.js" in capabilities["commands"]["npx"]["message"]
+
+
+def test_get_mcp_runtime_profile_prefers_known_profiles(monkeypatch):
+    from open_webui.utils import mcp as mcp_mod
+
+    monkeypatch.setenv("HALO_RUNTIME_PROFILE", "slim")
+    assert mcp_mod.get_mcp_runtime_profile() == "slim"
+
+    monkeypatch.setenv("HALO_RUNTIME_PROFILE", "main")
+    assert mcp_mod.get_mcp_runtime_profile() == "main"
+
+    monkeypatch.setenv("HALO_RUNTIME_PROFILE", "weird")
+    assert mcp_mod.get_mcp_runtime_profile() == "custom"
+
+
+def test_mcp_stdio_start_failure_includes_stderr(tmp_path, monkeypatch):
+    from open_webui.utils import mcp as mcp_mod
+
+    monkeypatch.setattr(
+        mcp_mod,
+        "DEFAULT_STDIO_ALLOWED_COMMANDS",
+        mcp_mod.DEFAULT_STDIO_ALLOWED_COMMANDS | {pathlib.Path(sys.executable).name.lower()},
+    )
+
+    script_path = _write_stdio_server(
+        tmp_path,
+        "stderr_exit_stdio.py",
+        """
+        import sys
+
+        sys.stderr.write("missing dependency\\n")
+        sys.stderr.flush()
+        sys.exit(1)
+        """,
+    )
+
+    async def run():
+        client = mcp_mod.MCPStdioClient(
+            {"transport_type": "stdio", "command": sys.executable, "args": [script_path]}
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            await client.start()
+
+        assert "exited before initialization" in str(exc_info.value)
+        assert "stderr:" in str(exc_info.value)
+        assert "missing dependency" in str(exc_info.value)
+
+    asyncio.run(run())
+
+
+def test_mcp_stdio_start_failure_without_stderr_reports_initialize_exit(tmp_path, monkeypatch):
+    from open_webui.utils import mcp as mcp_mod
+
+    monkeypatch.setattr(
+        mcp_mod,
+        "DEFAULT_STDIO_ALLOWED_COMMANDS",
+        mcp_mod.DEFAULT_STDIO_ALLOWED_COMMANDS | {pathlib.Path(sys.executable).name.lower()},
+    )
+
+    script_path = _write_stdio_server(
+        tmp_path,
+        "silent_exit_stdio.py",
+        """
+        raise SystemExit(1)
+        """,
+    )
+
+    async def run():
+        client = mcp_mod.MCPStdioClient(
+            {"transport_type": "stdio", "command": sys.executable, "args": [script_path]}
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            await client.start()
+
+        assert "exited before initialization" in str(exc_info.value)
+        assert "进程提前退出，未返回 MCP initialize 响应" in str(exc_info.value)
+
+    asyncio.run(run())
+
+
+def test_mcp_servers_config_get_includes_runtime_capabilities(monkeypatch):
+    from open_webui.routers import configs as configs_router
+
+    monkeypatch.setattr(
+        configs_router,
+        "get_user_mcp_server_connections",
+        lambda _request, _user: [{"transport_type": "http", "url": "http://example.com"}],
+    )
+    monkeypatch.setattr(
+        configs_router,
+        "get_mcp_runtime_capabilities",
+        lambda: {"commands": {"uvx": {"available": True, "message": None}}},
+    )
+    monkeypatch.setattr(configs_router, "get_mcp_runtime_profile", lambda: "main")
+
+    async def run():
+        return await configs_router.get_mcp_servers_config(
+            SimpleNamespace(),
+            SimpleNamespace(role="admin"),
+        )
+
+    result = asyncio.run(run())
+
+    assert result["MCP_SERVER_CONNECTIONS"][0]["url"] == "http://example.com"
+    assert result["MCP_RUNTIME_CAPABILITIES"]["commands"]["uvx"]["available"] is True
+    assert result["MCP_RUNTIME_PROFILE"] == "main"
+
+
+def test_mcp_servers_config_post_includes_runtime_capabilities(monkeypatch):
+    from open_webui.routers import configs as configs_router
+
+    saved = {}
+
+    monkeypatch.setattr(
+        configs_router,
+        "set_user_mcp_server_connections",
+        lambda _user, connections: saved.setdefault("connections", connections),
+    )
+    monkeypatch.setattr(
+        configs_router,
+        "get_mcp_runtime_capabilities",
+        lambda: {"commands": {"npx": {"available": False, "message": "missing"}}},
+    )
+    monkeypatch.setattr(configs_router, "get_mcp_runtime_profile", lambda: "slim")
+
+    form_data = configs_router.MCPServersConfigForm(
+        MCP_SERVER_CONNECTIONS=[
+            configs_router.MCPServerConnection(
+                transport_type="http",
+                url="http://example.com",
+            )
+        ]
+    )
+
+    async def run():
+        return await configs_router.set_mcp_servers_config(
+            SimpleNamespace(),
+            form_data,
+            user=SimpleNamespace(role="admin"),
+        )
+
+    result = asyncio.run(run())
+
+    assert saved["connections"][0]["url"] == "http://example.com"
+    assert result["MCP_RUNTIME_CAPABILITIES"]["commands"]["npx"]["available"] is False
+    assert result["MCP_RUNTIME_PROFILE"] == "slim"
+
+
+def test_mcp_servers_config_post_round_trips_headers(monkeypatch):
+    from open_webui.routers import configs as configs_router
+
+    saved = {}
+
+    monkeypatch.setattr(
+        configs_router,
+        "set_user_mcp_server_connections",
+        lambda _user, connections: saved.setdefault("connections", connections),
+    )
+    monkeypatch.setattr(configs_router, "get_mcp_runtime_capabilities", lambda: {"commands": {}})
+    monkeypatch.setattr(configs_router, "get_mcp_runtime_profile", lambda: "custom")
+
+    form_data = configs_router.MCPServersConfigForm(
+        MCP_SERVER_CONNECTIONS=[
+            configs_router.MCPServerConnection(
+                transport_type="http",
+                url="http://example.com",
+                auth_type="none",
+                headers={"X-API-Key": "abc123"},
+            )
+        ]
+    )
+
+    async def run():
+        return await configs_router.set_mcp_servers_config(
+            SimpleNamespace(),
+            form_data,
+            user=SimpleNamespace(role="admin"),
+        )
+
+    result = asyncio.run(run())
+
+    assert saved["connections"][0]["headers"] == {"X-API-Key": "abc123"}
+    assert result["MCP_SERVER_CONNECTIONS"][0]["headers"] == {"X-API-Key": "abc123"}
+
+
+def test_verify_mcp_server_connection_passes_headers_and_session_token(monkeypatch):
+    from open_webui.routers import configs as configs_router
+
+    captured = {}
+
+    async def fake_get_mcp_server_data(connection, **kwargs):
+        captured["connection"] = connection
+        captured["kwargs"] = kwargs
+        return {
+            "server_info": {"name": "verified"},
+            "tools": [
+                {
+                    "name": "echo",
+                    "description": "Echo",
+                    "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(configs_router, "get_mcp_server_data", fake_get_mcp_server_data)
+
+    request = SimpleNamespace(state=SimpleNamespace(token=SimpleNamespace(credentials="session-token")))
+    form_data = configs_router.MCPServerConnection(
+        transport_type="http",
+        url="http://example.com",
+        auth_type="session",
+        headers={"X-API-Key": "abc123"},
+    )
+
+    async def run():
+        return await configs_router.verify_mcp_server_connection(
+            request,
+            form_data,
+            user=SimpleNamespace(role="admin"),
+        )
+
+    result = asyncio.run(run())
+
+    assert captured["connection"]["headers"] == {"X-API-Key": "abc123"}
+    assert captured["kwargs"]["session_token"] == "session-token"
+    assert result["tool_count"] == 1
+    assert result["tools"] == [
+        {
+            "name": "echo",
+            "description": "Echo",
+            "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}},
+        }
+    ]
+
+
+def test_get_mcp_servers_cached_data_returns_selected_verified_snapshots():
+    from open_webui.utils import mcp as mcp_mod
+
+    results = mcp_mod.get_mcp_servers_cached_data(
+        [
+            {
+                "transport_type": "http",
+                "url": "http://one",
+                "config": {"enable": True},
+                "server_info": {"name": "server-one"},
+                "tools": [
+                    {
+                        "name": "echo",
+                        "description": "Echo",
+                        "inputSchema": {"type": "object"},
+                    }
+                ],
+            },
+            {
+                "transport_type": "http",
+                "url": "http://two",
+                "config": {"enable": True},
+                "tools": [],
+            },
+        ],
+        selected_indices={0},
+        strict_selected=True,
+    )
+
+    assert results == [
+        {
+            "idx": 0,
+            "transport_type": "http",
+            "url": "http://one",
+            "command": "",
+            "server_info": {"name": "server-one"},
+            "capabilities": {},
+            "tools": [
+                {
+                    "name": "echo",
+                    "description": "Echo",
+                    "inputSchema": {"type": "object"},
+                }
+            ],
+        }
+    ]

@@ -1,6 +1,7 @@
 import logging
 import os
 import math
+import time
 from typing import Optional, Union
 
 import requests
@@ -39,6 +40,7 @@ from open_webui.utils.error_handling import (
     build_error_detail,
     read_requests_error_payload,
 )
+from open_webui.utils.headers import include_user_info_headers
 from open_webui.utils.optional_dependencies import format_optional_dependency_error
 
 log = logging.getLogger(__name__)
@@ -117,6 +119,39 @@ def get_doc(collection_name: str, user: UserModel = None):
         raise e
 
 
+def get_enriched_texts(collection_result: GetResult) -> list[str]:
+    enriched_texts = []
+    for idx, text in enumerate(collection_result.documents[0]):
+        metadata = collection_result.metadatas[0][idx]
+        metadata_parts = [text]
+
+        if metadata.get("name"):
+            filename = metadata["name"]
+            filename_tokens = (
+                filename.replace("_", " ").replace("-", " ").replace(".", " ")
+            )
+            metadata_parts.append(
+                f"Filename: {filename} {filename_tokens} {filename_tokens}"
+            )
+
+        if metadata.get("title"):
+            metadata_parts.append(f'Title: {metadata["title"]}')
+
+        if metadata.get("headings") and isinstance(metadata["headings"], list):
+            headings = " > ".join(str(h) for h in metadata["headings"])
+            metadata_parts.append(f"Section: {headings}")
+
+        if metadata.get("source"):
+            metadata_parts.append(f'Source: {metadata["source"]}')
+
+        if metadata.get("snippet"):
+            metadata_parts.append(f'Snippet: {metadata["snippet"]}')
+
+        enriched_texts.append(" ".join(metadata_parts))
+
+    return enriched_texts
+
+
 def query_doc_with_hybrid_search(
     collection_name: str,
     collection_result: GetResult,
@@ -127,11 +162,18 @@ def query_doc_with_hybrid_search(
     k_reranker: int,
     r: float,
     bm25_weight: float = 0.5,
+    enable_enriched_texts: bool = False,
+    user: UserModel = None,
 ) -> dict:
     try:
         log.debug(f"query_doc_with_hybrid_search:doc {collection_name}")
+        bm25_texts = (
+            get_enriched_texts(collection_result)
+            if enable_enriched_texts
+            else collection_result.documents[0]
+        )
         bm25_retriever = BM25Retriever.from_texts(
-            texts=collection_result.documents[0],
+            texts=bm25_texts,
             metadatas=collection_result.metadatas[0],
         )
         bm25_retriever.k = k
@@ -183,7 +225,19 @@ def query_doc_with_hybrid_search(
         return result
     except Exception as e:
         log.exception(f"Error querying doc {collection_name} with hybrid search: {e}")
-        raise e
+        log.warning(
+            "Falling back to vector search for collection %s after hybrid search failed.",
+            collection_name,
+        )
+        fallback = query_doc(
+            collection_name=collection_name,
+            query_embedding=embedding_function(query, RAG_EMBEDDING_QUERY_PREFIX),
+            k=k,
+            user=user,
+        )
+        if fallback is None:
+            raise
+        return fallback.model_dump()
 
 
 def merge_get_results(get_results: list[dict]) -> dict:
@@ -301,6 +355,7 @@ def query_collection_with_hybrid_search(
     k_reranker: int,
     r: float,
     bm25_weight: float = 0.5,
+    enable_enriched_texts: bool = False,
 ) -> dict:
     results = []
     error = False
@@ -335,6 +390,7 @@ def query_collection_with_hybrid_search(
                 k_reranker=k_reranker,
                 r=r,
                 bm25_weight=bm25_weight,
+                enable_enriched_texts=enable_enriched_texts,
             )
             return result, None
         except Exception as e:
@@ -361,8 +417,14 @@ def query_collection_with_hybrid_search(
             results.append(result)
 
     if error and not results:
-        raise Exception(
-            "Hybrid search failed for all collections. Using Non-hybrid search as fallback."
+        log.warning(
+            "Hybrid search failed for all collections; falling back to non-hybrid retrieval."
+        )
+        return query_collection(
+            collection_names=collection_names,
+            queries=queries,
+            embedding_function=embedding_function,
+            k=k,
         )
 
     return merge_and_sort_query_results(results, k=k)
@@ -375,6 +437,9 @@ def get_embedding_function(
     url,
     key,
     embedding_batch_size,
+    azure_api_version=None,
+    enable_async=True,
+    concurrent_requests=0,
 ):
     if embedding_engine == "":
         if embedding_function is None:
@@ -392,7 +457,7 @@ def get_embedding_function(
         return lambda query, prefix=None, user=None: embedding_function.encode(
             query, **({"prompt": prefix} if prefix else {})
         ).tolist()
-    elif embedding_engine in ["ollama", "openai"]:
+    elif embedding_engine in ["ollama", "openai", "azure_openai"]:
         func = lambda query, prefix=None, user=None: generate_embeddings(
             engine=embedding_engine,
             model=embedding_model,
@@ -401,15 +466,21 @@ def get_embedding_function(
             url=url,
             key=key,
             user=user,
+            azure_api_version=azure_api_version,
         )
 
         def generate_multiple(query, prefix, user, func):
             if isinstance(query, list):
-                embeddings = []
-                for i in range(0, len(query), embedding_batch_size):
+                batches = [
+                    (i, query[i : i + embedding_batch_size])
+                    for i in range(0, len(query), embedding_batch_size)
+                ]
+
+                def run_batch(index_and_batch):
+                    i, batch = index_and_batch
                     try:
                         batch_result = func(
-                            query[i : i + embedding_batch_size],
+                            batch,
                             prefix=prefix,
                             user=user,
                         )
@@ -418,11 +489,26 @@ def get_embedding_function(
                             f"Embedding generation failed for batch starting at index {i}: "
                             f"{build_error_detail(exc)}"
                         ) from exc
+
                     if batch_result is None:
                         raise RuntimeError(
                             "Embedding generation failed for batch starting at index "
                             f"{i}: no embedding vectors were returned."
                         )
+
+                    return i, batch_result
+
+                if enable_async and len(batches) > 1:
+                    max_workers = concurrent_requests or len(batches)
+                    max_workers = max(1, min(max_workers, len(batches)))
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        batch_results = list(executor.map(run_batch, batches))
+                    batch_results.sort(key=lambda item: item[0])
+                else:
+                    batch_results = [run_batch(item) for item in batches]
+
+                embeddings = []
+                for _, batch_result in batch_results:
                     embeddings.extend(batch_result)
                 return embeddings
             else:
@@ -447,6 +533,7 @@ def get_sources_from_files(
     hybrid_search,
     full_context=False,
     bm25_weight: float = 0.5,
+    enable_enriched_texts: bool = False,
 ):
     log.debug(
         f"files: {files} {queries} {embedding_function} {reranking_function} {full_context}"
@@ -574,6 +661,7 @@ def get_sources_from_files(
                                     k_reranker=k_reranker,
                                     r=r,
                                     bm25_weight=bm25_weight,
+                                    enable_enriched_texts=enable_enriched_texts,
                                 )
                             except Exception as e:
                                 log.debug(
@@ -735,7 +823,7 @@ def generate_ollama_batch_embeddings(
                         "X-OpenWebUI-User-Email": user.email,
                         "X-OpenWebUI-User-Role": user.role,
                     }
-                    if ENABLE_FORWARD_USER_INFO_HEADERS
+                    if ENABLE_FORWARD_USER_INFO_HEADERS and user
                     else {}
                 ),
             },
@@ -753,6 +841,57 @@ def generate_ollama_batch_embeddings(
     except Exception as e:
         log.exception(f"Error generating ollama batch embeddings: {e}")
         raise RuntimeError(build_error_detail(e)) from e
+
+
+def generate_azure_openai_batch_embeddings(
+    model: str,
+    texts: list[str],
+    url: str,
+    key: str = "",
+    version: str = "",
+    prefix: str = None,
+    user: UserModel = None,
+) -> list[list[float]]:
+    log.debug(
+        f"generate_azure_openai_batch_embeddings:deployment {model} batch size: {len(texts)}"
+    )
+    json_data = {"input": texts}
+    if isinstance(RAG_EMBEDDING_PREFIX_FIELD_NAME, str) and isinstance(prefix, str):
+        json_data[RAG_EMBEDDING_PREFIX_FIELD_NAME] = prefix
+
+    request_url = (
+        f"{str(url or '').rstrip('/')}/openai/deployments/{model}/embeddings"
+        f"?api-version={version}"
+    )
+
+    for _ in range(5):
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": key,
+        }
+        if ENABLE_FORWARD_USER_INFO_HEADERS and user:
+            headers = include_user_info_headers(headers, user)
+
+        response = requests.post(
+            request_url,
+            headers=headers,
+            json=json_data,
+        )
+        if response.status_code == 429:
+            retry = float(response.headers.get("Retry-After", "1"))
+            time.sleep(retry)
+            continue
+        response.raise_for_status()
+        data = response.json()
+        if "data" in data:
+            return [elem["embedding"] for elem in data["data"]]
+        raise ValueError(
+            "Unexpected Azure OpenAI embeddings response: missing 'data' key"
+        )
+
+    raise RuntimeError(
+        "Azure OpenAI embedding request failed: max retries (429) exceeded"
+    )
 
 
 def generate_embeddings(
@@ -806,6 +945,19 @@ def generate_embeddings(
         else:
             embeddings = generate_openai_batch_embeddings(
                 model, [text], url, key, prefix, user
+            )
+        if embeddings is None:
+            return None
+        return embeddings[0] if isinstance(text, str) else embeddings
+    elif engine == "azure_openai":
+        version = kwargs.get("azure_api_version", "")
+        if isinstance(text, list):
+            embeddings = generate_azure_openai_batch_embeddings(
+                model, text, url, key, version, prefix, user
+            )
+        else:
+            embeddings = generate_azure_openai_batch_embeddings(
+                model, [text], url, key, version, prefix, user
             )
         if embeddings is None:
             return None

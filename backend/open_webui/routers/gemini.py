@@ -43,15 +43,19 @@ from open_webui.utils.access_control import has_access
 from open_webui.utils.payload import (
     apply_model_params_to_body_openai,
     apply_model_system_prompt_to_body,
+    merge_additive_payload_fields,
 )
 from open_webui.utils.error_handling import build_error_detail
 from open_webui.utils.native_web_search import (
     build_native_web_search_support,
+    resolve_effective_native_web_search_support,
 )
 
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["OPENAI"])
+
+_CUSTOM_PARAM_FORBIDDEN_KEYS = {"contents"}
 
 
 def _stringify_gemini_error_body(body) -> str:
@@ -146,6 +150,33 @@ def _resolve_gemini_connection_by_model_id(
     api_config = {**api_config, "_resolved_prefix_id": chosen_prefix or ""}
 
     return chosen_idx, url, key, api_config
+
+
+async def _is_user_visible_model(
+    request: Request, user: UserModel, model_id: str
+) -> bool:
+    state = getattr(request, "state", None)
+    models_map = getattr(state, "MODELS", None) if state is not None else None
+    if isinstance(models_map, dict) and model_id in models_map:
+        return True
+
+    try:
+        # Avoid a module-level import here because utils.models imports this router.
+        from open_webui.utils.models import get_all_models as load_user_models
+
+        await load_user_models(request, user=user)
+    except Exception as e:
+        log.debug(
+            "Failed to load user-scoped models while validating %s: %s: %s",
+            model_id,
+            type(e).__name__,
+            e,
+        )
+        return False
+
+    state = getattr(request, "state", None)
+    models_map = getattr(state, "MODELS", None) if state is not None else None
+    return isinstance(models_map, dict) and model_id in models_map
 
 ##########################################
 #
@@ -1181,7 +1212,7 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
             except Exception:
                 connection_name = ""
         connection_icon = (api_config.get("icon") or "").strip()
-        native_web_search_support = build_native_web_search_support(
+        connection_support = build_native_web_search_support(
             "gemini",
             url=base_urls[idx],
             api_config=api_config,
@@ -1200,10 +1231,17 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
                 model["connection_icon"] = connection_icon
             if tags:
                 model["tags"] = tags
-            model["native_web_search_supported"] = (
-                native_web_search_support.get("supported") is True
+            model_support = resolve_effective_native_web_search_support(
+                connection_support,
+                provider="gemini",
+                model_id=model_name,
+                model_name=model.get("displayName")
+                or model.get("name", "").replace("models/", ""),
             )
-            model["native_web_search_support"] = dict(native_web_search_support)
+            model["native_web_search_supported"] = (
+                model_support.get("supported") is True
+            )
+            model["native_web_search_support"] = dict(model_support)
 
     return responses
 
@@ -1294,7 +1332,7 @@ async def get_models(
         api_config = cfgs.get(str(url_idx), {}) if isinstance(cfgs, dict) else {}
 
         response = await send_get_request(f"{url}/models", key, api_config)
-        native_web_search_support = build_native_web_search_support(
+        connection_support = build_native_web_search_support(
             "gemini",
             url=url,
             api_config=api_config,
@@ -1306,9 +1344,16 @@ async def get_models(
                         "id": m.get("name", "").replace("models/", ""),
                         "name": m.get("displayName", ""),
                         "owned_by": "google",
-                        "native_web_search_supported": native_web_search_support.get("supported")
+                        "native_web_search_supported": (
+                            model_support := resolve_effective_native_web_search_support(
+                                connection_support,
+                                provider="gemini",
+                                model_id=m.get("name", "").replace("models/", ""),
+                                model_name=m.get("displayName", ""),
+                            )
+                        ).get("supported")
                         is True,
-                        "native_web_search_support": dict(native_web_search_support),
+                        "native_web_search_support": dict(model_support),
                     }
                     for m in response["models"]
                     if "generateContent" in m.get("supportedGenerationMethods", [])
@@ -1325,6 +1370,34 @@ class ConnectionVerificationForm(BaseModel):
     url: str
     key: str
     config: Optional[dict] = None
+
+
+class HealthCheckForm(BaseModel):
+    url: str
+    key: str = ""
+    config: Optional[dict] = None
+    model: Optional[str] = None
+
+
+def _strip_gemini_model_prefix(model_id: str, api_config: Optional[dict]) -> str:
+    resolved_prefix = (
+        (api_config or {}).get("_resolved_prefix_id")
+        or (api_config or {}).get("prefix_id")
+        or ""
+    ).strip()
+    if resolved_prefix and isinstance(model_id, str) and model_id.startswith(f"{resolved_prefix}."):
+        return model_id[len(resolved_prefix) + 1 :]
+    return model_id
+
+
+async def _read_gemini_upstream_body(response: aiohttp.ClientResponse):
+    try:
+        return await response.json(content_type=None)
+    except Exception:
+        try:
+            return await response.text()
+        except Exception:
+            return None
 
 
 @router.post("/verify")
@@ -1350,7 +1423,7 @@ async def verify_connection(
                 status_code=response.get("error", {}).get("code", 500),
                 detail=response.get("error", {}).get("message", "Unknown error"),
             )
-        support = build_native_web_search_support(
+        connection_support = build_native_web_search_support(
             "gemini",
             url=url,
             api_config=config,
@@ -1359,8 +1432,14 @@ async def verify_connection(
             for model in response["models"]:
                 if not isinstance(model, dict):
                     continue
-                model["native_web_search_supported"] = support.get("supported") is True
-                model["native_web_search_support"] = dict(support)
+                model_support = resolve_effective_native_web_search_support(
+                    connection_support,
+                    provider="gemini",
+                    model_id=model.get("name", "").replace("models/", ""),
+                    model_name=model.get("displayName", ""),
+                )
+                model["native_web_search_supported"] = model_support.get("supported") is True
+                model["native_web_search_support"] = dict(model_support)
         return response
     except HTTPException:
         raise
@@ -1370,6 +1449,100 @@ async def verify_connection(
             status_code=500,
             detail=build_error_detail(e, prefix="Gemini"),
         )
+
+
+@router.post("/health_check")
+async def health_check_connection(
+    form_data: HealthCheckForm,
+    user=Depends(get_verified_user),
+):
+    url = (form_data.url or "").rstrip("/")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    key = form_data.key or ""
+    config = form_data.config or {}
+
+    chosen_model = form_data.model
+    if not chosen_model:
+        response = await send_get_request(f"{url}/models", key, config)
+        if response is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Gemini: Connection to upstream server failed",
+            )
+        if "error" in response:
+            raise HTTPException(
+                status_code=response.get("error", {}).get("code", 500),
+                detail=response.get("error", {}).get("message", "Unknown error"),
+            )
+
+        models = response.get("models") if isinstance(response, dict) else None
+        if isinstance(models, list):
+            for model in models:
+                if not isinstance(model, dict):
+                    continue
+                supported_methods = model.get("supportedGenerationMethods", [])
+                if "generateContent" not in supported_methods:
+                    continue
+                chosen_model = model.get("name", "").replace("models/", "")
+                if chosen_model:
+                    break
+
+    if not chosen_model:
+        raise HTTPException(status_code=400, detail="Gemini: No compatible model found")
+
+    chosen_model = _strip_gemini_model_prefix(str(chosen_model), config)
+    if chosen_model.startswith("models/"):
+        chosen_model = chosen_model[len("models/") :]
+
+    request_url = f"{url}/models/{chosen_model}:generateContent"
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": "Hi"}]}],
+        "generationConfig": {"maxOutputTokens": 16},
+    }
+
+    timeout = aiohttp.ClientTimeout(total=15)
+    last_status = None
+    last_body = None
+    started_at = time.monotonic()
+    try:
+        async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
+            for full_url, headers in _auth_attempts(request_url, key or "", config):
+                async with session.post(full_url, headers=headers, json=payload) as response:
+                    body = await _read_gemini_upstream_body(response)
+                    if response.status < 400 and isinstance(body, dict):
+                        return {
+                            "ok": True,
+                            "model": chosen_model,
+                            "response_time_ms": max(
+                                1, int((time.monotonic() - started_at) * 1000)
+                            ),
+                        }
+                    last_status = response.status
+                    last_body = body
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception(f"Unexpected error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=build_error_detail(e, prefix="Gemini"),
+        )
+
+    status = last_status or 500
+    if isinstance(last_body, dict):
+        error = last_body.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            raise HTTPException(status_code=status, detail=str(error.get("message")))
+    raise HTTPException(
+        status_code=status,
+        detail=_format_gemini_upstream_error(
+            request_url=request_url,
+            status=status,
+            body=last_body,
+        ),
+    )
 
 
 @router.post("/chat/completions")
@@ -1388,6 +1561,7 @@ async def generate_chat_completion(
         bypass_filter = True
 
     payload = {**form_data}
+    custom_params = payload.pop("custom_params", None)
     metadata = payload.pop("metadata", None)
 
     model_id = payload.get("model", "")
@@ -1416,7 +1590,8 @@ async def generate_chat_completion(
     elif not bypass_filter:
         # Match OpenAI router behavior: allow base models for admins; users require model record/access.
         if user.role != "admin":
-            raise HTTPException(status_code=403, detail="Model not found")
+            if not await _is_user_visible_model(request, user, model_id):
+                raise HTTPException(status_code=403, detail="Model not found")
 
     form_data = payload
     stream = form_data.get("stream", False)
@@ -1917,6 +2092,12 @@ async def generate_chat_completion(
     for i, item in enumerate(gemini_payload.get("contents", [])):
         log.info(f"[GEMINI PAYLOAD DEBUG] Content {i}: role={item.get('role')}, parts_count={len(item.get('parts', []))}, parts_types={[list(p.keys()) for p in item.get('parts', [])]}")
     log.info(f"[GEMINI PAYLOAD DEBUG] Complete contents array: {json.dumps(gemini_payload.get('contents', []), ensure_ascii=False, default=str)[:2000]}")
+
+    gemini_payload = merge_additive_payload_fields(
+        gemini_payload,
+        custom_params,
+        forbidden_keys=_CUSTOM_PARAM_FORBIDDEN_KEYS,
+    )
 
     # Remove empty generationConfig to avoid potential issues
     if "generationConfig" in gemini_payload and not gemini_payload["generationConfig"]:

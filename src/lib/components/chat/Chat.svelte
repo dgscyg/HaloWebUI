@@ -54,6 +54,12 @@
 	} from '$lib/utils';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
 	import {
+		type ChatAssistantSnapshot,
+		PENDING_ASSISTANT_STORAGE_KEY,
+		toChatAssistantSnapshot
+	} from '$lib/utils/chat-assistants';
+	import {
+		getTemporaryChatAccess,
 		getTemporaryChatNavigationPath,
 		persistTemporaryChatOverride,
 		resolveTemporaryChatEnabled
@@ -64,6 +70,7 @@
 		type WebSearchMode
 	} from '$lib/utils/web-search-mode';
 	import { getFunctionPipeRootId } from '$lib/utils/image-generation';
+	import { applyUserSettingsSnapshot } from '$lib/utils/user-settings';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
 	import {
@@ -116,20 +123,31 @@
 	let loading = false;
 
 	const eventTarget = new EventTarget();
+	type MessageFile = Record<string, unknown>;
 	type PendingGeminiImage = {
 		mimeType: string;
 		parts: string[];
 	};
 	const pendingGeminiImages = new Map<string, Map<string, PendingGeminiImage>>();
-	const buildImageDataUrl = (mimeType: string, data: string) =>
-		`data:${mimeType};base64,${data}`;
-	const mergeMessageFiles = (existing: any[] = [], incoming: any[] = []) => {
-		const merged = [];
+	const buildImageDataUrl = (mimeType: string, data: string) => `data:${mimeType};base64,${data}`;
+	const normalizeMessageFile = (file: unknown): MessageFile | null => {
+		if (!file || typeof file !== 'object') return null;
+
+		try {
+			return JSON.parse(JSON.stringify(file)) as MessageFile;
+		} catch (error) {
+			console.warn('Failed to normalize message file', error);
+			return null;
+		}
+	};
+
+	const mergeMessageFiles = (existing: MessageFile[] = [], incoming: MessageFile[] = []) => {
+		const merged: MessageFile[] = [];
 		const seen = new Set<string>();
 
 		for (const file of [...existing, ...incoming]) {
-			if (!file || typeof file !== 'object') continue;
-			const normalized = JSON.parse(JSON.stringify(file));
+			const normalized = normalizeMessageFile(file);
+			if (!normalized) continue;
 			const key = JSON.stringify(normalized);
 			if (seen.has(key)) continue;
 			seen.add(key);
@@ -166,6 +184,7 @@
 	let atSelectedModel: Model | undefined;
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
+	let activeAssistant: ChatAssistantSnapshot | null = null;
 
 	let selectedToolIds = [];
 	let imageGenerationEnabled = false;
@@ -196,6 +215,39 @@
 	}
 	const getModelById = (id: string): Model | undefined => modelsMap.get(id);
 
+	const normalizeReasoningEffortValue = (value: unknown): string | null => {
+		if (value === null || value === undefined) {
+			return null;
+		}
+
+		const normalized = String(value).trim().toLowerCase();
+		return normalized === '' ? null : normalized;
+	};
+
+	const normalizeThinkingTokenValue = (value: unknown): number | null => {
+		if (value === null || value === undefined || value === '') {
+			return null;
+		}
+
+		const parsed = Number(value);
+		return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+	};
+
+	const getResolvedSelectedModelIds = () =>
+		selectedModelIds.filter((id): id is string => typeof id === 'string' && id.trim() !== '');
+
+	const getSingleSelectedReasoningModel = (): Model | null => {
+		const ids = getResolvedSelectedModelIds();
+		if (ids.length !== 1) {
+			return null;
+		}
+
+		return getModelById(ids[0]) ?? null;
+	};
+
+	const getModelDefaultReasoningEffort = (model: Model | null | undefined): string | null =>
+		normalizeReasoningEffortValue((model as any)?.info?.params?.reasoning_effort ?? null);
+
 	// J-3-01: Reactive flag to avoid calling createMessagesList just for emptiness check in template
 	let hasMessages = false;
 	$: hasMessages = history.currentId !== null;
@@ -222,6 +274,108 @@
 	// 用缓存值打断 reactive 级联：正向同步更新缓存 → 反向 onChange 检测到缓存一致则跳过
 	let _lastSyncedEffort: string | null = null;
 	let _lastSyncedTokens: number | null = null;
+	let reasoningSelectionTrackingReady = false;
+	let lastReasoningSelectionKey = '';
+
+	const syncReasoningUiState = (effort: unknown, tokens: unknown) => {
+		const normalizedEffort = normalizeReasoningEffortValue(effort);
+		const normalizedTokens = normalizeThinkingTokenValue(tokens);
+
+		_lastSyncedEffort = normalizedEffort;
+		_lastSyncedTokens = normalizedTokens;
+
+		if (reasoningEffort !== normalizedEffort) {
+			reasoningEffort = normalizedEffort;
+		}
+
+		if (maxThinkingTokens !== normalizedTokens) {
+			maxThinkingTokens = normalizedTokens;
+		}
+	};
+
+	const syncReasoningParamsState = (effort: unknown, tokens: unknown) => {
+		const normalizedEffort = normalizeReasoningEffortValue(effort);
+		const normalizedTokens = normalizeThinkingTokenValue(tokens);
+		const currentEffort = normalizeReasoningEffortValue(params?.reasoning_effort ?? null);
+		const currentTokens = normalizeThinkingTokenValue(params?.max_thinking_tokens ?? null);
+
+		if (currentEffort === normalizedEffort && currentTokens === normalizedTokens) {
+			return;
+		}
+
+		params = {
+			...params,
+			reasoning_effort: normalizedEffort,
+			max_thinking_tokens: normalizedTokens
+		};
+	};
+
+	const setSharedReasoningState = ({
+		effort,
+		tokens,
+		syncParams = true
+	}: {
+		effort: unknown;
+		tokens: unknown;
+		syncParams?: boolean;
+	}) => {
+		syncReasoningUiState(effort, tokens);
+
+		if (syncParams) {
+			syncReasoningParamsState(effort, tokens);
+		}
+	};
+
+	const applyReasoningSelectionDefaults = () => {
+		const ids = getResolvedSelectedModelIds();
+		const singleModel = getSingleSelectedReasoningModel();
+
+		if (ids.length !== 1 || !singleModel) {
+			setSharedReasoningState({ effort: null, tokens: null });
+			return;
+		}
+
+		setSharedReasoningState({
+			effort: getModelDefaultReasoningEffort(singleModel),
+			tokens: null
+		});
+	};
+
+	const resetReasoningSelectionTracking = () => {
+		reasoningSelectionTrackingReady = false;
+		lastReasoningSelectionKey = '';
+	};
+
+	const initializeReasoningSelectionTracking = () => {
+		lastReasoningSelectionKey = getResolvedSelectedModelIds().join('|');
+		reasoningSelectionTrackingReady = true;
+	};
+
+	const activateAssistant = (value: Record<string, unknown> | ChatAssistantSnapshot | null) => {
+		const assistant = toChatAssistantSnapshot(value as Record<string, unknown> | null);
+		if (!assistant) {
+			return;
+		}
+
+		activeAssistant = assistant;
+		params = {
+			...params,
+			system: assistant.prompt
+		};
+		persistChatSessionState();
+	};
+
+	const deactivateAssistant = () => {
+		const assistantPrompt = activeAssistant?.prompt ?? null;
+		activeAssistant = null;
+
+		if (assistantPrompt && params?.system === assistantPrompt) {
+			const { system: _system, ...rest } = params;
+			params = rest;
+		}
+
+		persistChatSessionState();
+	};
 
 	const getRequestStopTokens = () => {
 		const rawStop = params?.stop ?? $settings?.params?.stop;
@@ -345,7 +499,6 @@
 			params: {
 				...$settings?.params,
 				...params,
-				function_calling: 'default',
 				...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
 				...(maxThinkingTokens != null && maxThinkingTokens > 0
 					? { thinking: { type: 'enabled', budget_tokens: maxThinkingTokens } }
@@ -391,7 +544,6 @@
 			},
 			session_id: $socket?.id ?? undefined,
 			chat_id: $chatId ?? undefined,
-			preview_tool_compat: true,
 			model_item: getModelById(model.id),
 			...(stream && shouldIncludeUsageStreamOption(model)
 				? {
@@ -406,15 +558,96 @@
 	setContext('floatingChatRequestFactory', buildFloatingChatRequest);
 
 	const getPreferredDefaultWebSearchMode = (): WebSearchMode =>
-		getPreferredWebSearchMode($settings, $config, 'off');
+		getPreferredWebSearchMode($settings, 'off');
+
+	const decodeTokenUserId = (token: string | null | undefined): string | null => {
+		if (!token || typeof atob !== 'function') {
+			return null;
+		}
+
+		try {
+			const [, payload = ''] = token.split('.');
+			if (!payload) {
+				return null;
+			}
+
+			const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+			const padded = normalized.padEnd(
+				normalized.length + ((4 - (normalized.length % 4)) % 4),
+				'='
+			);
+			const decoded = JSON.parse(atob(padded));
+			const value = typeof decoded?.id === 'string' ? decoded.id.trim() : '';
+			return value || null;
+		} catch {
+			return null;
+		}
+	};
+
+	const getChatStorageUserScope = (): string => {
+		const directUserId = typeof $user?.id === 'string' ? $user.id.trim() : '';
+		if (directUserId) {
+			return directUserId;
+		}
+
+		if (typeof localStorage !== 'undefined') {
+			const tokenUserId = decodeTokenUserId(localStorage.token);
+			if (tokenUserId) {
+				return tokenUserId;
+			}
+		}
+
+		return 'anonymous';
+	};
+
+	const buildScopedStorageKey = (baseKey: string) => `${baseKey}::${getChatStorageUserScope()}`;
+
+	const readStorageItem = (
+		storage: Storage,
+		scopedKey: string,
+		legacyKey?: string | null
+	): { value: string | null; usedLegacy: boolean } => {
+		const scopedValue = storage.getItem(scopedKey);
+		if (scopedValue !== null) {
+			return { value: scopedValue, usedLegacy: false };
+		}
+
+		if (!legacyKey || legacyKey === scopedKey) {
+			return { value: null, usedLegacy: false };
+		}
+
+		const legacyValue = storage.getItem(legacyKey);
+		return { value: legacyValue, usedLegacy: legacyValue !== null };
+	};
+
+	const migrateStorageItem = (
+		storage: Storage,
+		scopedKey: string,
+		legacyKey: string | null | undefined,
+		value: string | null
+	) => {
+		if (value === null) {
+			return;
+		}
+
+		storage.setItem(scopedKey, value);
+		if (legacyKey && legacyKey !== scopedKey) {
+			storage.removeItem(legacyKey);
+		}
+	};
 
 	const getImageGenerationOptionsPayload = () => {
 		const raw = imageGenerationOptions ?? {};
 		const payload = Object.fromEntries(
-			Object.entries(raw).filter(([, value]) => value !== undefined && value !== null && value !== '')
+			Object.entries(raw).filter(
+				([, value]) => value !== undefined && value !== null && value !== ''
+			)
 		);
 		return Object.keys(payload).length > 0 ? payload : undefined;
 	};
+
+	const supportsToolValvesContext = (id: string | null | undefined): id is string =>
+		Boolean(id) && !String(id).startsWith('mcp:') && !String(id).startsWith('server:');
 
 	$: currentValvesContext = (() => {
 		const activeModelId =
@@ -430,10 +663,11 @@
 			}
 		}
 
-		if (selectedToolIds.length > 0) {
+		const preferredToolId = selectedToolIds.find((id) => supportsToolValvesContext(id));
+		if (preferredToolId) {
 			return {
 				tab: 'tools' as const,
-				id: selectedToolIds[0]
+				id: preferredToolId
 			};
 		}
 
@@ -455,10 +689,24 @@
 		return fallback;
 	};
 
-	const getChatSessionStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
+	const getLegacyChatSessionStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
 		`chat-session-state-${id && id !== '' ? id : 'new'}`;
 
-	const safeParseStoredJson = <T>(rawValue: string | null | undefined, fallback: T): T => {
+	const getChatSessionStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
+		buildScopedStorageKey(getLegacyChatSessionStateKey(id));
+
+	const getLegacyChatInputStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
+		`chat-input-${id ?? ''}`;
+
+	const getChatInputStateKey = (id: string | null | undefined = $chatId || chatIdProp) =>
+		buildScopedStorageKey(getLegacyChatInputStateKey(id));
+
+	const getLegacySelectedModelsStorageKey = () => 'selectedModels';
+
+	const getSelectedModelsStorageKey = () =>
+		buildScopedStorageKey(getLegacySelectedModelsStorageKey());
+
+	const safeParseStoredJson = <T,>(rawValue: string | null | undefined, fallback: T): T => {
 		if (!rawValue) {
 			return fallback;
 		}
@@ -470,29 +718,52 @@
 		}
 	};
 
-	const readLegacyInputSettings = (id: string | null | undefined = $chatId || chatIdProp) => {
-		try {
-			const input = JSON.parse(localStorage.getItem(`chat-input-${id ?? ''}`) || 'null');
-			if (!input) {
-				return null;
-			}
+	const readChatInputState = (id: string | null | undefined = $chatId || chatIdProp) => {
+		const scopedKey = getChatInputStateKey(id);
+		const legacyKey = getLegacyChatInputStateKey(id);
+		const { value, usedLegacy } = readStorageItem(localStorage, scopedKey, legacyKey);
+		const parsed = safeParseStoredJson<Record<string, any> | null>(value, null);
 
-			return {
-				webSearchMode: input.webSearchMode,
-				reasoningEffort: input.reasoningEffort,
-				maxThinkingTokens: input.maxThinkingTokens,
-				imageGenerationOptions: input.imageGenerationOptions
-			};
-		} catch {
-			return null;
+		if (parsed && usedLegacy) {
+			migrateStorageItem(localStorage, scopedKey, legacyKey, value);
+		}
+
+		return parsed;
+	};
+
+	const writeChatInputState = (
+		input: Record<string, any>,
+		id: string | null | undefined = $chatId || chatIdProp
+	) => {
+		const scopedKey = getChatInputStateKey(id);
+		const legacyKey = getLegacyChatInputStateKey(id);
+		const serialized = JSON.stringify(input);
+		localStorage.setItem(scopedKey, serialized);
+		if (legacyKey !== scopedKey) {
+			localStorage.removeItem(legacyKey);
 		}
 	};
 
-		const restoreChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
-			try {
-				const stored = JSON.parse(localStorage.getItem(getChatSessionStateKey(id)) || 'null');
-				const state = stored ?? readLegacyInputSettings(id);
+	const removeChatInputState = (id: string | null | undefined = $chatId || chatIdProp) => {
+		const scopedKey = getChatInputStateKey(id);
+		const legacyKey = getLegacyChatInputStateKey(id);
+		localStorage.removeItem(scopedKey);
+		if (legacyKey !== scopedKey) {
+			localStorage.removeItem(legacyKey);
+		}
+	};
 
+	const restoreChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
+		try {
+			const scopedKey = getChatSessionStateKey(id);
+			const legacyKey = getLegacyChatSessionStateKey(id);
+			const { value, usedLegacy } = readStorageItem(localStorage, scopedKey, legacyKey);
+			const stored = safeParseStoredJson<Record<string, any> | null>(value, null);
+			if (stored && usedLegacy) {
+				migrateStorageItem(localStorage, scopedKey, legacyKey, value);
+			}
+
+			const state = stored ?? readChatInputState(id);
 			if (!state) {
 				return false;
 			}
@@ -501,44 +772,69 @@
 			if (state.reasoningEffort !== undefined) {
 				reasoningEffort = state.reasoningEffort ?? null;
 			}
-				if (state.maxThinkingTokens !== undefined) {
-					maxThinkingTokens = state.maxThinkingTokens ?? null;
-				}
-				if (state.imageGenerationEnabled !== undefined) {
-					imageGenerationEnabled = Boolean(state.imageGenerationEnabled);
-				}
-				if (state.imageGenerationOptions !== undefined) {
-					imageGenerationOptions = state.imageGenerationOptions ?? {};
-				}
-				if (state.codeInterpreterEnabled !== undefined) {
-					codeInterpreterEnabled = Boolean(state.codeInterpreterEnabled);
-				}
-
-				return true;
-			} catch {
-				return false;
+			if (state.maxThinkingTokens !== undefined) {
+				maxThinkingTokens = state.maxThinkingTokens ?? null;
 			}
+			if (state.imageGenerationEnabled !== undefined) {
+				imageGenerationEnabled = Boolean(state.imageGenerationEnabled);
+			}
+			if (state.imageGenerationOptions !== undefined) {
+				imageGenerationOptions = state.imageGenerationOptions ?? {};
+			}
+			if (state.codeInterpreterEnabled !== undefined) {
+				codeInterpreterEnabled = Boolean(state.codeInterpreterEnabled);
+			}
+			activeAssistant = toChatAssistantSnapshot(state.activeAssistant ?? null);
+
+			if (typeof state.systemPrompt === 'string') {
+				params = {
+					...params,
+					system: state.systemPrompt
+				};
+			} else if (activeAssistant?.prompt) {
+				params = {
+					...params,
+					system: activeAssistant.prompt
+				};
+			}
+
+			return true;
+		} catch {
+			return false;
+		}
 	};
 
 	const persistChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
+		const scopedKey = getChatSessionStateKey(id);
+		const legacyKey = getLegacyChatSessionStateKey(id);
 		localStorage.setItem(
-			getChatSessionStateKey(id),
+			scopedKey,
 			JSON.stringify({
-					webSearchMode: resolveStoredWebSearchMode(
-						{ webSearchMode },
-						getPreferredDefaultWebSearchMode()
-					),
-					imageGenerationEnabled,
-					imageGenerationOptions,
-					codeInterpreterEnabled,
-					reasoningEffort,
-					maxThinkingTokens
-				})
-			);
-		};
+				webSearchMode: resolveStoredWebSearchMode(
+					{ webSearchMode },
+					getPreferredDefaultWebSearchMode()
+				),
+				activeAssistant,
+				systemPrompt: typeof params?.system === 'string' ? params.system : null,
+				imageGenerationEnabled,
+				imageGenerationOptions,
+				codeInterpreterEnabled,
+				reasoningEffort,
+				maxThinkingTokens
+			})
+		);
+		if (legacyKey !== scopedKey) {
+			localStorage.removeItem(legacyKey);
+		}
+	};
 
 	const removeChatSessionState = (id: string | null | undefined = $chatId || chatIdProp) => {
-		localStorage.removeItem(getChatSessionStateKey(id));
+		const scopedKey = getChatSessionStateKey(id);
+		const legacyKey = getLegacyChatSessionStateKey(id);
+		localStorage.removeItem(scopedKey);
+		if (legacyKey !== scopedKey) {
+			localStorage.removeItem(legacyKey);
+		}
 	};
 
 	const migrateChatSessionState = (
@@ -560,29 +856,63 @@
 		localStorage.removeItem(fromKey);
 	};
 
+	const buildPersistedChatData = (historyState, messages = createMessagesList(historyState, historyState.currentId)) => ({
+		models: selectedModels,
+		history: historyState,
+		messages,
+		params,
+		files: chatFiles,
+		assistant: activeAssistant ?? undefined
+	});
+
+	$: {
+		const currentSystemPrompt = typeof params?.system === 'string' ? params.system : null;
+		currentSystemPrompt;
+		activeAssistant;
+
+		if (!chatIdProp) {
+			persistChatSessionState();
+		}
+	}
+
 	// 正向同步: Controls(params) → ThinkingControl(reasoningEffort/maxThinkingTokens)
 	$: {
-		const re = params?.reasoning_effort ?? null;
-		const mt = params?.max_thinking_tokens ?? null;
-		if (re !== _lastSyncedEffort || mt !== _lastSyncedTokens) {
-			_lastSyncedEffort = re;
-			_lastSyncedTokens = mt;
-			if (re && re !== 'none' && re !== reasoningEffort) {
-				reasoningEffort = re;
-				maxThinkingTokens = null;
-			} else if (mt !== null && mt > 0 && mt !== maxThinkingTokens) {
-				maxThinkingTokens = mt;
-				reasoningEffort = null;
-			} else if (!re && (mt === null || mt === 0)) {
-				reasoningEffort = re === 'none' ? 'none' : null;
-				maxThinkingTokens = mt === 0 ? 0 : null;
+		const paramEffort = normalizeReasoningEffortValue(params?.reasoning_effort ?? null);
+		const paramTokens = normalizeThinkingTokenValue(params?.max_thinking_tokens ?? null);
+		const resolvedModelIds = getResolvedSelectedModelIds();
+		const singleModel = getSingleSelectedReasoningModel();
+		const defaultEffort = getModelDefaultReasoningEffort(singleModel);
+		const hasSingleModelSelection = resolvedModelIds.length === 1 && !!singleModel;
+
+		if (resolvedModelIds.length !== 1) {
+			if (paramEffort !== null || paramTokens !== null) {
+				setSharedReasoningState({ effort: null, tokens: null });
+			} else {
+				syncReasoningUiState(null, null);
 			}
+		} else if (hasSingleModelSelection && defaultEffort !== null && paramEffort === null && paramTokens === null) {
+			setSharedReasoningState({ effort: defaultEffort, tokens: null });
+		} else if (paramTokens !== null && paramTokens > 0) {
+			setSharedReasoningState({ effort: null, tokens: paramTokens, syncParams: false });
+		} else {
+			syncReasoningUiState(paramEffort, paramTokens);
+		}
+	}
+
+	$: {
+		const selectionKey = getResolvedSelectedModelIds().join('|');
+		if (!reasoningSelectionTrackingReady) {
+			lastReasoningSelectionKey = selectionKey;
+		} else if (selectionKey !== lastReasoningSelectionKey) {
+			lastReasoningSelectionKey = selectionKey;
+			applyReasoningSelectionDefaults();
 		}
 	}
 
 	$: if (chatIdProp) {
 		(async () => {
 			loading = true;
+			resetReasoningSelectionTracking();
 
 			prompt = '';
 			files = [];
@@ -598,10 +928,9 @@
 				await tick();
 				restoreChatSessionState(chatIdProp);
 
-				if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
+				const input = readChatInputState(chatIdProp);
+				if (input) {
 					try {
-						const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
-
 						prompt = input.prompt;
 						files = input.files;
 						selectedToolIds = input.selectedToolIds;
@@ -613,6 +942,7 @@
 				window.setTimeout(() => scrollToBottom(), 0);
 				const chatInput = document.getElementById('chat-input');
 				chatInput?.focus();
+				initializeReasoningSelectionTracking();
 			} else {
 				await goto('/');
 			}
@@ -627,7 +957,12 @@
 		if (selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === '')) {
 			return;
 		}
-		sessionStorage.selectedModels = JSON.stringify(selectedModels);
+		const scopedKey = getSelectedModelsStorageKey();
+		const legacyKey = getLegacySelectedModelsStorageKey();
+		sessionStorage.setItem(scopedKey, JSON.stringify(selectedModels));
+		if (legacyKey !== scopedKey) {
+			sessionStorage.removeItem(legacyKey);
+		}
 	};
 
 	// When models finish loading after page refresh, restore selection from sessionStorage
@@ -639,22 +974,24 @@
 		!freshChatActive &&
 		(selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === ''))
 	) {
-		if (sessionStorage.selectedModels) {
+		const scopedKey = getSelectedModelsStorageKey();
+		const legacyKey = getLegacySelectedModelsStorageKey();
+		const { value, usedLegacy } = readStorageItem(sessionStorage, scopedKey, legacyKey);
+		if (value) {
 			try {
-				const stored = JSON.parse(sessionStorage.selectedModels);
+				const stored = JSON.parse(value);
 				const valid = stored.filter((id: string) => modelsMap.has(id));
 				if (valid.length > 0) {
 					selectedModels = valid;
+					if (usedLegacy) {
+						migrateStorageItem(sessionStorage, scopedKey, legacyKey, value);
+					}
 				}
 			} catch {}
 		}
 	}
 
-	$: if (selectedModels) {
-		setToolIds();
-	}
-
-	$: if (atSelectedModel || selectedModels) {
+	$: if ($tools && (atSelectedModel || selectedModels)) {
 		setToolIds();
 	}
 
@@ -898,9 +1235,9 @@
 		}
 
 		if (!chatIdProp) {
-			if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
+			const input = readChatInputState(chatIdProp);
+			if (input) {
 				try {
-					const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
 					prompt = input.prompt;
 					files = input.files;
 					selectedToolIds = input.selectedToolIds;
@@ -1203,8 +1540,7 @@
 
 	const syncTemporaryChatState = (settingsSource = $settings) => {
 		const defaultEnabled = settingsSource?.temporaryChatByDefault ?? false;
-		const allowed = $user?.role === 'user' ? ($user?.permissions?.chat?.temporary ?? true) : true;
-		const enforced = allowed && ($user?.permissions?.chat?.temporary_enforced ?? false);
+		const { allowed, enforced } = getTemporaryChatAccess($user);
 		const enabled = resolveTemporaryChatEnabled({
 			searchParams: $page.url.searchParams,
 			defaultEnabled,
@@ -1225,6 +1561,7 @@
 	const initNewChat = async (options: { fresh?: boolean } = {}) => {
 		const fresh = options.fresh ?? false;
 		freshChatActive = fresh;
+		resetReasoningSelectionTracking();
 
 		if ($page.url.searchParams.get('models')) {
 			selectedModels = $page.url.searchParams.get('models')?.split(',');
@@ -1253,13 +1590,16 @@
 				selectedModels = urlModels;
 			}
 		} else if (!fresh) {
-			if (sessionStorage.selectedModels) {
-				const storedSelectedModels = safeParseStoredJson<string[] | null>(
-					sessionStorage.selectedModels,
-					null
-				);
+			const scopedKey = getSelectedModelsStorageKey();
+			const legacyKey = getLegacySelectedModelsStorageKey();
+			const { value, usedLegacy } = readStorageItem(sessionStorage, scopedKey, legacyKey);
+			if (value) {
+				const storedSelectedModels = safeParseStoredJson<string[] | null>(value, null);
 				if (Array.isArray(storedSelectedModels)) {
 					selectedModels = storedSelectedModels;
+					if (usedLegacy) {
+						migrateStorageItem(sessionStorage, scopedKey, legacyKey, value);
+					}
 				}
 			} else {
 				if ($settings?.models) {
@@ -1279,7 +1619,10 @@
 		// The recovery block (line 573) and ModelSelector validation handle deferred validation.
 		if (modelsMap.size > 0) {
 			selectedModels = selectedModels.filter((modelId) => modelsMap.has(modelId));
-			if (selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === '')) {
+			if (
+				selectedModels.length === 0 ||
+				(selectedModels.length === 1 && selectedModels[0] === '')
+			) {
 				if (!fresh && $models.length > 0) {
 					// Non-fresh: auto-select first available model as fallback
 					selectedModels = [$models[0].id];
@@ -1330,6 +1673,7 @@
 			taskIds = null;
 			processing = '';
 			atSelectedModel = undefined;
+			activeAssistant = null;
 			prompt = '';
 			files = [];
 			selectedToolIds = [];
@@ -1343,6 +1687,7 @@
 
 		if (fresh) {
 			removeChatSessionState('');
+			removeChatInputState('');
 			reasoningEffort = null;
 			maxThinkingTokens = null;
 			webSearchMode = getPreferredDefaultWebSearchMode();
@@ -1408,12 +1753,30 @@
 		const userSettings = await getUserSettings(localStorage.token);
 
 		if (userSettings) {
-			settings.set(userSettings.ui);
+			applyUserSettingsSnapshot(userSettings, get(settings) ?? {});
 			temporaryChatState = syncTemporaryChatState(userSettings.ui);
 		} else {
-			const localSettings = safeParseStoredJson(localStorage.getItem('settings'), {});
-			settings.set(localSettings);
-			temporaryChatState = syncTemporaryChatState(localSettings);
+			const fallbackSettings = get(settings) ?? {};
+			settings.set(fallbackSettings);
+			temporaryChatState = syncTemporaryChatState(fallbackSettings);
+		}
+
+		if (fresh && $page.url.searchParams.get('web-search') !== 'true') {
+			webSearchMode = getPreferredWebSearchMode(userSettings?.ui ?? $settings, 'off');
+		}
+
+		if (fresh) {
+			const pendingAssistant = toChatAssistantSnapshot(
+				safeParseStoredJson<Record<string, unknown> | null>(
+					sessionStorage.getItem(PENDING_ASSISTANT_STORAGE_KEY),
+					null
+				)
+			);
+			sessionStorage.removeItem(PENDING_ASSISTANT_STORAGE_KEY);
+
+			if (pendingAssistant) {
+				activateAssistant(pendingAssistant);
+			}
 		}
 
 		if (window.location.pathname === '/') {
@@ -1433,6 +1796,7 @@
 
 		const chatInput = document.getElementById('chat-input');
 		setTimeout(() => chatInput?.focus(), 0);
+		initializeReasoningSelectionTracking();
 
 		if (fresh && $page.url.searchParams.get('fresh-chat') === 'true') {
 			const url = new URL($page.url);
@@ -1491,11 +1855,8 @@
 
 				chatTitle.set(chatContent.title);
 
-				if (!$settings || Object.keys($settings).length === 0) {
-					await settings.set(safeParseStoredJson(localStorage.getItem('settings'), {}));
-				}
-
 				params = chatContent?.params ?? {};
+				activeAssistant = toChatAssistantSnapshot(chatContent?.assistant ?? null);
 				chatFiles = chatContent?.files ?? [];
 
 				void (async () => {
@@ -1672,9 +2033,7 @@
 		}
 	};
 
-	const createResponseAnimationController = (
-		message
-	): ResponseAnimationController => ({
+	const createResponseAnimationController = (message): ResponseAnimationController => ({
 		destroy() {},
 		enqueue(text: string) {
 			appendAnimatedMessageContent(message, text);
@@ -1811,13 +2170,11 @@
 
 		if ($chatId == chatId) {
 			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, chatId, {
-					models: selectedModels,
-					messages: messages,
-					history: history,
-					params: params,
-					files: chatFiles
-				});
+				chat = await updateChatById(
+					localStorage.token,
+					chatId,
+					buildPersistedChatData(history, messages)
+				);
 
 				currentChatPage.set(1);
 				await chats.set(await getChatList(localStorage.token, $currentChatPage));
@@ -1882,13 +2239,11 @@
 
 		if ($chatId == chatId) {
 			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, chatId, {
-					models: selectedModels,
-					messages: messages,
-					history: history,
-					params: params,
-					files: chatFiles
-				});
+				chat = await updateChatById(
+					localStorage.token,
+					chatId,
+					buildPersistedChatData(history, messages)
+				);
 
 				currentChatPage.set(1);
 				await chats.set(await getChatList(localStorage.token, $currentChatPage));
@@ -2589,12 +2944,11 @@
 			})
 			.filter((message) => message?.role === 'user' || message?.content?.trim());
 
-		const requestedWebSearchMode = (
+		const requestedWebSearchMode =
 			$config?.features?.enable_web_search &&
 			($user?.role === 'admin' || $user?.permissions?.features?.web_search)
-		)
-			? normalizeWebSearchMode(webSearchMode, 'off')
-			: 'off';
+				? normalizeWebSearchMode(webSearchMode, 'off')
+				: 'off';
 
 		const res = await generateOpenAIChatCompletion(
 			localStorage.token,
@@ -2643,8 +2997,7 @@
 							? codeInterpreterEnabled
 							: false,
 					web_search: requestedWebSearchMode !== 'off',
-					web_search_mode:
-						requestedWebSearchMode !== 'off' ? requestedWebSearchMode : undefined
+					web_search_mode: requestedWebSearchMode !== 'off' ? requestedWebSearchMode : undefined
 				},
 				variables: {
 					...getPromptVariables(
@@ -2999,7 +3352,9 @@
 			innerError.type === 'api_error' &&
 			('title' in innerError || 'content' in innerError)
 		) {
-			toast.error(`${innerError.title ?? innerError.content ?? $i18n.t('error.title.upstream_service_error_no_status')}`);
+			toast.error(
+				`${innerError.title ?? innerError.content ?? $i18n.t('error.title.upstream_service_error_no_status')}`
+			);
 			responseMessage.error = innerError;
 			responseMessage.done = true;
 
@@ -3173,10 +3528,7 @@
 			);
 
 			if (res && res.ok && res.body) {
-				const textStream = await createOpenAITextStream(
-					res.body,
-					$settings.splitLargeChunks
-				);
+				const textStream = await createOpenAITextStream(res.body, $settings.splitLargeChunks);
 				for await (const update of textStream) {
 					const { value, image, done, sources, error, usage } = update;
 					if (error || done) {
@@ -3215,13 +3567,10 @@
 			chat = await createNewChat(localStorage.token, {
 				id: _chatId,
 				title: $i18n.t('New Chat'),
-				models: selectedModels,
 				system: $settings.system ?? undefined,
-				params: params,
-				history: history,
-				messages: createMessagesList(history, history.currentId),
 				tags: [],
-				timestamp: Date.now()
+				timestamp: Date.now(),
+				...buildPersistedChatData(history)
 			});
 
 			_chatId = chat.id;
@@ -3245,13 +3594,7 @@
 	const saveChatHandler = async (_chatId, history) => {
 		if ($chatId == _chatId) {
 			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, _chatId, {
-					models: selectedModels,
-					history: history,
-					messages: createMessagesList(history, history.currentId),
-					params: params,
-					files: chatFiles
-				});
+				chat = await updateChatById(localStorage.token, _chatId, buildPersistedChatData(history));
 				currentChatPage.set(1);
 				await chats.set(await getChatList(localStorage.token, $currentChatPage));
 			}
@@ -3305,7 +3648,10 @@
 		{/if}
 
 		<PaneGroup direction="horizontal" class="w-full h-full">
-			<Pane defaultSize={50} class="h-full flex relative max-w-full min-w-0 flex-col overflow-hidden">
+			<Pane
+				defaultSize={50}
+				class="h-full flex relative max-w-full min-w-0 flex-col overflow-hidden"
+			>
 				<Navbar
 					bind:this={navbarElement}
 					chat={{
@@ -3315,6 +3661,7 @@
 							models: selectedModels,
 							system: $settings.system ?? undefined,
 							params: params,
+							assistant: activeAssistant ?? undefined,
 							history: history,
 							timestamp: Date.now()
 						}
@@ -3328,12 +3675,12 @@
 
 				<div class="flex flex-col flex-auto z-10 w-full min-w-0 @container">
 					{#if $settings?.landingPageMode === 'chat' || hasMessages}
-							<div
-								class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
-								id="messages-container"
-								bind:this={messagesContainerElement}
-								on:scroll={handleMessagesScroll}
-							>
+						<div
+							class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
+							id="messages-container"
+							bind:this={messagesContainerElement}
+							on:scroll={handleMessagesScroll}
+						>
 							<div class=" h-full w-full flex flex-col">
 								<Messages
 									chatId={$chatId}
@@ -3390,16 +3737,18 @@
 								bind:atSelectedModel
 								bind:reasoningEffort
 								bind:maxThinkingTokens
+								{activeAssistant}
+								onDeactivateAssistant={deactivateAssistant}
 								toolServers={$toolServers}
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
 								{stopResponse}
 								{createMessagePair}
 								onChange={(input) => {
 									// 反向同步: ThinkingControl → Controls(params)
-									const newRE = input.reasoningEffort ?? null;
-									const newMT = input.maxThinkingTokens ?? null;
-									const oldRE = params?.reasoning_effort ?? null;
-									const oldMT = params?.max_thinking_tokens ?? null;
+									const newRE = normalizeReasoningEffortValue(input.reasoningEffort ?? null);
+									const newMT = normalizeThinkingTokenValue(input.maxThinkingTokens ?? null);
+									const oldRE = normalizeReasoningEffortValue(params?.reasoning_effort ?? null);
+									const oldMT = normalizeThinkingTokenValue(params?.max_thinking_tokens ?? null);
 									if (newRE !== oldRE || newMT !== oldMT) {
 										const finalMT = newRE ? null : newMT;
 										_lastSyncedEffort = newRE;
@@ -3414,14 +3763,14 @@
 										{ webSearchMode: input.webSearchMode },
 										getPreferredDefaultWebSearchMode()
 									);
-									reasoningEffort = input.reasoningEffort ?? null;
-									maxThinkingTokens = input.maxThinkingTokens ?? null;
+									reasoningEffort = newRE;
+									maxThinkingTokens = newMT;
 									persistChatSessionState();
 
 									if (input.prompt) {
-										localStorage.setItem(`chat-input-${$chatId}`, JSON.stringify(input));
+										writeChatInputState(input, $chatId);
 									} else {
-										localStorage.removeItem(`chat-input-${$chatId}`);
+										removeChatInputState($chatId);
 									}
 								}}
 								on:upload={async (e) => {
@@ -3455,7 +3804,7 @@
 						</div>
 					{:else}
 						<div class="overflow-auto w-full h-full flex items-center">
-								<Placeholder
+							<Placeholder
 								{history}
 								{selectedModels}
 								bind:files
@@ -3469,6 +3818,9 @@
 								bind:atSelectedModel
 								bind:reasoningEffort
 								bind:maxThinkingTokens
+								{activeAssistant}
+								onActivateAssistant={activateAssistant}
+								onDeactivateAssistant={deactivateAssistant}
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
 								toolServers={$toolServers}
 								{stopResponse}

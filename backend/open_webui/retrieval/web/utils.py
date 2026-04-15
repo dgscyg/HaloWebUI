@@ -35,6 +35,8 @@ from open_webui.config import (
     FIRECRAWL_API_KEY,
     FIRECRAWL_TIMEOUT,
     TAVILY_API_KEY,
+    TAVILY_EXTRACT_API_BASE_URL,
+    TAVILY_EXTRACT_API_FORCE_MODE,
     TAVILY_EXTRACT_DEPTH,
 )
 from open_webui.env import SRC_LOG_LEVELS
@@ -287,6 +289,8 @@ class SafeTavilyLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
         web_paths: Union[str, List[str]],
         api_key: str,
         extract_depth: Literal["basic", "advanced"] = "basic",
+        api_base_url: Optional[str] = None,
+        force_mode: bool = False,
         continue_on_failure: bool = True,
         requests_per_second: Optional[float] = None,
         verify_ssl: bool = True,
@@ -320,6 +324,8 @@ class SafeTavilyLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
         self.web_paths = web_paths if isinstance(web_paths, list) else [web_paths]
         self.api_key = api_key
         self.extract_depth = extract_depth
+        self.api_base_url = api_base_url
+        self.force_mode = force_mode
         self.continue_on_failure = continue_on_failure
         self.verify_ssl = verify_ssl
         self.trust_env = trust_env
@@ -350,6 +356,8 @@ class SafeTavilyLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
                 urls=valid_urls,
                 api_key=self.api_key,
                 extract_depth=self.extract_depth,
+                api_base_url=self.api_base_url,
+                force_mode=self.force_mode,
                 continue_on_failure=self.continue_on_failure,
             )
             yield from loader.lazy_load()
@@ -382,6 +390,8 @@ class SafeTavilyLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
                 urls=valid_urls,
                 api_key=self.api_key,
                 extract_depth=self.extract_depth,
+                api_base_url=self.api_base_url,
+                force_mode=self.force_mode,
                 continue_on_failure=self.continue_on_failure,
             )
             async for document in loader.alazy_load():
@@ -655,6 +665,8 @@ def get_web_loader(
     elif WEB_LOADER_ENGINE.value == "tavily":
         WebLoaderClass = SafeTavilyLoader
         web_loader_args["api_key"] = TAVILY_API_KEY.value
+        web_loader_args["api_base_url"] = TAVILY_EXTRACT_API_BASE_URL.value
+        web_loader_args["force_mode"] = TAVILY_EXTRACT_API_FORCE_MODE.value
         web_loader_args["extract_depth"] = TAVILY_EXTRACT_DEPTH.value
 
     if WebLoaderClass:

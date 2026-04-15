@@ -83,6 +83,22 @@ def test_classify_file_upload_error_handles_embedding_timeout():
     assert diagnostic["code"] == "embedding_provider_unreachable"
 
 
+def test_classify_file_upload_error_preserves_provider_chain_failure_message():
+    diagnostic = classify_file_upload_error(
+        RuntimeError(
+            "Primary provider `open_mineru` failed: upstream timeout. "
+            "Fallback provider `local_default` was attempted. "
+            "Fallback failed: unsupported file."
+        ),
+        filename="report.pdf",
+        content_type="application/pdf",
+    )
+
+    assert diagnostic["code"] == "document_provider_fallback_failed"
+    assert "open_mineru" in diagnostic["message"]
+    assert "local_default" in diagnostic["message"]
+
+
 def test_cleanup_failed_uploaded_file_removes_collection_record_and_storage(monkeypatch):
     events: list[tuple[str, str]] = []
 

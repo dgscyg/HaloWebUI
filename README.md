@@ -64,13 +64,46 @@ docker run -d -p 3000:8080 \
   ghcr.io/ztx888/halowebui:main
 ```
 
-### Docker Compose
+### Docker Compose（默认推荐）
 
 ```bash
 docker compose up -d
 ```
 
 启动完成后访问 **http://localhost:3000** ，首次注册的用户自动成为管理员。
+
+### MCP stdio 说明
+
+- 官方 `main` 镜像是默认推荐版，内置了 `uv/uvx`、`node/npx` 与 `git`，可直接体验当前内置的常见 stdio MCP 预设，也兼容一部分通过 `uvx --from git+...` 安装的 MCP。
+- 官方 `slim` 镜像是极简版，不内置 `uv/uvx`、`node/npx`、`git` 等 stdio MCP 常用运行时，适合更在意镜像体积和依赖面的部署场景。
+- stdio MCP 命令运行在 HaloWebUI 服务端容器内，不是在浏览器或你的本机 shell 里执行。
+- 某些自定义 stdio MCP 会通过 Git 源安装（例如 `uvx --from git+https://...`）；这类配置除了 `uv/uvx` 之外还依赖 `git`。
+- MCP 配置保存后不会自动验证，需要进入对应配置并手动点击 `验证连接` / `重新验证`。
+- `docker exec` 进入容器后能运行某个命令，不代表临时 shell 路径一定适合长期配置为 MCP command；请优先使用镜像内稳定安装路径或服务主进程可见的常规 `PATH`，避免依赖 `fnm_multishells/...` 这类临时路径。
+- stdio MCP 本身不会长期常驻占用额外内存；额外内存主要来自实际启动的 MCP 子进程，空闲后会按系统配置自动回收。
+
+### Docker 运行（轻量版 slim）
+
+```bash
+docker run -d -p 3000:8080 \
+  --add-host=host.docker.internal:host-gateway \
+  -v open-webui:/app/backend/data \
+  --name halowebui \
+  --restart always \
+  ghcr.io/ztx888/halowebui:slim
+```
+
+### Docker Compose（轻量版 slim）
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.slim.yaml up -d
+```
+
+`slim` 适合：
+
+- 追求更小镜像
+- 不需要 stdio MCP 开箱体验
+- 愿意自行补充 Node.js / uv 等运行时
 
 <details>
 <summary><strong>⚙️ 常用环境变量</strong></summary>

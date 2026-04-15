@@ -6,10 +6,10 @@
 
 	const i18n = getContext('i18n') as Writable<i18nType>;
 
-	import { verifyOpenAIConnection } from '$lib/apis/openai';
-	import { verifyOllamaConnection } from '$lib/apis/ollama';
-	import { verifyGeminiConnection } from '$lib/apis/gemini';
-	import { verifyAnthropicConnection } from '$lib/apis/anthropic';
+	import { healthCheckOpenAIConnection, verifyOpenAIConnection } from '$lib/apis/openai';
+	import { healthCheckOllamaConnection, verifyOllamaConnection } from '$lib/apis/ollama';
+	import { healthCheckGeminiConnection, verifyGeminiConnection } from '$lib/apis/gemini';
+	import { healthCheckAnthropicConnection, verifyAnthropicConnection } from '$lib/apis/anthropic';
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import ConnectionAvatarPicker from '$lib/components/common/ConnectionAvatarPicker.svelte';
@@ -19,6 +19,9 @@
 	import Tags from './common/Tags.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
+	import ArrowPath from '$lib/components/icons/ArrowPath.svelte';
+	import Bolt from '$lib/components/icons/Bolt.svelte';
+	import Check from '$lib/components/icons/Check.svelte';
 	import Textarea from './common/Textarea.svelte';
 	import CollapsibleSection from '$lib/components/common/CollapsibleSection.svelte';
 	import ModelSelectorModal from '$lib/components/common/ModelSelectorModal.svelte';
@@ -42,8 +45,6 @@
 		use_responses_api?: boolean;
 		responses_api_exclude_patterns?: string[];
 		native_file_inputs_enabled?: boolean;
-		native_web_search_enabled?: boolean;
-		native_web_search_tool_type?: string;
 		// Anthropic-specific
 		anthropic_version?: string;
 		anthropic_beta?: string[];
@@ -120,9 +121,6 @@
 	let responsesApiExcludePatterns: Array<{ name: string }> = [{ name: 'gemini' }];
 	let nativeFileInputsEnabled = false;
 	let nativeFileInputsTouched = false;
-	let nativeWebSearchEnabled = false;
-	let nativeWebSearchToolType = 'web_search';
-	let nativeWebSearchTouched = false;
 
 	// Anthropic settings
 	let anthropicVersion = '2023-06-01';
@@ -183,7 +181,37 @@
 		prevModelManagementOpen = null;
 	}
 
+	type ModelHealthState = {
+		status: 'idle' | 'testing' | 'success' | 'error';
+		responseTimeMs?: number;
+		detail?: string;
+	};
+
+	type ProviderHealthCheckRequest =
+		| {
+				provider: 'openai';
+				connection: { url: string; key: string; config?: object };
+		  }
+		| {
+				provider: 'gemini';
+				connection: { url: string; key: string; config?: object };
+		  }
+		| {
+				provider: 'anthropic';
+				connection: { url: string; key: string; config?: object };
+		  }
+		| {
+				provider: 'ollama';
+				connection: { url: string; key?: string; config?: object };
+		  };
+
+	const BATCH_HEALTH_CHECK_DELAY_MS = 300;
+
 	let loading = false;
+	let batchHealthChecking = false;
+	let batchHealthProgress = { current: 0, total: 0 };
+	let modelHealthStates: Record<string, ModelHealthState> = {};
+	let modelHealthContextKey = '';
 	let showModelSelector = false;
 	let showNoModelsConfirm = false;
 
@@ -309,10 +337,13 @@
 		!ollama &&
 		(inputUrl || '').trim().replace(/\/+$/, '').endsWith(OPENAI_CHAT_COMPLETIONS_SUFFIX);
 
-	const showConnectionErrorToast = (error: unknown) => {
-		const { title, description } = formatConnectionErrorToast(error, (key, options) =>
+	const describeConnectionErrorToast = (error: unknown) =>
+		formatConnectionErrorToast(error, (key, options) =>
 			$i18n.t(key, options)
 		);
+
+	const showConnectionErrorToast = (error: unknown) => {
+		const { title, description } = describeConnectionErrorToast(error);
 
 		toast.error(title, {
 			...(description ? { description } : {}),
@@ -338,27 +369,6 @@
 
 	const isOfficialOpenAIHostname = (hostname: string) =>
 		hostname === 'api.openai.com' || hostname.endsWith('.openai.com');
-
-	const isOfficialGeminiHostname = (hostname: string) =>
-		hostname === 'generativelanguage.googleapis.com';
-
-	const getDefaultNativeWebSearchEnabled = () => {
-		if (ollama || direct || anthropic) {
-			return false;
-		}
-
-		if (gemini) {
-			const hostname = getHostname(url || 'https://generativelanguage.googleapis.com/v1beta');
-			return isOfficialGeminiHostname(hostname);
-		}
-
-		if (azure) {
-			return false;
-		}
-
-		const hostname = getHostname(url || 'https://api.openai.com/v1');
-		return isOfficialOpenAIHostname(hostname);
-	};
 
 	const getDefaultNativeFileInputsEnabled = () => {
 		if (ollama || direct || anthropic || gemini || azure || isForceMode) {
@@ -453,108 +463,165 @@
 		}
 	})();
 
-	$: showNativeWebSearchToggle = !ollama && !direct && !anthropic;
 	$: isOfficialOpenAIConnection = !gemini && !anthropic && !ollama && !direct && !azure
 		? isOfficialOpenAIHostname(getHostname(url || 'https://api.openai.com/v1'))
 		: false;
-	$: showNativeWebSearchToolType =
-		!ollama && !direct && !gemini && !anthropic && !azure && !isOfficialOpenAIConnection;
 	$: showNativeFileInputsToggle =
 		!ollama && !direct && !gemini && !anthropic && !azure && !isForceMode && useResponsesApi;
-	$: nativeWebSearchPreview = (() => {
-		if (!showNativeWebSearchToggle) {
+	$: if (show && !nativeFileInputsTouched) {
+		nativeFileInputsEnabled = getDefaultNativeFileInputsEnabled();
+	}
+
+	const parseHeadersInput = (): Record<string, string> | null | undefined => {
+		if (!headers) return undefined;
+
+		try {
+			const parsed = JSON.parse(headers);
+			if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+				throw new Error('Headers must be a valid JSON object');
+			}
+
+			headers = JSON.stringify(parsed, null, 2);
+			return parsed as Record<string, string>;
+		} catch (error) {
+			toast.error($i18n.t('Headers must be a valid JSON object'));
+			return null;
+		}
+	};
+
+	const getOpenAIConnectionConfig = (parsedHeaders?: Record<string, string>) => ({
+		...(direct && preserveEmptyPrefixId
+			? { prefix_id: '' }
+			: prefixId.trim()
+				? { prefix_id: prefixId.trim() }
+				: {}),
+		force_mode: isForceMode,
+		auth_type,
+		...(azure ? { azure: true } : {}),
+		...(apiVersion ? { api_version: apiVersion } : {}),
+		...(parsedHeaders ? { headers: parsedHeaders } : {}),
+		...(!ollama && !gemini && !anthropic && !isForceMode && useResponsesApi
+			? {
+					use_responses_api: true,
+					responses_api_exclude_patterns: responsesApiExcludePatterns
+						.map((p) => p.name)
+						.filter((p) => p.trim())
+				}
+			: {}),
+		...(!ollama && !direct && !gemini && !anthropic && !azure && !isForceMode && useResponsesApi
+			? {
+					native_file_inputs_enabled: nativeFileInputsEnabled
+				}
+			: {})
+	});
+
+	const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+	const updateModelHealthState = (modelId: string, nextState: ModelHealthState) => {
+		modelHealthStates = {
+			...modelHealthStates,
+			[modelId]: nextState
+		};
+	};
+
+	const getModelHealthState = (modelId: string): ModelHealthState =>
+		modelHealthStates[modelId] ?? { status: 'idle' };
+
+	const getModelNameTooltip = (modelId: string) => modelId;
+
+	const getModelHealthActionTooltip = (modelId: string) => {
+		const state = getModelHealthState(modelId);
+		if (state.status === 'testing') {
+			return $i18n.t('Testing model...');
+		}
+		return $i18n.t('Test Model');
+	};
+
+	const buildOpenAIHealthCheckPayload = () => {
+		const parsedOpenAIHeaders = parseHeadersInput();
+		if (headers && parsedOpenAIHeaders === null) return null;
+
+		return {
+			url: normalizedUrl,
+			key,
+			config: getOpenAIConnectionConfig(parsedOpenAIHeaders ?? undefined)
+		};
+	};
+
+	const buildGeminiHealthCheckPayload = () => {
+		const parsedGeminiHeaders = parseHeadersInput();
+		if (headers && parsedGeminiHeaders === null) return null;
+
+		return {
+			url: normalizedUrl,
+			key,
+			config: {
+				auth_type,
+				...(prefixId.trim() ? { prefix_id: prefixId.trim() } : {}),
+				...(parsedGeminiHeaders ? { headers: parsedGeminiHeaders } : {})
+			}
+		};
+	};
+
+	const buildAnthropicHealthCheckPayload = () => {
+		const parsedAnthropicHeaders = parseHeadersInput();
+		if (headers && parsedAnthropicHeaders === null) return null;
+		if (anthropicExtraBody && !parsedAnthropicExtraBody) {
+			toast.error($i18n.t('Anthropic extra params must be a valid JSON object'));
 			return null;
 		}
 
-		if (azure) {
+		return {
+			url: normalizedUrl,
+			key,
+			config: {
+				auth_type,
+				...(prefixId.trim() ? { prefix_id: prefixId.trim() } : {}),
+				anthropic_version: anthropicVersion,
+				anthropic_beta: anthropicBetas.map((b) => b.name).filter((b) => b.trim()),
+				use_files_api: useFilesApi,
+				files_auto_attach: filesAutoAttach,
+				files_cache_ttl: filesCacheTtl,
+				files_citations: filesCitations,
+				...(parsedAnthropicExtraBody
+					? { anthropic_extra_body: parsedAnthropicExtraBody }
+					: {}),
+				...(parsedAnthropicHeaders ? { headers: parsedAnthropicHeaders } : {})
+			}
+		};
+	};
+
+	const buildOllamaHealthCheckPayload = () => ({
+		url: normalizedUrl,
+		key,
+		config: {
+			...(prefixId.trim() ? { prefix_id: prefixId.trim() } : {})
+		}
+	});
+
+	const buildHealthCheckRequest = (): ProviderHealthCheckRequest | null => {
+		if (direct) return null;
+
+		if (ollama) {
 			return {
-				tone: 'slate',
-				label: $i18n.t('Unavailable'),
-				description: $i18n.t(
-					'Azure OpenAI endpoints do not expose this model-native web search path in HaloWebUI.'
-				)
+				provider: 'ollama',
+				connection: buildOllamaHealthCheckPayload()
 			};
 		}
 
 		if (gemini) {
-			const official = isOfficialGeminiHostname(
-				getHostname(url || 'https://generativelanguage.googleapis.com/v1beta')
-			);
-			if (nativeWebSearchEnabled) {
-				return official
-					? {
-							tone: 'green',
-							label: $i18n.t('Official Default'),
-							description: $i18n.t(
-								'Official Gemini endpoints are detected automatically, so chat mode can use model-native web search right away.'
-							)
-						}
-					: {
-							tone: 'green',
-							label: $i18n.t('Manually Enabled'),
-							description: $i18n.t(
-								'This compatible Gemini endpoint will be treated as native-web-search capable. Native mode can now actively try the upstream built-in search tool.'
-							)
-						};
-			}
-
-			return official
-				? {
-						tone: 'slate',
-						label: $i18n.t('Manually Disabled'),
-						description: $i18n.t(
-							'This official Gemini endpoint was detected, but native web search is currently disabled for this connection.'
-						)
-					}
-				: {
-						tone: 'amber',
-						label: $i18n.t('Unverified'),
-						description: $i18n.t(
-							'This compatible Gemini endpoint is not verified yet. Leave it off for safe fallback behavior, or enable it if the upstream supports built-in search tools.'
-						)
-					};
+			const connection = buildGeminiHealthCheckPayload();
+			return connection ? { provider: 'gemini', connection } : null;
 		}
 
-		if (nativeWebSearchEnabled) {
-			return isOfficialOpenAIConnection
-				? {
-						tone: 'green',
-						label: $i18n.t('Official Default'),
-						description: $i18n.t(
-							'Official OpenAI endpoints are detected automatically, so chat mode can use model-native web search right away.'
-						)
-					}
-				: {
-						tone: 'green',
-						label: $i18n.t('Manually Enabled'),
-						description: $i18n.t(
-							'This compatible OpenAI endpoint will be treated as native-web-search capable. Native mode can now actively try the upstream built-in search tool.'
-						)
-					};
+		if (anthropic) {
+			const connection = buildAnthropicHealthCheckPayload();
+			return connection ? { provider: 'anthropic', connection } : null;
 		}
 
-		return isOfficialOpenAIConnection
-			? {
-					tone: 'slate',
-					label: $i18n.t('Manually Disabled'),
-					description: $i18n.t(
-						'This official OpenAI endpoint was detected, but native web search is currently disabled for this connection.'
-					)
-				}
-			: {
-					tone: 'amber',
-					label: $i18n.t('Unverified'),
-					description: $i18n.t(
-						'This compatible OpenAI endpoint is not verified yet. Leave it off for safe fallback behavior, or enable it if the upstream supports built-in search tools.'
-					)
-				};
-	})();
-	$: if (show && showNativeWebSearchToggle && !nativeWebSearchTouched) {
-		nativeWebSearchEnabled = getDefaultNativeWebSearchEnabled();
-	}
-	$: if (show && !nativeFileInputsTouched) {
-		nativeFileInputsEnabled = getDefaultNativeFileInputsEnabled();
-	}
+		const connection = buildOpenAIHealthCheckPayload();
+		return connection ? { provider: 'openai', connection } : null;
+	};
 
 	const verifyOllamaHandler = async () => {
 		const verifyUrl = normalizedUrl;
@@ -573,22 +640,8 @@
 
 	const verifyOpenAIHandler = async () => {
 		const verifyUrl = normalizedUrl;
-
-		let _headers = null;
-
-		if (headers) {
-			try {
-				_headers = JSON.parse(headers);
-				if (typeof _headers !== 'object' || Array.isArray(_headers)) {
-					_headers = null;
-					throw new Error('Headers must be a valid JSON object');
-				}
-				headers = JSON.stringify(_headers, null, 2);
-			} catch (error) {
-				toast.error($i18n.t('Headers must be a valid JSON object'));
-				return;
-			}
-		}
+		const parsedOpenAIHeaders = parseHeadersInput();
+		if (headers && parsedOpenAIHeaders === null) return;
 
 		const res = await verifyOpenAIConnection(
 			localStorage.token,
@@ -596,13 +649,7 @@
 				url: verifyUrl,
 				key,
 				purpose: 'connection',
-				config: {
-					force_mode: isForceMode,
-					auth_type,
-					azure: azure,
-					...(apiVersion ? { api_version: apiVersion } : {}),
-					...(_headers ? { headers: _headers } : {})
-				}
+				config: getOpenAIConnectionConfig(parsedOpenAIHeaders ?? undefined)
 			},
 			direct
 		).catch((error) => {
@@ -613,6 +660,189 @@
 			toast.success($i18n.t('Server connection verified'));
 		}
 	};
+
+	const runModelHealthCheck = async (
+		modelId: string,
+		options: {
+			silentToast?: boolean;
+			healthCheckRequest?: ProviderHealthCheckRequest;
+		} = {}
+	) => {
+		if (!modelId || direct) return false;
+
+		const request = options.healthCheckRequest ?? buildHealthCheckRequest();
+		if (!request) return false;
+
+		updateModelHealthState(modelId, { status: 'testing' });
+
+		try {
+			let result;
+			if (request.provider === 'openai') {
+				result = await healthCheckOpenAIConnection(localStorage.token, {
+					...request.connection,
+					model: modelId
+				});
+			} else if (request.provider === 'gemini') {
+				result = await healthCheckGeminiConnection(localStorage.token, {
+					...request.connection,
+					model: modelId
+				});
+			} else if (request.provider === 'anthropic') {
+				result = await healthCheckAnthropicConnection(localStorage.token, {
+					...request.connection,
+					model: modelId
+				});
+			} else {
+				result = await healthCheckOllamaConnection(localStorage.token, {
+					...request.connection,
+					model: modelId
+				});
+			}
+
+			updateModelHealthState(modelId, {
+				status: 'success',
+				responseTimeMs: result?.response_time_ms ?? 0
+			});
+
+			if (!options.silentToast) {
+				toast.success(
+					$i18n.t('Model test passed: {{model}} ({{time}}ms)', {
+						model: result?.model ?? modelId,
+						time: result?.response_time_ms ?? 0
+					})
+				);
+			}
+
+			return true;
+		} catch (error) {
+			const { title, description } = describeConnectionErrorToast(error);
+			updateModelHealthState(modelId, {
+				status: 'error',
+				detail: description ? `${title} ${description}` : title
+			});
+
+			if (!options.silentToast) {
+				toast.error(title, {
+					...(description ? { description } : {}),
+					duration: description ? 6000 : 4000
+				});
+			}
+
+			return false;
+		}
+	};
+
+	const runBatchHealthCheck = async () => {
+		if (modelIds.length === 0 || batchHealthChecking || direct) {
+			return;
+		}
+
+		const sharedRequest = buildHealthCheckRequest();
+		if (!sharedRequest) return;
+
+		batchHealthChecking = true;
+		batchHealthProgress = { current: 0, total: modelIds.length };
+
+		if (modelIds.length > 5) {
+			toast.info($i18n.t('Selected model batch tests run sequentially to reduce rate-limit risk.'), {
+				duration: 4000
+			});
+		}
+
+		let passed = 0;
+		const failed: string[] = [];
+
+		try {
+			for (const [index, modelId] of modelIds.entries()) {
+				batchHealthProgress = { current: index + 1, total: modelIds.length };
+				const ok = await runModelHealthCheck(modelId, {
+					silentToast: true,
+					healthCheckRequest: sharedRequest
+				});
+
+				if (ok) {
+					passed += 1;
+				} else {
+					failed.push(modelId);
+				}
+
+				if (index < modelIds.length - 1) {
+					await sleep(BATCH_HEALTH_CHECK_DELAY_MS);
+				}
+			}
+		} finally {
+			batchHealthChecking = false;
+			batchHealthProgress = { current: 0, total: 0 };
+		}
+
+		if (failed.length === 0) {
+			toast.success(
+				$i18n.t('Batch model test passed: {{passed}}/{{total}}', {
+					passed,
+					total: modelIds.length
+				})
+			);
+		} else if (passed > 0) {
+			toast.warning(
+				$i18n.t('Batch model test finished: {{passed}}/{{total}} passed', {
+					passed,
+					total: modelIds.length
+				}),
+				{
+					description: failed.join(', '),
+					duration: 6000
+				}
+			);
+		} else {
+			toast.error($i18n.t('Batch model test failed for all selected models'), {
+				description: failed.join(', '),
+				duration: 6000
+			});
+		}
+	};
+
+	$: {
+		const allowedModels = new Set(modelIds);
+		const filteredStates = Object.fromEntries(
+			Object.entries(modelHealthStates).filter(([modelId]) => allowedModels.has(modelId))
+		);
+		if (Object.keys(filteredStates).length !== Object.keys(modelHealthStates).length) {
+			modelHealthStates = filteredStates;
+		}
+	}
+
+	$: {
+		const nextContextKey = JSON.stringify({
+			url: normalizedUrl,
+			key,
+			ollama,
+			gemini,
+			anthropic,
+			auth_type,
+			prefixId,
+			azure,
+			apiVersion,
+			headers,
+			isForceMode,
+			useResponsesApi,
+			modelIds,
+			anthropicVersion,
+			anthropicBetas,
+			useFilesApi,
+			filesAutoAttach,
+			filesCacheTtl,
+			filesCitations,
+			anthropicExtraBody
+		});
+
+		if (modelHealthContextKey && modelHealthContextKey !== nextContextKey) {
+			modelHealthStates = {};
+			batchHealthChecking = false;
+			batchHealthProgress = { current: 0, total: 0 };
+		}
+
+		modelHealthContextKey = nextContextKey;
+	}
 
 	const verifyGeminiHandler = async () => {
 		const verifyUrl = normalizedUrl;
@@ -812,18 +1042,6 @@
 							}
 						: {}),
 					...(!ollama && azure ? { azure: true, ...(apiVersion ? { api_version: apiVersion } : {}) } : {}),
-						...(!ollama && !direct && !anthropic && !azure
-							? {
-									native_web_search_enabled: nativeWebSearchEnabled
-								}
-							: {}),
-					...(showNativeWebSearchToolType &&
-					nativeWebSearchEnabled &&
-					nativeWebSearchToolType.trim()
-						? {
-								native_web_search_tool_type: nativeWebSearchToolType.trim()
-							}
-						: {}),
 					...(!ollama && !gemini && !anthropic && !direct && !azure && !isForceMode && useResponsesApi
 						? {
 								native_file_inputs_enabled: nativeFileInputsEnabled
@@ -877,9 +1095,6 @@
 			responsesApiExcludePatterns = [{ name: 'gemini' }];
 			nativeFileInputsEnabled = false;
 			nativeFileInputsTouched = false;
-			nativeWebSearchEnabled = false;
-			nativeWebSearchToolType = 'web_search';
-			nativeWebSearchTouched = false;
 			anthropicVersion = '2023-06-01';
 			anthropicVersionMode = '2023-06-01';
 			anthropicCustomVersion = '2023-06-01';
@@ -901,6 +1116,11 @@
 	};
 
 	const init = () => {
+		batchHealthChecking = false;
+		batchHealthProgress = { current: 0, total: 0 };
+		modelHealthStates = {};
+		modelHealthContextKey = '';
+
 		if (connection) {
 			const shouldRestoreForceMode =
 				connection.config?.force_mode === true || isLegacyForceModeUrl(connection.url);
@@ -942,9 +1162,6 @@
 					responsesApiExcludePatterns = [{ name: 'gemini' }];
 					nativeFileInputsEnabled = false;
 					nativeFileInputsTouched = false;
-					nativeWebSearchEnabled = false;
-					nativeWebSearchToolType = 'web_search';
-					nativeWebSearchTouched = false;
 
 					const v = (connection.config?.anthropic_version ?? '2023-06-01').toString();
 					anthropicVersion = v;
@@ -984,20 +1201,6 @@
 						nativeFileInputsEnabled = getDefaultNativeFileInputsEnabled();
 						nativeFileInputsTouched = false;
 					}
-					nativeWebSearchToolType =
-						connection.config?.native_web_search_tool_type?.toString().trim() || 'web_search';
-					if (
-						Object.prototype.hasOwnProperty.call(
-							connection.config ?? {},
-							'native_web_search_enabled'
-						)
-					) {
-						nativeWebSearchEnabled = connection.config?.native_web_search_enabled ?? false;
-						nativeWebSearchTouched = true;
-					} else {
-						nativeWebSearchEnabled = getDefaultNativeWebSearchEnabled();
-						nativeWebSearchTouched = false;
-					}
 				}
 			}
 			if (!connection.config?.azure) {
@@ -1027,9 +1230,6 @@
 			preserveEmptyPrefixId = false;
 			nativeFileInputsEnabled = false;
 			nativeFileInputsTouched = false;
-			nativeWebSearchEnabled = getDefaultNativeWebSearchEnabled();
-			nativeWebSearchToolType = 'web_search';
-			nativeWebSearchTouched = false;
 		}
 
 		// Default UX: start with Basic + Model Management visible, Advanced collapsed.
@@ -1311,30 +1511,84 @@
 										>
 									{/if}
 								</div>
-								<button
-									type="button"
-									class="px-3 py-1.5 text-sm font-medium bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition"
-									on:click={() => (showModelSelector = true)}
-								>
-									{$i18n.t('Manage Models')}
-								</button>
+								<div class="flex items-center gap-2">
+									{#if !direct}
+										<Tooltip
+											content={modelIds.length === 0
+												? $i18n.t('Please add models in Model Management')
+												: $i18n.t('Sequentially test selected models')}
+										>
+											<button
+												type="button"
+												class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+												on:click={runBatchHealthCheck}
+												disabled={batchHealthChecking || modelIds.length === 0}
+											>
+												{#if batchHealthChecking}
+													<Spinner className="size-3.5" />
+													<span>
+														{$i18n.t('Testing selected models: {{current}}/{{total}}', batchHealthProgress)}
+													</span>
+												{:else}
+													<ArrowPath className="size-3.5" />
+													<span>{$i18n.t('Test Selected')}</span>
+												{/if}
+											</button>
+										</Tooltip>
+									{/if}
+									<button
+										type="button"
+										class="px-3 py-1.5 text-sm font-medium bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition"
+										on:click={() => (showModelSelector = true)}
+									>
+										{$i18n.t('Manage Models')}
+									</button>
+								</div>
 							</div>
 
 							{#if modelIds.length > 0}
 								<div class="flex flex-wrap gap-1.5">
-									{#each modelIds.slice(0, 5) as modelId}
-										<span
-											class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-800 rounded-md truncate max-w-32"
+									{#each modelIds as modelId}
+										{@const state = getModelHealthState(modelId)}
+										<div
+											class="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs max-w-44 {state.status === 'success'
+												? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300'
+												: state.status === 'error'
+													? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-300'
+													: 'border-gray-200 bg-gray-100 text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'}"
 										>
-											{modelId}
-										</span>
+											<Tooltip content={getModelNameTooltip(modelId)}>
+												<span class="truncate max-w-28">{modelId}</span>
+											</Tooltip>
+											{#if !direct}
+												<Tooltip content={getModelHealthActionTooltip(modelId)}>
+													<button
+														type="button"
+														class="inline-flex items-center justify-center rounded p-0.5 hover:bg-black/5 dark:hover:bg-white/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
+														on:click={() => runModelHealthCheck(modelId)}
+														disabled={batchHealthChecking || state.status === 'testing'}
+														aria-label={$i18n.t('Test this model')}
+													>
+														{#if state.status === 'testing'}
+															<Spinner className="size-3" />
+														{:else if state.status === 'success'}
+															<Check className="size-3 text-emerald-600 dark:text-emerald-400" />
+														{:else if state.status === 'error'}
+															<XMark className="size-3 text-rose-600 dark:text-rose-400" />
+														{:else}
+															<Bolt className="size-3 text-gray-500 dark:text-gray-400" />
+														{/if}
+													</button>
+												</Tooltip>
+											{/if}
+										</div>
 									{/each}
-									{#if modelIds.length > 5}
-										<span class="px-2 py-1 text-xs text-gray-500">
-											{$i18n.t('+{{count}} more', { count: modelIds.length - 5 })}
-										</span>
-									{/if}
 								</div>
+								{#if !direct}
+									<div class="text-xs text-gray-400">
+										{$i18n.t('Single model tests use the chip action. Batch tests run sequentially to reduce rate-limit risk.')}
+									</div>
+								{/if}
 							{:else if azure}
 								<div class="text-xs text-amber-600 dark:text-amber-400">
 									{$i18n.t('Deployment names are required for Azure OpenAI')}
@@ -1680,88 +1934,6 @@
 												'Usually not required. HaloWebUI only uses api-version when it needs to fall back to legacy Azure deployment paths.'
 											)}
 										</div>
-									</div>
-								{/if}
-
-								{#if showNativeWebSearchToggle}
-									<div
-										class="bg-gray-50 dark:bg-gray-850 rounded-xl p-3 space-y-3 border border-gray-200 dark:border-gray-700"
-									>
-										<div
-											class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide"
-										>
-											{$i18n.t('模型原生联网搜索')}
-										</div>
-											<div class="flex items-center justify-between">
-												<div>
-													<div class="text-sm font-medium">
-														{$i18n.t('启用模型原生联网搜索')}
-													</div>
-												<div class="text-xs text-gray-400 mt-0.5">
-													{#if gemini}
-														{$i18n.t(
-															'官方 Gemini 连接默认开启。其他 Gemini 兼容端点需要你手动开启。'
-														)}
-													{:else}
-														{$i18n.t(
-															'官方 OpenAI 连接默认开启。OpenAI 兼容网关或代理需要你手动开启。'
-														)}
-													{/if}
-												</div>
-											</div>
-												{#if azure}
-													<div class="text-xs font-medium text-gray-400 dark:text-gray-500">
-														{$i18n.t('Unavailable')}
-													</div>
-												{:else}
-													<Switch
-														state={nativeWebSearchEnabled}
-														on:change={(e) => {
-															nativeWebSearchEnabled = e.detail;
-															nativeWebSearchTouched = true;
-														}}
-													/>
-												{/if}
-											</div>
-											{#if nativeWebSearchPreview}
-												<div
-													class="rounded-lg px-3 py-2 text-xs leading-5 {nativeWebSearchPreview.tone === 'green'
-														? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
-														: nativeWebSearchPreview.tone === 'amber'
-															? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
-															: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}"
-												>
-													<div class="font-medium">{nativeWebSearchPreview.label}</div>
-													<div>{nativeWebSearchPreview.description}</div>
-												</div>
-											{/if}
-
-											{#if showNativeWebSearchToolType && nativeWebSearchEnabled}
-												<div class="flex flex-col">
-												<label
-													for="native-web-search-tool-type"
-													class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-												>
-													{$i18n.t('兼容代理工具类型')}
-												</label>
-												<input
-													id="native-web-search-tool-type"
-													class="w-full px-3 py-2 text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg focus:outline-none"
-													type="text"
-													bind:value={nativeWebSearchToolType}
-													on:input={() => {
-														nativeWebSearchTouched = true;
-													}}
-													placeholder="web_search"
-													autocomplete="off"
-												/>
-												<div class="text-xs text-gray-400 mt-1">
-													{$i18n.t(
-														'只有兼容代理/网关把内置联网工具名改掉时才需要填，标准 OpenAI 一般不用填。位置就在当前连接的高级设置里。'
-													)}
-												</div>
-											</div>
-										{/if}
 									</div>
 								{/if}
 

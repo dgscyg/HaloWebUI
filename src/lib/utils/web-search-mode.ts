@@ -32,7 +32,6 @@ export function normalizeWebSearchMode(
 
 export function getPreferredWebSearchMode(
 	settingsValue: { webSearchMode?: unknown; webSearch?: unknown } | null | undefined,
-	configValue: { features?: { default_web_search_mode?: unknown } } | null | undefined,
 	fallback: WebSearchMode = 'off'
 ): WebSearchMode {
 	if (settingsValue && settingsValue.webSearchMode !== undefined && settingsValue.webSearchMode !== null) {
@@ -43,8 +42,7 @@ export function getPreferredWebSearchMode(
 		return 'halo';
 	}
 
-	const backendDefault = configValue?.features?.default_web_search_mode;
-	return normalizeWebSearchMode(backendDefault, fallback);
+	return fallback;
 }
 
 export function isWebSearchEnabled(mode: WebSearchMode | null | undefined): boolean {

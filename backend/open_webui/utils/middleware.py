@@ -49,10 +49,16 @@ from open_webui.routers.retrieval import (
 )
 from open_webui.routers.images import image_generations, GenerateImageForm
 from open_webui.routers.openai import (
-    _connection_supports_native_file_inputs,
+    NATIVE_FILE_INPUT_STATUS_DISABLED_BY_CONFIG,
+    NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
+    NATIVE_FILE_INPUT_STATUS_SUPPORTED,
+    NATIVE_FILE_INPUT_STATUS_UPLOAD_FAILED,
+    NATIVE_FILE_INPUT_STATUS_UPSTREAM_REJECTED,
     _get_cached_openai_file_id,
+    _get_native_file_input_capability,
     _get_openai_file_cache_key,
     _get_openai_user_config,
+    _probe_responses_support_for_native_file_inputs,
     _set_cached_openai_file_id,
     _resolve_openai_connection_by_model_id,
     _should_use_responses_api,
@@ -71,19 +77,27 @@ from open_webui.models.functions import Functions
 from open_webui.models.models import Models
 
 from open_webui.retrieval.utils import get_sources_from_files
-from open_webui.retrieval.runtime import ensure_reranking_runtime
+from open_webui.retrieval.runtime import get_safe_reranking_runtime
 from open_webui.retrieval.document_processing import (
+    DOCUMENT_PROVIDER_LOCAL_DEFAULT,
     FILE_PROCESSING_MODE_FULL_CONTEXT,
     FILE_PROCESSING_MODE_NATIVE_FILE,
     FILE_PROCESSING_MODE_RETRIEVAL,
     get_file_effective_processing_mode,
     get_requested_processing_mode_for_file_item,
+    normalize_document_provider,
     normalize_file_processing_mode,
 )
+from open_webui.storage.provider import Storage
 
 
 from open_webui.utils.chat import generate_chat_completion
-from open_webui.utils.native_web_search import build_native_web_search_support
+from open_webui.utils.native_web_search import (
+    build_native_web_search_support,
+    resolve_effective_native_web_search_support,
+    strip_model_prefix,
+)
+from open_webui.utils.payload import merge_additive_payload_fields
 from open_webui.utils.task import (
     get_task_model_id,
     rag_template,
@@ -99,10 +113,15 @@ from open_webui.utils.misc import (
     prepend_to_first_user_message_content,
     convert_logit_bias_input_to_json,
 )
-from open_webui.utils.tools import get_tools, get_tool_servers_data
+from open_webui.utils.tools import (
+    get_tools,
+    get_tool_servers_data,
+    validate_tool_ids_access,
+)
 from open_webui.utils.mcp import (
     build_mcp_app_resource_proxy_path,
     extract_selected_mcp_indices,
+    get_mcp_servers_cached_data,
     get_mcp_servers_data,
 )
 from open_webui.utils.builtin_tools import get_builtin_tools
@@ -938,9 +957,13 @@ _NATIVE_WEB_SEARCH_RETRY_PATTERNS = (
 )
 
 _NATIVE_FILE_INPUT_RETRY_PATTERNS = (
+    "native file inputs request failed",
+    "native file inputs",
     "input_file",
     "file_id",
     "files api",
+    "responses api",
+    "/responses",
     "invalid file",
     "unsupported file",
     "unsupported document",
@@ -1093,11 +1116,19 @@ def _resolve_native_web_search_support(
                 "can_attempt": False,
             }
 
-        support = build_native_web_search_support(
+        connection_support = build_native_web_search_support(
             "openai",
             url=url,
             api_config=api_config,
             connection_name=model.get("connection_name"),
+        )
+        support = resolve_effective_native_web_search_support(
+            connection_support,
+            provider="openai",
+            model_id=model.get("original_id") or strip_model_prefix(
+                model_id, api_config.get("_resolved_prefix_id")
+            ),
+            model_name=model.get("name") or "",
         )
         support["url"] = url
         support["api_config"] = api_config
@@ -1128,17 +1159,30 @@ def _resolve_native_web_search_support(
                 "can_attempt": False,
             }
 
-        support = build_native_web_search_support(
+        connection_support = build_native_web_search_support(
             "gemini",
             url=url,
             api_config=api_config,
             connection_name=model.get("connection_name"),
         )
+        support = resolve_effective_native_web_search_support(
+            connection_support,
+            provider="gemini",
+            model_id=model.get("original_id") or strip_model_prefix(
+                model_id, api_config.get("_resolved_prefix_id")
+            ),
+            model_name=model.get("name") or "",
+        )
         support["url"] = url
         support["api_config"] = api_config
         return support
 
-    return build_native_web_search_support(provider or "unknown")
+    return resolve_effective_native_web_search_support(
+        build_native_web_search_support(provider or "unknown"),
+        provider=provider or "unknown",
+        model_id=model.get("original_id") or model_id,
+        model_name=model.get("name") or "",
+    )
 
 
 def _resolve_web_search_strategy(
@@ -1389,6 +1433,243 @@ def _merge_message_content_with_native_file_inputs(
     return parts
 
 
+def _get_native_file_input_diagnostics(metadata: dict) -> dict[str, dict[str, Any]]:
+    diagnostics = metadata.get("native_file_input_diagnostics")
+    if isinstance(diagnostics, dict):
+        return diagnostics
+
+    diagnostics = {}
+    metadata["native_file_input_diagnostics"] = diagnostics
+    return diagnostics
+
+
+def _build_native_file_input_diagnostic(
+    status: str,
+    *,
+    reason: str,
+    message: str,
+    detail: Optional[str] = None,
+    source: str = "",
+) -> dict[str, Any]:
+    diagnostic = {
+        "status": status,
+        "reason": reason,
+        "message": message,
+    }
+    if detail:
+        diagnostic["detail"] = detail
+    if source:
+        diagnostic["source"] = source
+    return diagnostic
+
+
+def _set_native_file_input_diagnostic(
+    metadata: dict,
+    *,
+    file_id: str,
+    file_name: str,
+    diagnostic: dict[str, Any],
+) -> None:
+    diagnostics = _get_native_file_input_diagnostics(metadata)
+    diagnostics[file_id] = {
+        "file_id": file_id,
+        "file_name": file_name,
+        **diagnostic,
+    }
+
+
+def _get_native_file_input_diagnostic(
+    metadata: dict,
+    file_id: str,
+) -> Optional[dict[str, Any]]:
+    diagnostics = metadata.get("native_file_input_diagnostics")
+    if not isinstance(diagnostics, dict):
+        return None
+    value = diagnostics.get(file_id)
+    return value if isinstance(value, dict) else None
+
+
+def _native_file_provider_display_name(provider: str) -> str:
+    normalized = str(provider or "").strip().lower()
+    if normalized == DOCUMENT_PROVIDER_LOCAL_DEFAULT:
+        return "local document parsing"
+    if not normalized:
+        return "document parsing"
+    return normalized
+
+
+def _join_processing_notices(*parts: Optional[str]) -> Optional[str]:
+    normalized_parts: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        text = str(part or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized_parts.append(text)
+    return " ".join(normalized_parts) if normalized_parts else None
+
+
+def _build_native_file_input_fallback_message(
+    diagnostic: dict[str, Any],
+    *,
+    file_name: Optional[str] = None,
+    fallback_provider: Optional[str] = None,
+    used_cached_context: bool = False,
+) -> str:
+    base_message = str(
+        diagnostic.get("message") or "Native file inputs could not be used."
+    ).strip()
+    display_name = str(file_name or diagnostic.get("file_name") or "").strip()
+    if display_name:
+        base_message = f"{base_message} ({display_name})"
+
+    if used_cached_context:
+        return f"{base_message} Using the existing full document context instead."
+
+    provider_name = _native_file_provider_display_name(str(fallback_provider or ""))
+    if provider_name == "local document parsing":
+        return f"{base_message} Falling back to local document parsing for this request."
+
+    return (
+        f"{base_message} Local document parsing failed, so this request used "
+        f"{provider_name} instead."
+    )
+
+
+def _persist_native_file_fallback_notice(
+    file_id: str,
+    *,
+    diagnostic: dict[str, Any],
+    fallback_provider: str,
+    fallback_reason: Optional[str] = None,
+) -> None:
+    file_obj = Files.get_file_by_id(file_id)
+    if not file_obj:
+        return
+
+    notice = _build_native_file_input_fallback_message(
+        diagnostic,
+        file_name=file_obj.filename,
+        fallback_provider=fallback_provider,
+    )
+    Files.update_file_metadata_by_id(
+        file_id,
+        {
+            "processing_notice": _join_processing_notices(
+                notice,
+                (file_obj.meta or {}).get("processing_notice"),
+            ),
+            "fallback_provider": fallback_provider,
+            "fallback_reason": fallback_reason
+            or diagnostic.get("detail")
+            or diagnostic.get("reason")
+            or diagnostic.get("message"),
+            "native_file_input_status": diagnostic.get("status"),
+            "native_file_input_reason": diagnostic.get("reason"),
+            "native_file_input_message": diagnostic.get("message"),
+        },
+    )
+
+
+def _classify_native_file_input_retry_error(error: Any) -> dict[str, Any]:
+    message = str(error or "").strip()
+    lowered = message.lower()
+
+    if (
+        "/responses" in lowered
+        and any(token in lowered for token in ("not found", "unknown", "unsupported", "405", "404"))
+    ):
+        return _build_native_file_input_diagnostic(
+            NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
+            reason="responses_endpoint_unsupported",
+            message=(
+                "The current connection does not support the OpenAI Responses "
+                "endpoint required for native file inputs."
+            ),
+            detail=message,
+            source="responses_request",
+        )
+
+    return _build_native_file_input_diagnostic(
+        NATIVE_FILE_INPUT_STATUS_UPSTREAM_REJECTED,
+        reason="upstream_rejected",
+        message=(
+            "The upstream rejected native file inputs for this request."
+        ),
+        detail=message,
+        source="responses_request",
+    )
+
+
+def build_native_file_input_retry_notification(metadata: dict, error: Any) -> str:
+    diagnostic = _classify_native_file_input_retry_error(error)
+    metadata["native_file_input_request_error"] = diagnostic
+    return _build_native_file_input_fallback_message(
+        diagnostic,
+        fallback_provider=DOCUMENT_PROVIDER_LOCAL_DEFAULT,
+    )
+
+
+async def _process_file_with_native_fallback_chain(
+    request: Request,
+    user: UserModel,
+    *,
+    file_id: str,
+    diagnostic: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
+    local_error: Optional[Exception] = None
+    requested_provider = normalize_document_provider(
+        getattr(request.app.state.config, "DOCUMENT_PROVIDER", None),
+        DOCUMENT_PROVIDER_LOCAL_DEFAULT,
+    )
+
+    try:
+        result = await run_in_threadpool(
+            process_file,
+            request,
+            ProcessFileForm(
+                file_id=file_id,
+                processing_mode=FILE_PROCESSING_MODE_FULL_CONTEXT,
+                document_provider=DOCUMENT_PROVIDER_LOCAL_DEFAULT,
+                allow_provider_local_fallback=False,
+            ),
+            user,
+        )
+        _persist_native_file_fallback_notice(
+            file_id,
+            diagnostic=diagnostic,
+            fallback_provider=DOCUMENT_PROVIDER_LOCAL_DEFAULT,
+        )
+        return result, DOCUMENT_PROVIDER_LOCAL_DEFAULT
+    except Exception as exc:
+        local_error = exc
+
+    if requested_provider != DOCUMENT_PROVIDER_LOCAL_DEFAULT:
+        result = await run_in_threadpool(
+            process_file,
+            request,
+            ProcessFileForm(
+                file_id=file_id,
+                processing_mode=FILE_PROCESSING_MODE_FULL_CONTEXT,
+                document_provider=requested_provider,
+                allow_provider_local_fallback=False,
+            ),
+            user,
+        )
+        _persist_native_file_fallback_notice(
+            file_id,
+            diagnostic=diagnostic,
+            fallback_provider=requested_provider,
+            fallback_reason=str(local_error),
+        )
+        return result, requested_provider
+
+    if local_error is not None:
+        raise local_error
+    raise RuntimeError("Native file fallback processing failed.")
+
+
 def _anthropic_model_supports_native_file_mode(model: dict) -> bool:
     if not isinstance(model, dict):
         return False
@@ -1466,13 +1747,23 @@ async def _ensure_requested_chat_file_modes(
             file_obj=file_obj,
             default_mode=default_mode,
         )
+        native_fallback_diagnostic = None
 
         if desired_mode == FILE_PROCESSING_MODE_NATIVE_FILE:
             if file_id not in native_ids:
+                native_fallback_diagnostic = _get_native_file_input_diagnostic(
+                    metadata, file_id
+                ) or _build_native_file_input_diagnostic(
+                    NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
+                    reason="native_file_not_prepared",
+                    message=(
+                        "Native file inputs were not prepared for this request."
+                    ),
+                    source="chat_preparation",
+                )
                 desired_mode = FILE_PROCESSING_MODE_FULL_CONTEXT
                 file_item["processing_mode"] = FILE_PROCESSING_MODE_FULL_CONTEXT
                 file_item["context"] = "full"
-                fallback_messages.append(file_obj.filename)
             else:
                 file_item["processing_mode"] = FILE_PROCESSING_MODE_NATIVE_FILE
                 file_item.pop("context", None)
@@ -1497,17 +1788,40 @@ async def _ensure_requested_chat_file_modes(
             needs_processing = True
 
         if needs_processing:
-            await run_in_threadpool(
-                process_file,
-                request,
-                ProcessFileForm(file_id=file_id, processing_mode=desired_mode),
-                user,
-            )
+            if native_fallback_diagnostic is not None:
+                _result, fallback_provider = await _process_file_with_native_fallback_chain(
+                    request,
+                    user,
+                    file_id=file_id,
+                    diagnostic=native_fallback_diagnostic,
+                )
+                fallback_messages.append(
+                    _build_native_file_input_fallback_message(
+                        native_fallback_diagnostic,
+                        file_name=file_obj.filename,
+                        fallback_provider=fallback_provider,
+                    )
+                )
+            else:
+                await run_in_threadpool(
+                    process_file,
+                    request,
+                    ProcessFileForm(file_id=file_id, processing_mode=desired_mode),
+                    user,
+                )
             refreshed = Files.get_file_by_id(file_id)
             if refreshed:
                 file_item["file"] = refreshed.model_dump()
                 if refreshed.meta and refreshed.meta.get("collection_name"):
                     file_item["collection_name"] = refreshed.meta.get("collection_name")
+        elif native_fallback_diagnostic is not None:
+            fallback_messages.append(
+                _build_native_file_input_fallback_message(
+                    native_fallback_diagnostic,
+                    file_name=file_obj.filename,
+                    used_cached_context=True,
+                )
+            )
 
     metadata["files"] = regular_files
 
@@ -1517,11 +1831,7 @@ async def _ensure_requested_chat_file_modes(
                 "type": "notification",
                 "data": {
                     "type": "info",
-                    "content": (
-                        "Native file inputs are unavailable for "
-                        + ", ".join(fallback_messages)
-                        + ". Retrying with full document context."
-                    ),
+                    "content": "\n".join(fallback_messages),
                 },
             }
         )
@@ -1558,12 +1868,6 @@ async def _prepare_openai_native_file_inputs(
         model_id, base_urls, keys, cfgs
     )
     if not url:
-        return
-
-    if not _should_use_responses_api(url, api_config, model_id, native_web_search=False):
-        return
-
-    if not _connection_supports_native_file_inputs(url, api_config):
         return
 
     file_ids_by_message_idx: dict[int, list[str]] = {}
@@ -1604,16 +1908,129 @@ async def _prepare_openai_native_file_inputs(
     if not unique_file_ids:
         return
 
+    capability = _get_native_file_input_capability(url, api_config)
+    connection_name = (
+        (model or {}).get("connection_name")
+        or api_config.get("remark")
+        or (urlparse(url).hostname or "")
+    )
+    metadata["native_file_input_connection"] = {
+        "model_id": model_id,
+        "connection_name": connection_name,
+        "url": url,
+        "prefix_id": api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or "",
+        "responses_configured": capability.get("responses_configured"),
+        "native_file_inputs_enabled": api_config.get("native_file_inputs_enabled"),
+        "official_openai": capability.get("official"),
+        "status": capability.get("status"),
+        "reason": capability.get("reason"),
+    }
+    log.info(
+        "[OPENAI NATIVE FILE INPUTS] model=%s connection=%s status=%s reason=%s responses_configured=%s enabled=%s official=%s",
+        model_id,
+        connection_name or url,
+        capability.get("status"),
+        capability.get("reason"),
+        capability.get("responses_configured"),
+        api_config.get("native_file_inputs_enabled"),
+        capability.get("official"),
+    )
+
+    if capability.get("status") != NATIVE_FILE_INPUT_STATUS_SUPPORTED:
+        for file_id in unique_file_ids:
+            file_obj = Files.get_file_by_id(file_id)
+            _set_native_file_input_diagnostic(
+                metadata,
+                file_id=file_id,
+                file_name=(file_obj.filename if file_obj else file_id),
+                diagnostic=_build_native_file_input_diagnostic(
+                    str(capability.get("status") or NATIVE_FILE_INPUT_STATUS_DISABLED_BY_CONFIG),
+                    reason=str(capability.get("reason") or "connection_not_supported"),
+                    message=str(
+                        capability.get("message")
+                        or "Native file inputs are not enabled for this connection."
+                    ),
+                    source="connection_policy",
+                ),
+            )
+        return
+
+    responses_configured = _should_use_responses_api(
+        url, api_config, model_id, native_web_search=False
+    )
+    if not responses_configured:
+        probe = await _probe_responses_support_for_native_file_inputs(
+            url=url,
+            key=key or "",
+            api_config=api_config,
+            user=user,
+            model_id=model_id,
+        )
+        metadata["native_file_input_responses_probe"] = probe
+        log.info(
+            "[OPENAI NATIVE FILE INPUTS] responses_probe model=%s connection=%s supported=%s reason=%s status=%s",
+            model_id,
+            connection_name or url,
+            probe.get("supported"),
+            probe.get("reason"),
+            probe.get("http_status"),
+        )
+        if probe.get("supported") is False:
+            for file_id in unique_file_ids:
+                file_obj = Files.get_file_by_id(file_id)
+                _set_native_file_input_diagnostic(
+                    metadata,
+                    file_id=file_id,
+                    file_name=(file_obj.filename if file_obj else file_id),
+                    diagnostic=_build_native_file_input_diagnostic(
+                        NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
+                        reason=str(probe.get("reason") or "responses_endpoint_unsupported"),
+                        message=str(
+                            probe.get("message")
+                            or "The current connection does not support the Responses endpoint required for native file inputs."
+                        ),
+                        detail=str(probe.get("body_preview") or ""),
+                        source="responses_probe",
+                    ),
+                )
+            return
+
     conn_key = _get_openai_file_cache_key(api_config, url_idx)
     remote_ids_by_local_id: dict[str, str] = {}
 
     for file_id in unique_file_ids:
         file_obj = Files.get_file_by_id(file_id)
         if not file_obj or not file_obj.meta or not file_obj.path:
+            _set_native_file_input_diagnostic(
+                metadata,
+                file_id=file_id,
+                file_name=(file_obj.filename if file_obj else file_id),
+                diagnostic=_build_native_file_input_diagnostic(
+                    NATIVE_FILE_INPUT_STATUS_UPLOAD_FAILED,
+                    reason="file_not_available",
+                    message=(
+                        "The uploaded file is no longer available for native file transfer."
+                    ),
+                    source="local_file_lookup",
+                ),
+            )
             continue
 
         content_type = (file_obj.meta or {}).get("content_type") or "application/octet-stream"
         if str(content_type).startswith("image/"):
+            _set_native_file_input_diagnostic(
+                metadata,
+                file_id=file_id,
+                file_name=file_obj.filename or file_id,
+                diagnostic=_build_native_file_input_diagnostic(
+                    NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
+                    reason="image_attachment_not_uploaded_via_files_api",
+                    message=(
+                        "This attachment was not sent through the OpenAI Files API path for native file inputs."
+                    ),
+                    source="files_api_preparation",
+                ),
+            )
             continue
 
         remote_file_id = _get_cached_openai_file_id(file_obj.meta, conn_key)
@@ -1633,10 +2050,28 @@ async def _prepare_openai_native_file_inputs(
                     file_id, file_obj.meta, conn_key, remote_file_id
                 )
             except Exception as exc:
-                log.info(
-                    "[OPENAI] Native file input upload failed for %s: %s",
+                detail = str(exc)
+                log.warning(
+                    "[OPENAI NATIVE FILE INPUTS] files_api_upload_failed model=%s connection=%s file_id=%s filename=%s detail=%s",
+                    model_id,
+                    connection_name or url,
                     file_id,
-                    exc,
+                    file_obj.filename,
+                    detail,
+                )
+                _set_native_file_input_diagnostic(
+                    metadata,
+                    file_id=file_id,
+                    file_name=file_obj.filename or file_id,
+                    diagnostic=_build_native_file_input_diagnostic(
+                        NATIVE_FILE_INPUT_STATUS_UPLOAD_FAILED,
+                        reason="files_api_upload_failed",
+                        message=(
+                            "Uploading this file to the upstream Files API failed."
+                        ),
+                        detail=detail,
+                        source="files_api_upload",
+                    ),
                 )
                 continue
 
@@ -1665,6 +2100,14 @@ async def _prepare_openai_native_file_inputs(
 
     metadata["native_file_input_file_ids"] = native_file_input_ids
     metadata["native_file_input_parts_by_message"] = parts_by_message_idx
+    metadata["native_file_inputs_force_responses_api"] = True
+    log.info(
+        "[OPENAI NATIVE FILE INPUTS] prepared model=%s connection=%s files=%s force_responses=%s",
+        model_id,
+        connection_name or url,
+        native_file_input_ids,
+        True,
+    )
 
 
 def _apply_prepared_openai_native_file_inputs(
@@ -2551,7 +2994,7 @@ async def chat_completion_files_handler(
                             query, prefix=prefix, user=user
                         ),
                         k=request.app.state.config.TOP_K,
-                        reranking_function=ensure_reranking_runtime(request.app)
+                        reranking_function=get_safe_reranking_runtime(request.app)
                         if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH
                         else None,
                         k_reranker=request.app.state.config.TOP_K_RERANKER,
@@ -2559,6 +3002,11 @@ async def chat_completion_files_handler(
                         hybrid_search=request.app.state.config.ENABLE_RAG_HYBRID_SEARCH,
                         full_context=request.app.state.config.RAG_FULL_CONTEXT,
                         bm25_weight=request.app.state.config.RAG_HYBRID_SEARCH_BM25_WEIGHT,
+                        enable_enriched_texts=getattr(
+                            request.app.state.config,
+                            "ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS",
+                            False,
+                        ),
                     ),
                 )
         except Exception as e:
@@ -2571,9 +3019,11 @@ async def chat_completion_files_handler(
 
 
 def apply_params_to_form_data(form_data, model):
-    params = form_data.pop("params", {})
+    params = dict(form_data.pop("params", {}) or {})
+    custom_params = params.pop("custom_params", None)
+
     if model.get("ollama"):
-        form_data["options"] = params
+        form_data["options"] = merge_additive_payload_fields(params, custom_params)
 
         if "format" in params:
             form_data["format"] = params["format"]
@@ -2612,6 +3062,9 @@ def apply_params_to_form_data(form_data, model):
                 )
             except Exception as e:
                 print(f"Error parsing logit_bias: {e}")
+
+        if isinstance(custom_params, dict) and custom_params:
+            form_data["custom_params"] = custom_params
 
     return form_data
 
@@ -2838,8 +3291,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     log.debug(f"{tool_servers=}")
 
     tools_dict = {}
+    tool_calling_disabled = metadata.get("tool_calling_mode") == "off"
 
-    if tool_ids:
+    if tool_ids and not tool_calling_disabled:
+        validate_tool_ids_access(tool_ids, user)
+
         # Ensure server-side toolkits are loaded before resolving tool_ids into callable specs.
         # This keeps /api/chat/completions robust even if /api/tools hasn't been called yet.
         if any(str(tid).startswith("server:") for tid in tool_ids) and not getattr(
@@ -2860,13 +3316,25 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             request.state.MCP_SERVER_CONNECTIONS = get_user_mcp_server_connections(
                 request, user
             )
-            request.state.MCP_SERVERS = await get_mcp_servers_data(
-                request.state.MCP_SERVER_CONNECTIONS,
-                session_token=request.state.token.credentials,
-                selected_indices=selected_mcp_indices,
-                strict_selected=True,
-                user_id=user.id,
-            )
+            try:
+                request.state.MCP_SERVERS = await get_mcp_servers_data(
+                    request.state.MCP_SERVER_CONNECTIONS,
+                    session_token=request.state.token.credentials,
+                    selected_indices=selected_mcp_indices,
+                    strict_selected=True,
+                    user_id=user.id,
+                )
+            except RuntimeError as exc:
+                log.warning(
+                    "Falling back to cached MCP tool snapshot for selected servers %s: %s",
+                    sorted(selected_mcp_indices),
+                    exc,
+                )
+                request.state.MCP_SERVERS = get_mcp_servers_cached_data(
+                    request.state.MCP_SERVER_CONNECTIONS,
+                    selected_indices=selected_mcp_indices,
+                    strict_selected=True,
+                )
 
         tools_dict = get_tools(
             request,
@@ -2880,7 +3348,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             },
         )
 
-    if tool_servers:
+    if tool_servers and not tool_calling_disabled:
         for tool_server in tool_servers:
             tool_specs = tool_server.pop("specs", [])
 
@@ -2894,10 +3362,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # Built-in tools are exposed when tool calling is enabled (native or compatibility/default),
     # and are still gated by admin config + permissions.
     if (
-        metadata.get("function_calling") == "native"
-        or tool_ids
-        or tool_servers
-        or metadata.get("preview_tool_compat")
+        not tool_calling_disabled
+        and (
+            metadata.get("function_calling") == "native"
+            or tool_ids
+            or tool_servers
+            or metadata.get("preview_tool_compat")
+        )
     ):
         builtin_tools = get_builtin_tools(request, user, metadata)
         suppressed_web_tools = _get_builtin_web_tools_to_suppress(
@@ -2985,7 +3456,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             except Exception:
                 # Never block the request due to prompt injection failures.
                 pass
-        else:
+        elif not tool_calling_disabled:
             # If the function calling is not native, then call the tools function calling handler
             try:
                 form_data, flags = await chat_completion_tools_handler(
@@ -3052,6 +3523,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             )
 
     _apply_prepared_openai_native_file_inputs(form_data, metadata)
+    if metadata.get("native_file_input_file_ids"):
+        form_data["native_file_inputs"] = True
 
     # If there are citations, add them to the data_items
     sources = [source for source in sources if source.get("source", {}).get("name", "")]

@@ -16,9 +16,7 @@
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
 	import { createMessagesList } from '$lib/utils';
 	import { getCitationEntries } from '$lib/utils/citations';
-	import {
-		resolveChatTransitionMode
-	} from '$lib/utils/lobehub-chat-appearance';
+	import { resolveChatTransitionMode } from '$lib/utils/lobehub-chat-appearance';
 
 	export let id;
 	export let content;
@@ -36,6 +34,7 @@
 	export let onTaskClick = () => {};
 
 	export let onAddMessages = () => {};
+	export let headings = [];
 
 	let contentContainerElement;
 	let floatingButtonsElement;
@@ -43,6 +42,7 @@
 
 	// Long content truncation
 	const MAX_CONTENT_HEIGHT = 2000;
+	const MESSAGE_OUTLINE_SCROLL_OFFSET = 24;
 	let isExpanded = false;
 	let needsTruncation = false;
 	let resizeObserver;
@@ -73,6 +73,49 @@
 	}
 
 	$: currentTransitionMode = resolveChatTransitionMode($settings);
+
+	const highlightHeading = (headingElement) => {
+		headingElement.classList.remove('message-outline-anchor-target');
+		void headingElement.offsetWidth;
+		headingElement.classList.add('message-outline-anchor-target');
+		headingElement.addEventListener(
+			'animationend',
+			() => {
+				headingElement.classList.remove('message-outline-anchor-target');
+			},
+			{ once: true }
+		);
+	};
+
+	export async function scrollToHeading(headingId) {
+		if (needsTruncation && !isExpanded) {
+			isExpanded = true;
+			await tick();
+		}
+
+		await tick();
+
+		const headingElement = contentContainerElement?.querySelector?.(`[id="${headingId}"]`);
+		const messagesContainer = document.getElementById('messages-container');
+
+		if (!headingElement || !messagesContainer) {
+			return;
+		}
+
+		const containerRect = messagesContainer.getBoundingClientRect();
+		const headingRect = headingElement.getBoundingClientRect();
+		const nextTop =
+			messagesContainer.scrollTop +
+			(headingRect.top - containerRect.top) -
+			MESSAGE_OUTLINE_SCROLL_OFFSET;
+
+		messagesContainer.scrollTo({
+			top: Math.max(0, nextTop),
+			behavior: 'smooth'
+		});
+
+		highlightHeading(headingElement);
+	}
 
 	const updateButtonPosition = (event) => {
 		const buttonsContainerElement = document.getElementById(`floating-buttons-${id}`);
@@ -186,14 +229,16 @@
 	});
 </script>
 
-<div
-	bind:this={contentContainerElement}
-	class="relative"
-	style={needsTruncation && !isExpanded
-		? `max-height: ${MAX_CONTENT_HEIGHT}px; overflow: hidden;`
-		: ''}
->
-	<Markdown
+<div class="relative overflow-visible">
+	<div
+		bind:this={contentContainerElement}
+		class="relative"
+		style={needsTruncation && !isExpanded
+			? `max-height: ${MAX_CONTENT_HEIGHT}px; overflow: hidden;`
+			: ''}
+	>
+		<Markdown
+			bind:headings
 			{id}
 			content={content || ''}
 			{model}
@@ -265,6 +310,7 @@
 				}
 			}}
 		/>
+	</div>
 </div>
 
 {#if needsTruncation && !isExpanded}
@@ -299,3 +345,30 @@
 		}}
 	/>
 {/if}
+
+<style>
+	:global(.message-outline-anchor) {
+		scroll-margin-top: 1.5rem;
+	}
+
+	:global(.message-outline-anchor-target) {
+		animation: message-outline-anchor-flash 900ms ease;
+	}
+
+	@keyframes message-outline-anchor-flash {
+		0% {
+			background-color: rgba(56, 189, 248, 0.18);
+			box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.18);
+		}
+
+		45% {
+			background-color: rgba(56, 189, 248, 0.28);
+			box-shadow: 0 0 0 0.45rem rgba(56, 189, 248, 0.12);
+		}
+
+		100% {
+			background-color: transparent;
+			box-shadow: 0 0 0 0 rgba(56, 189, 248, 0);
+		}
+	}
+</style>

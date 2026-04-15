@@ -14,11 +14,13 @@ ARG USE_CUDA_VER=cu121
 # IMPORTANT: If you change the embedding model (sentence-transformers/all-MiniLM-L6-v2) and vice versa, you aren't able to use RAG Chat with your previous documents loaded in the WebUI! You need to re-embed them.
 ARG USE_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 ARG USE_RERANKING_MODEL=""
+ARG HALO_PG_CLIENT_MAJORS="14 15 16 17 18"
 
 # Tiktoken encoding name; models to use can be found at https://huggingface.co/models?library=tiktoken
 ARG USE_TIKTOKEN_ENCODING_NAME="cl100k_base"
 
 ARG BUILD_HASH=dev-build
+ARG HALO_RUNTIME_PROFILE=main
 # Override at your own risk - non-root configurations are untested
 ARG UID=0
 ARG GID=0
@@ -81,6 +83,7 @@ ARG DEBIAN_MIRROR
 ARG DEBIAN_SECURITY_MIRROR
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
+ARG HALO_RUNTIME_PROFILE
 
 ENV USE_CUDA_DOCKER=${USE_CUDA} \
     USE_CUDA_DOCKER_VER=${USE_CUDA_VER} \
@@ -124,6 +127,9 @@ RUN set -eux; \
     pip install --no-cache-dir -r "${requirements_file}"; \
     # `/api/v1/utils/code/format` uses black at runtime, but build profiles do not include dev-test deps.
     pip install --no-cache-dir black==25.1.0; \
+    if [ "$HALO_RUNTIME_PROFILE" = "main" ]; then \
+        pip install --no-cache-dir uv; \
+    fi; \
     if [ "$PRELOAD_LOCAL_MODELS" = "true" ]; then \
         if [ "$INSTALL_PROFILE" = "local-rag" ] || [ "$INSTALL_PROFILE" = "full" ]; then \
             python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"; \
@@ -145,12 +151,14 @@ ARG USE_CUDA_VER
 ARG USE_EMBEDDING_MODEL
 ARG USE_RERANKING_MODEL
 ARG USE_TIKTOKEN_ENCODING_NAME
+ARG HALO_PG_CLIENT_MAJORS
 ARG UID
 ARG GID
 ARG DEBIAN_MIRROR
 ARG DEBIAN_SECURITY_MIRROR
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
+ARG HALO_RUNTIME_PROFILE
 
 ENV ENV=prod \
     PORT=8080 \
@@ -177,6 +185,7 @@ ENV ENV=prod \
     HF_HOME="/app/backend/data/cache/embedding/models" \
     PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    HALO_RUNTIME_PROFILE=${HALO_RUNTIME_PROFILE} \
     PATH="/opt/venv/bin:${PATH}" \
     HOME=/root
 
@@ -191,16 +200,31 @@ RUN if [ $UID -ne 0 ]; then \
 
 RUN set -eux; \
     extra_apt_packages=""; \
+    pg_client_packages=""; \
     case "$INSTALL_PROFILE" in \
         local-audio) extra_apt_packages="ffmpeg libsm6 libxext6" ;; \
         docs-full|full) extra_apt_packages="pandoc ffmpeg libsm6 libxext6" ;; \
     esac; \
     replace-debian-mirrors "${DEBIAN_MIRROR}" "${DEBIAN_SECURITY_MIRROR}"; \
+    for major in ${HALO_PG_CLIENT_MAJORS}; do \
+        pg_client_packages="${pg_client_packages} postgresql-client-${major}"; \
+    done; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         curl \
-        postgresql-client \
+        ca-certificates \
         ${extra_apt_packages}; \
+    install -d /usr/share/postgresql-common/pgdg; \
+    curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc; \
+    . /etc/os-release; \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ${pg_client_packages}; \
+    if [ "$HALO_RUNTIME_PROFILE" = "main" ]; then \
+        apt-get install -y --no-install-recommends nodejs npm git; \
+    fi; \
     if [ "$USE_OLLAMA" = "true" ]; then \
         curl -fsSL https://ollama.com/install.sh | sh; \
     fi; \

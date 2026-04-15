@@ -6,7 +6,7 @@ import secrets
 import time
 import uuid
 from pathlib import Path
-from typing import Literal, Optional, overload
+from typing import Any, Literal, Optional, overload
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 import aiohttp
@@ -45,6 +45,7 @@ from open_webui.env import ENV, SRC_LOG_LEVELS
 from open_webui.utils.payload import (
     apply_model_params_to_body_openai,
     apply_model_system_prompt_to_body,
+    merge_additive_payload_fields,
 )
 from open_webui.utils.misc import (
     convert_logit_bias_input_to_json,
@@ -62,6 +63,8 @@ from open_webui.utils.openai_responses import (
 )
 from open_webui.utils.native_web_search import (
     build_native_web_search_support,
+    resolve_effective_native_web_search_support,
+    strip_model_prefix,
 )
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -74,6 +77,16 @@ log.setLevel(SRC_LOG_LEVELS["OPENAI"])
 OPENAI_CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
 AZURE_OPENAI_V1_SEGMENT = "/openai/v1"
 AZURE_OPENAI_DEPLOYMENTS_SEGMENT = "/openai/deployments/"
+
+NATIVE_FILE_INPUT_STATUS_SUPPORTED = "supported"
+NATIVE_FILE_INPUT_STATUS_DISABLED_BY_CONFIG = "disabled_by_config"
+NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED = "protocol_not_attempted"
+NATIVE_FILE_INPUT_STATUS_UPLOAD_FAILED = "upload_failed"
+NATIVE_FILE_INPUT_STATUS_UPSTREAM_REJECTED = "upstream_rejected"
+
+_NATIVE_FILE_INPUT_PROBE_TTL_SECONDS = 60
+_NATIVE_FILE_INPUT_PROBE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_CUSTOM_PARAM_FORBIDDEN_KEYS = {"model", "messages", "input", "stream"}
 
 
 def _is_official_openai_connection(url: str) -> bool:
@@ -370,6 +383,33 @@ def _resolve_openai_connection_by_model_id(
     return chosen_idx, url, key, api_config
 
 
+async def _is_user_visible_model(
+    request: Request, user: UserModel, model_id: str
+) -> bool:
+    state = getattr(request, "state", None)
+    models_map = getattr(state, "MODELS", None) if state is not None else None
+    if isinstance(models_map, dict) and model_id in models_map:
+        return True
+
+    try:
+        # Avoid a module-level import here because utils.models imports this router.
+        from open_webui.utils.models import get_all_models as load_user_models
+
+        await load_user_models(request, user=user)
+    except Exception as e:
+        log.debug(
+            "Failed to load user-scoped models while validating %s: %s: %s",
+            model_id,
+            type(e).__name__,
+            e,
+        )
+        return False
+
+    state = getattr(request, "state", None)
+    models_map = getattr(state, "MODELS", None) if state is not None else None
+    return isinstance(models_map, dict) and model_id in models_map
+
+
 ##########################################
 #
 # Utility functions
@@ -422,14 +462,17 @@ def _should_use_responses_api(
     api_config: Optional[dict],
     model_id: Optional[str],
     native_web_search: bool = False,
+    native_file_inputs: bool = False,
 ) -> bool:
     cfg = api_config or {}
     if _is_azure_openai_connection(url, cfg):
         return False
-    use_responses_api = bool(cfg.get("use_responses_api", False) or native_web_search)
+    use_responses_api = bool(
+        cfg.get("use_responses_api", False) or native_web_search or native_file_inputs
+    )
     if _is_force_mode_connection(url, cfg):
         return False
-    if use_responses_api and not native_web_search:
+    if use_responses_api and not native_web_search and not native_file_inputs:
         exclude_patterns = cfg.get("responses_api_exclude_patterns", [])
         if isinstance(exclude_patterns, list):
             model_lower = (model_id or "").lower()
@@ -443,22 +486,91 @@ def _should_use_responses_api(
     return use_responses_api
 
 
+def _get_native_file_input_capability(
+    url: str, api_config: Optional[dict]
+) -> dict[str, Any]:
+    cfg = api_config or {}
+    explicit = cfg.get("native_file_inputs_enabled")
+    responses_configured = _coerce_bool(cfg.get("use_responses_api"), False)
+    official = _is_official_openai_connection(url)
+
+    capability: dict[str, Any] = {
+        "status": NATIVE_FILE_INPUT_STATUS_SUPPORTED,
+        "reason": "supported",
+        "message": "Native file inputs can be attempted for this connection.",
+        "official": official,
+        "responses_configured": responses_configured,
+        "force_responses_required": not responses_configured,
+    }
+
+    if _is_azure_openai_connection(url, cfg):
+        capability.update(
+            {
+                "status": NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
+                "reason": "azure_connection",
+                "message": (
+                    "The current Azure OpenAI connection does not expose the OpenAI "
+                    "Files/Responses protocol required for native file inputs."
+                ),
+                "force_responses_required": False,
+            }
+        )
+        return capability
+
+    if _is_force_mode_connection(url, cfg):
+        capability.update(
+            {
+                "status": NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
+                "reason": "force_mode_connection",
+                "message": (
+                    "The current force-mode connection cannot auto-route through the "
+                    "OpenAI Files/Responses protocol required for native file inputs."
+                ),
+                "force_responses_required": False,
+            }
+        )
+        return capability
+
+    if explicit is not None:
+        if _coerce_bool(explicit, False):
+            capability["reason"] = "explicitly_enabled"
+            return capability
+
+        capability.update(
+            {
+                "status": NATIVE_FILE_INPUT_STATUS_DISABLED_BY_CONFIG,
+                "reason": "disabled_by_config",
+                "message": "Native file inputs are disabled for the current connection.",
+                "force_responses_required": False,
+            }
+        )
+        return capability
+
+    if official:
+        capability["reason"] = "official_openai_default"
+        return capability
+
+    capability.update(
+        {
+            "status": NATIVE_FILE_INPUT_STATUS_DISABLED_BY_CONFIG,
+            "reason": "third_party_opt_in_required",
+            "message": (
+                "Native file inputs are not enabled for this third-party "
+                "OpenAI-compatible connection."
+            ),
+            "force_responses_required": False,
+        }
+    )
+    return capability
+
+
 def _connection_supports_native_file_inputs(
     url: str, api_config: Optional[dict]
 ) -> bool:
-    cfg = api_config or {}
-    if cfg.get("azure"):
-        return False
-    if _is_force_mode_connection(url, cfg):
-        return False
-    if not _coerce_bool(cfg.get("use_responses_api"), False):
-        return False
-
-    explicit = cfg.get("native_file_inputs_enabled")
-    if explicit is not None:
-        return _coerce_bool(explicit, False)
-
-    return _is_official_openai_connection(url)
+    return (
+        _get_native_file_input_capability(url, api_config).get("status")
+        == NATIVE_FILE_INPUT_STATUS_SUPPORTED
+    )
 
 
 def _get_default_responses_reasoning_summary(
@@ -787,7 +899,7 @@ def _apply_native_web_search_support_to_models_response(
     if not isinstance(body, dict):
         return body
 
-    support = build_native_web_search_support(
+    connection_support = build_native_web_search_support(
         "openai",
         url=url,
         api_config=api_config,
@@ -799,12 +911,21 @@ def _apply_native_web_search_support_to_models_response(
         for model in data:
             if not isinstance(model, dict):
                 continue
-            model["native_web_search_supported"] = support.get("supported") is True
-            model["native_web_search_support"] = dict(support)
+            model_support = resolve_effective_native_web_search_support(
+                connection_support,
+                provider="openai",
+                model_id=model.get("original_id")
+                or strip_model_prefix(
+                    model.get("id") or "", (api_config or {}).get("_resolved_prefix_id")
+                ),
+                model_name=model.get("name") or "",
+            )
+            model["native_web_search_supported"] = model_support.get("supported") is True
+            model["native_web_search_support"] = dict(model_support)
 
     meta = body.get("_openwebui")
     body["_openwebui"] = meta if isinstance(meta, dict) else {}
-    body["_openwebui"]["native_web_search_support"] = dict(support)
+    body["_openwebui"]["native_web_search_support"] = dict(connection_support)
     return body
 
 
@@ -932,6 +1053,118 @@ def _looks_like_responses_endpoint_unsupported(status: int, body_text: str) -> b
     if "unsupported" in text and "responses" in text:
         return True
     return False
+
+
+def _build_native_file_input_probe_cache_key(
+    url: str, api_config: Optional[dict]
+) -> str:
+    cfg = api_config or {}
+    payload = {
+        "url": (url or "").rstrip("/"),
+        "auth_type": str(cfg.get("auth_type") or ""),
+        "headers": cfg.get("headers") or {},
+        "prefix_id": str(
+            cfg.get("_resolved_prefix_id") or cfg.get("prefix_id") or ""
+        ),
+        "azure": bool(cfg.get("azure")),
+        "force_mode": bool(cfg.get("force_mode")),
+    }
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+async def _probe_responses_support_for_native_file_inputs(
+    *,
+    url: str,
+    key: str,
+    api_config: Optional[dict],
+    user: Optional[UserModel] = None,
+    model_id: Optional[str] = None,
+) -> dict[str, Any]:
+    cache_key = _build_native_file_input_probe_cache_key(url, api_config)
+    cached_result = _NATIVE_FILE_INPUT_PROBE_CACHE.get(cache_key)
+    if cached_result and (time.time() - cached_result[0]) < _NATIVE_FILE_INPUT_PROBE_TTL_SECONDS:
+        return dict(cached_result[1])
+
+    cfg = api_config or {}
+    headers = _build_upstream_headers(url, key or "", cfg, user=user)
+    chosen_model = str(model_id or "gpt-4o-mini")
+    prefix_id = str(cfg.get("_resolved_prefix_id") or cfg.get("prefix_id") or "").strip()
+    if prefix_id:
+        prefix = f"{prefix_id}."
+        if chosen_model.startswith(prefix):
+            chosen_model = chosen_model[len(prefix) :]
+    if not chosen_model:
+        chosen_model = "gpt-4o-mini"
+
+    request_url = f"{(url or '').rstrip('/')}/responses"
+    payload = {
+        "model": chosen_model,
+        "input": [{"role": "user", "content": "ping"}],
+        "stream": False,
+    }
+
+    result: dict[str, Any]
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST),
+            trust_env=True,
+        ) as session:
+            async with session.post(
+                request_url,
+                headers=headers,
+                data=json.dumps(payload, ensure_ascii=False, default=str),
+            ) as response:
+                body = await _safe_read_upstream_body(response)
+                body_text = _truncate_text(_stringify_upstream_body(body), 1200)
+
+                if response.status < 400:
+                    result = {
+                        "supported": True,
+                        "status": NATIVE_FILE_INPUT_STATUS_SUPPORTED,
+                        "reason": "responses_probe_succeeded",
+                        "message": "Responses endpoint probe succeeded for native file inputs.",
+                        "http_status": response.status,
+                        "body_preview": body_text,
+                    }
+                elif _looks_like_responses_endpoint_unsupported(response.status, body_text):
+                    result = {
+                        "supported": False,
+                        "status": NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
+                        "reason": "responses_endpoint_unsupported",
+                        "message": (
+                            "The current connection does not support the OpenAI "
+                            "Responses endpoint required for native file inputs."
+                        ),
+                        "http_status": response.status,
+                        "body_preview": body_text,
+                    }
+                else:
+                    result = {
+                        "supported": None,
+                        "status": NATIVE_FILE_INPUT_STATUS_SUPPORTED,
+                        "reason": "responses_probe_inconclusive",
+                        "message": (
+                            "Responses endpoint probing was inconclusive; native "
+                            "file inputs will be attempted anyway."
+                        ),
+                        "http_status": response.status,
+                        "body_preview": body_text,
+                    }
+    except Exception as exc:
+        result = {
+            "supported": None,
+            "status": NATIVE_FILE_INPUT_STATUS_SUPPORTED,
+            "reason": "responses_probe_failed",
+            "message": (
+                "Responses endpoint probing failed; native file inputs will be "
+                "attempted anyway."
+            ),
+            "detail": _truncate_text(str(exc), 1200),
+        }
+
+    _NATIVE_FILE_INPUT_PROBE_CACHE[cache_key] = (time.time(), dict(result))
+    return result
 
 
 def _looks_like_chat_completions_endpoint_unsupported(status: int, body) -> bool:
@@ -1504,7 +1737,7 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
                 connection_name = urlparse(url).hostname or ""
             except Exception:
                 connection_name = ""
-        native_web_search_support = build_native_web_search_support(
+        connection_support = build_native_web_search_support(
             "openai",
             url=url,
             api_config=api_config,
@@ -1532,10 +1765,16 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
             if connection_icon:
                 model["connection_icon"] = connection_icon
             model["name"] = display_name
-            model["native_web_search_supported"] = (
-                native_web_search_support.get("supported") is True
+            model_support = resolve_effective_native_web_search_support(
+                connection_support,
+                provider="openai",
+                model_id=original_id,
+                model_name=display_name,
             )
-            model["native_web_search_support"] = dict(native_web_search_support)
+            model["native_web_search_supported"] = (
+                model_support.get("supported") is True
+            )
+            model["native_web_search_support"] = dict(model_support)
 
             if prefix_id:
                 model["original_id"] = original_id
@@ -1722,6 +1961,42 @@ class ResponsesVerificationForm(BaseModel):
     model: Optional[str] = None
 
 
+class HealthCheckForm(BaseModel):
+    url: str
+    key: str = ""
+    config: Optional[dict] = None
+    model: Optional[str] = None
+
+
+async def _discover_openai_probe_model(
+    *,
+    session: aiohttp.ClientSession,
+    url: str,
+    headers: dict,
+    api_config: Optional[dict],
+) -> Optional[str]:
+    models_url = _get_openai_models_url(url, api_config)
+
+    try:
+        async with session.get(models_url, headers=headers) as response:
+            body = await _safe_read_upstream_body(response)
+            if response.status != 200:
+                return None
+
+            normalized = _normalize_openai_models_response(body)
+            items = normalized.get("data") if isinstance(normalized, dict) else None
+            if not isinstance(items, list) or not items:
+                return None
+
+            first = items[0]
+            if isinstance(first, dict):
+                return first.get("id") or first.get("name")
+    except Exception:
+        return None
+
+    return None
+
+
 @router.post("/verify")
 async def verify_connection(
     form_data: ConnectionVerificationForm, user=Depends(get_verified_user)
@@ -1783,6 +2058,173 @@ async def verify_connection(
             log.exception(f"Unexpected error: {e}")
             error_detail = f"Unexpected error: {str(e)}"
             raise HTTPException(status_code=500, detail=error_detail)
+
+
+@router.post("/health_check")
+async def health_check_connection(
+    form_data: HealthCheckForm, user=Depends(get_verified_user)
+):
+    url = (form_data.url or "").rstrip("/")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    key = form_data.key or ""
+    api_config = form_data.config or {}
+    headers = _build_upstream_headers(url, key, api_config, user=user)
+
+    timeout = aiohttp.ClientTimeout(total=15)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
+            chosen_model = form_data.model or await _discover_openai_probe_model(
+                session=session,
+                url=url,
+                headers=headers,
+                api_config=api_config,
+            )
+
+            if not chosen_model:
+                chosen_model = "gpt-4o-mini"
+
+            prefix_id = api_config.get("prefix_id", None)
+            if prefix_id and isinstance(chosen_model, str):
+                prefix = f"{prefix_id}."
+                if chosen_model.startswith(prefix):
+                    chosen_model = chosen_model[len(prefix) :]
+
+            use_responses_api = _should_use_responses_api(
+                url, api_config, chosen_model, native_web_search=False
+            )
+
+            probe_payload = {
+                "model": chosen_model,
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": False,
+                # OpenAI Responses API can reject extremely small max_output_tokens values
+                # (e.g. official OpenAI currently requires >=16). Keep chat probes at 1 token
+                # but use a small safe floor for Responses API health checks.
+                "max_tokens": 16 if use_responses_api else 1,
+            }
+
+            request_url = (
+                f"{url}/responses"
+                if use_responses_api
+                else _get_openai_chat_completions_url(url, api_config)
+            )
+
+            auto_reasoning_summary_applied = False
+            if use_responses_api:
+                payload_dict = convert_chat_completions_to_responses_payload(
+                    probe_payload,
+                    default_reasoning_summary=_get_default_responses_reasoning_summary(
+                        api_config
+                    ),
+                )
+                auto_reasoning_summary_applied = bool(
+                    isinstance(payload_dict.get("reasoning"), dict)
+                    and payload_dict["reasoning"].get("summary")
+                )
+                request_attempts = [(request_url, payload_dict)]
+            else:
+                payload_dict = dict(probe_payload)
+
+                is_o1_o3 = payload_dict["model"].lower().startswith(("o1", "o3-"))
+                if is_o1_o3:
+                    payload_dict = openai_o1_o3_handler(payload_dict)
+                elif "api.openai.com" not in url and "max_completion_tokens" in payload_dict:
+                    payload_dict["max_tokens"] = payload_dict["max_completion_tokens"]
+                    del payload_dict["max_completion_tokens"]
+
+                if "max_tokens" in payload_dict and "max_completion_tokens" in payload_dict:
+                    del payload_dict["max_tokens"]
+
+                request_attempts = _build_chat_completion_request_attempts(
+                    url=url,
+                    api_config=api_config,
+                    model_id=payload_dict.get("model"),
+                    payload_dict=payload_dict,
+                )
+
+            async def _post_once(target_url: str, payload: dict):
+                async with session.post(
+                    target_url,
+                    headers=headers,
+                    data=json.dumps(payload, ensure_ascii=False, default=str),
+                ) as response:
+                    body = await _safe_read_upstream_body(response)
+                    return response.status, body
+
+            started_at = time.monotonic()
+            attempt_idx = 0
+            request_url, payload_dict = request_attempts[attempt_idx]
+            status, response_body = await _post_once(request_url, payload_dict)
+
+            if not use_responses_api:
+                if (
+                    status >= 400
+                    and attempt_idx + 1 < len(request_attempts)
+                    and _looks_like_chat_completions_endpoint_unsupported(
+                        status, response_body
+                    )
+                ):
+                    attempt_idx += 1
+                    request_url, payload_dict = request_attempts[attempt_idx]
+                    status, response_body = await _post_once(request_url, payload_dict)
+
+                if status >= 400:
+                    raise HTTPException(
+                        status_code=status,
+                        detail=_extract_upstream_error_detail(status, response_body),
+                    )
+            else:
+                if (
+                    status >= 400
+                    and auto_reasoning_summary_applied
+                    and _looks_like_reasoning_summary_incompatible(
+                        status, response_body
+                    )
+                ):
+                    next_payload_dict, removed = _strip_reasoning_summary_from_payload(
+                        payload_dict
+                    )
+                    if removed:
+                        payload_dict = next_payload_dict
+                        status, response_body = await _post_once(
+                            request_url, payload_dict
+                        )
+
+                if status >= 400:
+                    raise HTTPException(
+                        status_code=status,
+                        detail=_format_responses_upstream_error(
+                            request_url=request_url,
+                            status=status,
+                            body=response_body,
+                        ),
+                    )
+
+            if not isinstance(response_body, dict):
+                raise HTTPException(
+                    status_code=502,
+                    detail="Invalid response from upstream model health check",
+                )
+
+            elapsed_ms = max(1, int((time.monotonic() - started_at) * 1000))
+            return {
+                "ok": True,
+                "model": chosen_model,
+                "response_time_ms": elapsed_ms,
+            }
+    except HTTPException:
+        raise
+    except aiohttp.ClientError as e:
+        log.exception(f"Client error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=build_error_detail(e),
+        )
+    except Exception as e:
+        log.exception(f"Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
 @router.post("/verify_responses")
@@ -1875,6 +2317,7 @@ async def generate_chat_completion(
     idx = 0
 
     payload = {**form_data}
+    custom_params = payload.pop("custom_params", None)
     metadata = payload.pop("metadata", None)
 
     model_id = form_data.get("model")
@@ -1904,10 +2347,11 @@ async def generate_chat_completion(
                 )
     elif not bypass_filter:
         if user.role != "admin":
-            raise HTTPException(
-                status_code=403,
-                detail="Model not found",
-            )
+            if not await _is_user_visible_model(request, user, model_id):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Model not found",
+                )
 
     # Resolve connection config from the *connection owner* (defaults to the requester).
     connection_user = getattr(getattr(request, "state", None), "connection_user", None) or user
@@ -1930,10 +2374,15 @@ async def generate_chat_completion(
 
     # Local-only flags (do not forward as-is).
     native_web_search = payload.pop("native_web_search", False) is True
+    native_file_inputs = payload.pop("native_file_inputs", False) is True
 
     # Responses API routing is strict: if enabled, we only call /responses and surface real errors.
     use_responses_api = _should_use_responses_api(
-        url, api_config, model_id, native_web_search=native_web_search
+        url,
+        api_config,
+        model_id,
+        native_web_search=native_web_search,
+        native_file_inputs=native_file_inputs,
     )
 
     request_url = (
@@ -1986,6 +2435,12 @@ async def generate_chat_completion(
 
         payload_dict = payload
 
+    payload_dict = merge_additive_payload_fields(
+        payload_dict,
+        custom_params,
+        forbidden_keys=_CUSTOM_PARAM_FORBIDDEN_KEYS,
+    )
+
     request_attempts = (
         [(request_url, payload_dict)]
         if use_responses_api
@@ -2008,7 +2463,7 @@ async def generate_chat_completion(
     _store_info = payload_dict.get("store") if isinstance(payload_dict, dict) else None
     _include_info = payload_dict.get("include") if isinstance(payload_dict, dict) else None
     log.info(
-        "[UPSTREAM REQUEST] POST %s | model=%s | payload_keys=%s | messages=%s | tools=%s | size=%d | reasoning=%s | store=%s | include=%s",
+        "[UPSTREAM REQUEST] POST %s | model=%s | payload_keys=%s | messages=%s | tools=%s | size=%d | reasoning=%s | store=%s | include=%s | native_file_inputs=%s | responses=%s",
         request_url,
         payload_dict.get("model", "?") if isinstance(payload_dict, dict) else "?",
         _diag_keys,
@@ -2018,6 +2473,8 @@ async def generate_chat_completion(
         _reasoning_info or "none",
         _store_info,
         _include_info,
+        native_file_inputs,
+        use_responses_api,
     )
     if log.isEnabledFor(logging.DEBUG):
         _diag_headers = {
@@ -2192,6 +2649,12 @@ async def generate_chat_completion(
                     message = _format_responses_upstream_error(
                         request_url=request_url, status=r.status, body=response
                     )
+                    if native_file_inputs:
+                        message = (
+                            "Native file inputs request failed. "
+                            "The upstream rejected the OpenAI Files/Responses "
+                            f"native-file flow.\n{message}"
+                        )
 
                     if client_stream:
                         streaming = True
