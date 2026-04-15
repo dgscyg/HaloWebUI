@@ -14,6 +14,7 @@
 		temporaryChatEnabled,
 		settings,
 		mobile,
+		selectedAssistantScene,
 		type Model
 	} from '$lib/stores';
 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
@@ -37,6 +38,8 @@
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 	import MessageInput from './MessageInput.svelte';
 	import AssistantPickerModal from './AssistantPickerModal.svelte';
+	import AssistantSceneTitle from './Placeholder/AssistantSceneTitle.svelte';
+	import AssistantScenePlaceholder from './Placeholder/AssistantScenePlaceholder.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -217,84 +220,93 @@
 
 	<div class="w-full text-gray-800 dark:text-gray-100 text-center flex items-center font-primary">
 		<div class="w-full flex flex-col justify-center items-center">
-			<!-- Logo/Avatar 区域 - 居中显示，更大尺寸 -->
-			<div class="flex justify-center mb-4" in:fade={{ duration: 100 }}>
-				<div class="flex -space-x-4">
-					{#each models as model, modelIdx}
-						<Tooltip
-							content={(models[modelIdx]?.info?.meta?.tags ?? [])
-								.map((tag) => tag.name.toUpperCase())
-								.join(', ')}
-							placement="top"
-						>
-							<button
-								on:click={() => {
-									selectedModelIdx = modelIdx;
-								}}
+			{#if $selectedAssistantScene}
+				<AssistantSceneTitle
+					assistant={$selectedAssistantScene}
+					on:clear={() => {
+						selectedAssistantScene.set(null);
+					}}
+				/>
+			{:else}
+				<!-- Logo/Avatar 区域 - 居中显示，更大尺寸 -->
+				<div class="flex justify-center mb-4" in:fade={{ duration: 100 }}>
+					<div class="flex -space-x-4">
+						{#each models as model, modelIdx}
+							<Tooltip
+								content={(models[modelIdx]?.info?.meta?.tags ?? [])
+									.map((tag) => tag.name.toUpperCase())
+									.join(', ')}
+								placement="top"
 							>
-								<ModelIcon
-									src={model?.info?.meta?.profile_image_url ??
-										model?.meta?.profile_image_url ??
-										($i18n.language === 'dg-DG'
-											? `/doge.png`
-											: `${WEBUI_BASE_URL}/static/favicon.png`)}
-									className="size-14 @sm:size-16 rounded-2xl border-2 border-white dark:border-gray-800 shadow-lg"
-									alt="logo"
-								/>
-							</button>
-						</Tooltip>
-					{/each}
+								<button
+									on:click={() => {
+										selectedModelIdx = modelIdx;
+									}}
+								>
+									<ModelIcon
+										src={model?.info?.meta?.profile_image_url ??
+											model?.meta?.profile_image_url ??
+											($i18n.language === 'dg-DG'
+												? `/doge.png`
+												: `${WEBUI_BASE_URL}/static/favicon.png`)}
+										className="size-14 @sm:size-16 rounded-2xl border-2 border-white dark:border-gray-800 shadow-lg"
+										alt="logo"
+									/>
+								</button>
+							</Tooltip>
+						{/each}
+					</div>
 				</div>
-			</div>
 
-			<!-- 模型名称/问候语 - 字体适中 -->
-			<div class="text-xl @sm:text-2xl font-medium line-clamp-1 px-4" in:fade={{ duration: 100 }}>
-				{#if models[selectedModelIdx]?.name}
-					{getModelChatDisplayName(models[selectedModelIdx])}
-				{:else}
-					{$i18n.t('Hello, {{name}}', { name: $user?.name })}
-				{/if}
-			</div>
-
-			<!-- 模型描述 -->
-			<div class="flex mt-2 mb-4">
-				<div in:fade={{ duration: 100, delay: 50 }}>
-					{#if models[selectedModelIdx]?.info?.meta?.description ?? null}
-						<Tooltip
-							className=" w-fit"
-							content={marked.parse(
-								sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description ?? '')
-							)}
-							placement="top"
-						>
-							<div
-								class="mt-0.5 px-3 text-sm font-normal text-gray-500 dark:text-gray-400 line-clamp-2 max-w-xl markdown"
-							>
-								{@html marked.parse(
-									sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description)
-								)}
-							</div>
-						</Tooltip>
-
-						{#if models[selectedModelIdx]?.info?.meta?.user}
-							<div class="mt-0.5 text-sm font-normal text-gray-400 dark:text-gray-500">
-								By
-								{#if models[selectedModelIdx]?.info?.meta?.user.community}
-									<a
-										href="https://openwebui.com/m/{models[selectedModelIdx]?.info?.meta?.user
-											.username}"
-										>{models[selectedModelIdx]?.info?.meta?.user.name
-											? models[selectedModelIdx]?.info?.meta?.user.name
-											: `@${models[selectedModelIdx]?.info?.meta?.user.username}`}</a
-									>
-								{:else}
-									{models[selectedModelIdx]?.info?.meta?.user.name}
-								{/if}
-							</div>
-						{/if}
+				<!-- 模型名称/问候语 - 字体适中 -->
+				<div class="text-xl @sm:text-2xl font-medium line-clamp-1 px-4" in:fade={{ duration: 100 }}>
+					{#if models[selectedModelIdx]?.name}
+						{getModelChatDisplayName(models[selectedModelIdx])}
+					{:else}
+						{$i18n.t('Hello, {{name}}', { name: $user?.name })}
 					{/if}
 				</div>
-			</div>
+
+				<!-- 模型描述 -->
+				<div class="flex mt-2 mb-4">
+					<div in:fade={{ duration: 100, delay: 50 }}>
+						{#if models[selectedModelIdx]?.info?.meta?.description ?? null}
+							<Tooltip
+								className=" w-fit"
+								content={marked.parse(
+									sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description ?? '')
+								)}
+								placement="top"
+							>
+								<div
+									class="mt-0.5 px-3 text-sm font-normal text-gray-500 dark:text-gray-400 line-clamp-2 max-w-xl markdown"
+								>
+									{@html marked.parse(
+										sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description)
+									)}
+								</div>
+							</Tooltip>
+
+							{#if models[selectedModelIdx]?.info?.meta?.user}
+								<div class="mt-0.5 text-sm font-normal text-gray-400 dark:text-gray-500">
+									By
+									{#if models[selectedModelIdx]?.info?.meta?.user.community}
+										<a
+											href="https://openwebui.com/m/{models[selectedModelIdx]?.info?.meta?.user
+												.username}"
+											>{models[selectedModelIdx]?.info?.meta?.user.name
+												? models[selectedModelIdx]?.info?.meta?.user.name
+												: `@${models[selectedModelIdx]?.info?.meta?.user.username}`}</a
+										>
+									{:else}
+										{models[selectedModelIdx]?.info?.meta?.user.name}
+									{/if}
+								</div>
+							{/if}
+						{/if}
+					</div>
+				</div>
+			{/if}
 
 			<div class="mx-auto w-full max-w-4xl pt-2 pb-3 text-base font-normal {atSelectedModel ? 'mt-2' : ''}">
 				<MessageInput
@@ -344,7 +356,7 @@
 			</div>
 		</div>
 	{/if}
-	{#if !activeAssistant && onActivateAssistant && ($settings?.showFeaturedAssistantsOnHome ?? true)}
+	{#if !$selectedAssistantScene && !activeAssistant && onActivateAssistant && ($settings?.showFeaturedAssistantsOnHome ?? true)}
 		<div class="mx-auto mt-1 w-full max-w-4xl px-2.5" in:fade={{ duration: 160, delay: 120 }}>
 			<div class="rounded-3xl border border-gray-200/60 bg-white/65 p-3 text-left shadow-sm backdrop-blur-xl dark:border-gray-700/30 dark:bg-white/[0.03]">
 				<div class="flex items-center justify-between gap-3 px-1">
@@ -491,6 +503,32 @@
 						</button>
 					</div>
 				{/if}
+			</div>
+		</div>
+	{/if}
+	{#if $selectedAssistantScene}
+		<div
+			class="mx-auto mt-4 w-full max-w-4xl px-2.5 font-primary"
+			in:fade={{ duration: 200, delay: 200 }}
+		>
+			<AssistantScenePlaceholder assistant={$selectedAssistantScene} />
+		</div>
+	{:else}
+		<div
+			class="mx-auto w-full max-w-4xl px-2.5 font-primary {!activeAssistant && onActivateAssistant && ($settings?.showFeaturedAssistantsOnHome ?? true) ? 'mt-4' : 'mt-2'}"
+			in:fade={{ duration: 200, delay: 200 }}
+		>
+			<div>
+				<Suggestions
+					suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??
+						models[selectedModelIdx]?.info?.meta?.suggestion_prompts ??
+						$config?.default_prompt_suggestions ??
+						[]}
+					inputValue={prompt}
+					on:select={(e) => {
+						selectSuggestionPrompt(e.detail);
+					}}
+				/>
 			</div>
 		</div>
 	{/if}

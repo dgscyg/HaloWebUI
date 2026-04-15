@@ -100,6 +100,7 @@ from open_webui.utils.native_web_search import (
 from open_webui.utils.payload import merge_additive_payload_fields
 from open_webui.utils.task import (
     get_task_model_id,
+    prompt_template,
     rag_template,
     tools_function_calling_generation_template,
 )

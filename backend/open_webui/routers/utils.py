@@ -1,12 +1,15 @@
 import logging
 import markdown
+import time
 from pathlib import Path
+from typing import Any
 
 from open_webui.models.chats import ChatTitleMessagesForm
 from open_webui.config import DATA_DIR, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 from starlette.responses import FileResponse
 
 
@@ -14,12 +17,25 @@ from open_webui.utils.misc import get_gravatar_url
 from open_webui.utils.pdf_generator import PDFGenerator
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.code_interpreter import execute_code_jupyter
-from open_webui.env import SRC_LOG_LEVELS
 from open_webui.utils.optional_dependencies import (
     OptionalDependencyError,
     require_module,
 )
-
+from open_webui.utils.data_management import (
+    DB_RESTORE_CONFIRMATION,
+    cleanup_path,
+    create_restore_token,
+    create_sqlite_snapshot,
+    ensure_db_restore_state,
+    get_database_restore_support,
+    inspect_sqlite_backup,
+    pop_restore_token,
+    prune_db_restore_tokens,
+    refresh_runtime_after_restore,
+    restore_sqlite_backup,
+    write_upload_to_temp,
+)
+from open_webui.env import SRC_LOG_LEVELS, UVICORN_WORKERS
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -110,6 +126,26 @@ class ChatForm(BaseModel):
     messages: list[dict]
 
 
+class DatabaseRestoreInspectResponse(BaseModel):
+    token: str
+    compatible: bool
+    filename: str
+    size: int
+    warnings: list[str]
+    summary: dict[str, Any]
+    confirmation: str
+
+
+class DatabaseRestoreForm(BaseModel):
+    token: str
+    confirmation: str
+
+
+class DatabaseRestoreResponse(BaseModel):
+    restored: bool
+    requires_reload: bool
+
+
 @router.post("/pdf")
 async def download_chat_as_pdf(
     form_data: ChatTitleMessagesForm, user=Depends(get_verified_user)
@@ -141,11 +177,159 @@ async def download_db(user=Depends(get_admin_user)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.DB_NOT_SQLITE,
         )
+
+    try:
+        snapshot_path = create_sqlite_snapshot(engine)
+    except Exception as e:
+        log.exception("Failed to create SQLite snapshot")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
     return FileResponse(
-        engine.url.database,
+        str(snapshot_path),
         media_type="application/octet-stream",
         filename="webui.db",
+        background=BackgroundTask(cleanup_path, snapshot_path),
     )
+
+
+def _assert_restore_supported():
+    from open_webui.internal.db import engine
+
+    support = get_database_restore_support(engine.name, UVICORN_WORKERS)
+    if support["backend"] != "sqlite":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DB_NOT_SQLITE,
+        )
+    if not support["supported"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Database restore is only available when running with a single server worker.",
+        )
+
+    return engine
+
+
+@router.post("/db/restore/inspect", response_model=DatabaseRestoreInspectResponse)
+async def inspect_db_restore(
+    request: Request,
+    file: UploadFile = File(...),
+    user=Depends(get_admin_user),
+):
+    if not ENABLE_ADMIN_EXPORT:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    _assert_restore_supported()
+    prune_db_restore_tokens(request.app)
+
+    staged_path = write_upload_to_temp(file, "open-webui-db-restore-")
+    try:
+        inspection = inspect_sqlite_backup(staged_path)
+    except Exception as e:
+        cleanup_path(staged_path)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    token_payload = create_restore_token(
+        request.app,
+        path=str(staged_path),
+        filename=file.filename or staged_path.name,
+        user_id=user.id,
+    )
+
+    return DatabaseRestoreInspectResponse(
+        token=token_payload["token"],
+        compatible=True,
+        filename=token_payload["filename"],
+        size=staged_path.stat().st_size,
+        warnings=inspection["warnings"],
+        summary=inspection["summary"],
+        confirmation=DB_RESTORE_CONFIRMATION,
+    )
+
+
+@router.post("/db/restore", response_model=DatabaseRestoreResponse)
+async def restore_db(
+    request: Request,
+    form_data: DatabaseRestoreForm,
+    user=Depends(get_admin_user),
+):
+    if not ENABLE_ADMIN_EXPORT:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    if form_data.confirmation != DB_RESTORE_CONFIRMATION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The confirmation phrase is incorrect.",
+        )
+
+    engine = _assert_restore_supported()
+    restore_lock, _ = ensure_db_restore_state(request.app)
+    token_payload = pop_restore_token(request.app, form_data.token)
+
+    if token_payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The restore session has expired. Please inspect the backup again.",
+        )
+    if token_payload["user_id"] != user.id:
+        cleanup_path(token_payload.get("path"))
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    uploaded_path = Path(token_payload["path"])
+    if not uploaded_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded restore file is no longer available. Please inspect it again.",
+        )
+
+    if restore_lock.locked():
+        cleanup_path(uploaded_path)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another database restore is already in progress.",
+        )
+
+    rollback_created = False
+
+    async with restore_lock:
+        try:
+            rollback_name = f"webui-rollback-{time.strftime('%Y%m%d-%H%M%S')}.db"
+            create_sqlite_snapshot(engine, filename=rollback_name)
+            rollback_created = True
+
+            engine.dispose()
+            restore_sqlite_backup(uploaded_path, Path(engine.url.database))
+            refresh_runtime_after_restore(request.app)
+
+            return DatabaseRestoreResponse(restored=True, requires_reload=True)
+        except Exception as e:
+            log.exception("Database restore failed")
+            detail = (
+                "Database restore failed after creating a rollback backup on the server."
+                if rollback_created
+                else "Database restore failed before the rollback backup completed."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{detail} {e}",
+            )
+        finally:
+            cleanup_path(uploaded_path)
 
 
 @router.get("/litellm/config")

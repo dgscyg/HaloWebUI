@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { v4 as uuidv4 } from 'uuid';
-
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import {
@@ -13,6 +11,7 @@
 		showSidebar,
 		mobile,
 		showArchivedChats,
+		selectedAssistantScene,
 		pinnedChats,
 		scrollPaginationEnabled,
 		currentChatPage,
@@ -27,20 +26,19 @@
 	const i18n = getContext('i18n');
 
 	import {
-		deleteChatById,
 		getChatList,
+		getChatListByAssistantId,
 		getAllTags,
 		getChatListBySearchText,
-		createNewChat,
 		getPinnedChatList,
 		toggleChatPinnedStatusById,
-		getChatPinnedStatusById,
 		getChatById,
 		updateChatFolderIdById,
 		importChat
 	} from '$lib/apis/chats';
-	import { createNewFolder, getFolders, updateFolderParentIdById } from '$lib/apis/folders';
 	import { WEBUI_BASE_URL } from '$lib/constants';
+	import { getModels as getWorkspaceModels } from '$lib/apis/models';
+	import { getModelChatDisplayName } from '$lib/utils/model-display';
 
 	import ArchivedChatsModal from './Sidebar/ArchivedChatsModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
@@ -52,15 +50,12 @@
 	import Folder from '../common/Folder.svelte';
 	import Plus from '../icons/Plus.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
-	import Folders from './Sidebar/Folders.svelte';
 	import { getChannels, createNewChannel } from '$lib/apis/channels';
 	import ChannelModal from './Sidebar/ChannelModal.svelte';
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
 	import ChatBubblePlus from '../icons/ChatBubblePlus.svelte';
 	import Search from '../icons/Search.svelte';
 	import ArchiveBox from '../icons/ArchiveBox.svelte';
-
-	const BREAKPOINT = 768;
 
 	type SidebarStyle = 'flat' | 'card';
 	const SIDEBAR_STYLE_QUERY_KEY = 'sidebarStyle';
@@ -118,89 +113,47 @@
 	// Pagination variables
 	let chatListLoading = false;
 	let allChatsLoaded = false;
+	let assistantScenes = [];
 
-	let folders = {};
-	let newFolderId = null;
+	const isAssistantSceneModel = (model) => {
+		const baseModelId = model?.base_model_id ?? model?.info?.base_model_id ?? null;
+		const meta = model?.meta ?? model?.info?.meta ?? {};
+		const isActive = model?.is_active ?? model?.info?.is_active ?? true;
 
-	const initFolders = async () => {
-		const folderList = await getFolders(localStorage.token).catch((error) => {
+		return Boolean(baseModelId) && meta?.hidden !== true && isActive !== false;
+	};
+
+	const loadAssistantScenes = async () => {
+		const models = await getWorkspaceModels(localStorage.token).catch((error) => {
 			toast.error(`${error}`);
 			return [];
 		});
 
-		folders = {};
+		assistantScenes = (models ?? [])
+			.filter((model) => isAssistantSceneModel(model))
+			.sort((a, b) =>
+				getModelChatDisplayName(a).localeCompare(getModelChatDisplayName(b), undefined, {
+					numeric: true,
+					sensitivity: 'base'
+				})
+			);
 
-		// First pass: Initialize all folder entries
-		for (const folder of folderList) {
-			// Ensure folder is added to folders with its data
-			folders[folder.id] = { ...(folders[folder.id] || {}), ...folder };
-
-			if (newFolderId && folder.id === newFolderId) {
-				folders[folder.id].new = true;
-				newFolderId = null;
-			}
-		}
-
-		// Second pass: Tie child folders to their parents
-		for (const folder of folderList) {
-			if (folder.parent_id) {
-				// Ensure the parent folder is initialized if it doesn't exist
-				if (!folders[folder.parent_id]) {
-					folders[folder.parent_id] = {}; // Create a placeholder if not already present
-				}
-
-				// Initialize childrenIds array if it doesn't exist and add the current folder id
-				folders[folder.parent_id].childrenIds = folders[folder.parent_id].childrenIds
-					? [...folders[folder.parent_id].childrenIds, folder.id]
-					: [folder.id];
-
-				// Sort the children by updated_at field
-				folders[folder.parent_id].childrenIds.sort((a, b) => {
-					return folders[b].updated_at - folders[a].updated_at;
-				});
-			}
+		if (
+			$selectedAssistantScene &&
+			!assistantScenes.some((model) => model.id === $selectedAssistantScene?.id)
+		) {
+			selectedAssistantScene.set(null);
 		}
 	};
 
-	const createFolder = async (name = 'Untitled') => {
-		if (name === '') {
-			toast.error($i18n.t('Folder name cannot be empty.'));
-			return;
-		}
+	const enterAssistantScene = async (assistant) => {
+		selectedChatId = null;
+		selectedAssistantScene.set(assistant);
+		await chatId.set('');
+		await goto('/');
 
-		const rootFolders = Object.values(folders).filter((folder) => folder.parent_id === null);
-		if (rootFolders.find((folder) => folder.name.toLowerCase() === name.toLowerCase())) {
-			// If a folder with the same name already exists, append a number to the name
-			let i = 1;
-			while (
-				rootFolders.find((folder) => folder.name.toLowerCase() === `${name} ${i}`.toLowerCase())
-			) {
-				i++;
-			}
-
-			name = `${name} ${i}`;
-		}
-
-		// Add a dummy folder to the list to show the user that the folder is being created
-		const tempId = uuidv4();
-		folders = {
-			...folders,
-			tempId: {
-				id: tempId,
-				name: name,
-				created_at: Date.now(),
-				updated_at: Date.now()
-			}
-		};
-
-		const res = await createNewFolder(localStorage.token, name).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (res) {
-			newFolderId = res.id;
-			await initFolders();
+		if ($mobile) {
+			showSidebar.set(false);
 		}
 	};
 
@@ -212,12 +165,13 @@
 		// Reset pagination variables
 		tags.set(await getAllTags(localStorage.token));
 		pinnedChats.set(await getPinnedChatList(localStorage.token));
-		initFolders();
 
 		currentChatPage.set(1);
 		allChatsLoaded = false;
 
-		if (search) {
+		if (!search && $selectedAssistantScene?.id) {
+			await chats.set(await getChatListByAssistantId(localStorage.token, $selectedAssistantScene.id));
+		} else if (search) {
 			await chats.set(await getChatListBySearchText(localStorage.token, search, $currentChatPage));
 		} else {
 			await chats.set(await getChatList(localStorage.token, $currentChatPage));
@@ -234,7 +188,13 @@
 
 		let newChatList = [];
 
-		if (search) {
+		if (!search && $selectedAssistantScene?.id) {
+			newChatList = await getChatListByAssistantId(
+				localStorage.token,
+				$selectedAssistantScene.id,
+				$currentChatPage
+			);
+		} else if (search) {
 			newChatList = await getChatListBySearchText(localStorage.token, search, $currentChatPage);
 		} else {
 			newChatList = await getChatList(localStorage.token, $currentChatPage);
@@ -272,6 +232,13 @@
 			}, 1000);
 		}
 	};
+
+	$: if (typeof localStorage !== 'undefined') {
+		$selectedAssistantScene;
+		if (!search) {
+			void initChatList();
+		}
+	}
 
 	const importChatHandler = async (items, pinned = false, folderId = null) => {
 		console.log('importChatHandler', items, pinned, folderId);
@@ -435,6 +402,7 @@
 
 		await initChannels();
 		await initChatList();
+		await loadAssistantScenes();
 
 		window.addEventListener('keydown', onKeyDown);
 		window.addEventListener('keyup', onKeyUp);
@@ -547,6 +515,7 @@
 					class={brandLinkClass}
 					on:click|preventDefault={async () => {
 						selectedChatId = null;
+						selectedAssistantScene.set(null);
 						await goto('/?fresh-chat=true');
 						if ($mobile) {
 							showSidebar.set(false);
@@ -634,6 +603,7 @@
 					aria-label={$i18n.t('New Chat')}
 					on:click={async () => {
 						selectedChatId = null;
+						selectedAssistantScene.set(null);
 						await goto('/');
 						const newChatButton = document.getElementById('new-chat-button');
 						setTimeout(() => {
@@ -658,6 +628,7 @@
 					on:click={() => {
 						selectedChatId = null;
 						chatId.set('');
+						selectedAssistantScene.set(null);
 
 						if ($mobile) {
 							showSidebar.set(false);
@@ -695,6 +666,7 @@
 						draggable="false"
 						on:click={async () => {
 							selectedChatId = null;
+							selectedAssistantScene.set(null);
 							await goto('/');
 							const newChatButton = document.getElementById('new-chat-button');
 							setTimeout(() => {
@@ -714,6 +686,7 @@
 							on:click={() => {
 								selectedChatId = null;
 								chatId.set('');
+								selectedAssistantScene.set(null);
 							}}
 							draggable="false"
 						>
@@ -815,68 +788,68 @@
 					</Folder>
 				{/if}
 
+				{#if !search}
+					<Folder className="px-2 mt-0.5" name={$i18n.t('Assistants')} dragAndDrop={false}>
+						{#if assistantScenes.length > 0}
+							<div class="mt-1 flex flex-col gap-1">
+								{#each assistantScenes as assistant}
+									<button
+										type="button"
+										class="mx-2 flex w-auto items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition {($selectedAssistantScene?.id ?? null) ===
+										assistant.id
+											? 'bg-gray-200 text-gray-900 dark:bg-gray-800 dark:text-gray-100'
+											: 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-850'}"
+										on:click={() => {
+											void enterAssistantScene(assistant);
+										}}
+									>
+										<img
+											src={assistant?.meta?.profile_image_url ??
+												assistant?.info?.meta?.profile_image_url ??
+												`${WEBUI_BASE_URL}/static/favicon.png`}
+											alt={getModelChatDisplayName(assistant)}
+											class="size-7 shrink-0 rounded-lg object-cover {(assistant?.meta?.profile_image_url ??
+											assistant?.info?.meta?.profile_image_url)
+												? ''
+												: 'dark:invert'}"
+											draggable="false"
+										/>
+										<div class="min-w-0 flex-1">
+											<div class="line-clamp-1 font-medium">
+												{getModelChatDisplayName(assistant)}
+											</div>
+										</div>
+									</button>
+								{/each}
+							</div>
+						{:else}
+							<div class="mx-2 mt-1 rounded-xl border border-dashed border-gray-200/80 px-3 py-3 text-xs text-gray-500 dark:border-gray-700/70 dark:text-gray-400">
+								<div>{$i18n.t('No assistants yet. Create your first assistant to get started.')}</div>
+								<a
+									class="mt-2 inline-flex rounded-full px-2.5 py-1.5 text-xs font-medium transition hover:bg-gray-100 dark:hover:bg-gray-850"
+									href="/workspace/models/create"
+								>
+									{$i18n.t('Create')}
+								</a>
+							</div>
+						{/if}
+					</Folder>
+				{/if}
+
 				<Folder
 					collapsible={!search}
 					className="px-2 mt-0.5"
 					name={$i18n.t('Chats')}
-					onAdd={() => {
-						createFolder();
-					}}
-					onAddLabel={$i18n.t('New Folder')}
+					dragAndDrop={false}
 					on:import={(e) => {
 						importChatHandler(e.detail);
-					}}
-					on:drop={async (e) => {
-						const { type, id, item } = e.detail;
-
-						if (type === 'chat') {
-							let chat = await getChatById(localStorage.token, id).catch((error) => {
-								return null;
-							});
-							if (!chat && item) {
-								chat = await importChat(localStorage.token, item.chat, item?.meta ?? {});
-							}
-
-							if (chat) {
-								console.log(chat);
-								if (chat.folder_id) {
-									const res = await updateChatFolderIdById(localStorage.token, chat.id, null).catch(
-										(error) => {
-											toast.error(`${error}`);
-											return null;
-										}
-									);
-								}
-
-								if (chat.pinned) {
-									const res = await toggleChatPinnedStatusById(localStorage.token, chat.id);
-								}
-
-								initChatList();
-							}
-						} else if (type === 'folder') {
-							if (folders[id].parent_id === null) {
-								return;
-							}
-
-							const res = await updateFolderParentIdById(localStorage.token, id, null).catch(
-								(error) => {
-									toast.error(`${error}`);
-									return null;
-								}
-							);
-
-							if (res) {
-								await initFolders();
-							}
-						}
 					}}
 				>
 					{#if $temporaryChatEnabled}
 						<div class="absolute z-40 w-full h-full flex justify-center"></div>
 					{/if}
 
-					{#if !search && $pinnedChats.length > 0}
+					{#if !search && !$selectedAssistantScene && $pinnedChats.length > 0}
 						<div class="flex flex-col space-y-1 rounded-xl">
 							<Folder
 								className=""
@@ -931,6 +904,7 @@
 											uiStyle={sidebarStyle}
 											id={chat.id}
 											title={chat.title}
+											assistantId={chat.assistant_id}
 											{shiftKey}
 											selected={selectedChatId === chat.id}
 											on:select={() => {
@@ -951,23 +925,6 @@
 								</div>
 							</Folder>
 						</div>
-					{/if}
-
-					{#if !search && folders}
-						<Folders
-							{folders}
-							uiStyle={sidebarStyle}
-							on:import={(e) => {
-								const { folderId, items } = e.detail;
-								importChatHandler(items, false, folderId);
-							}}
-							on:update={async (e) => {
-								initChatList();
-							}}
-							on:change={async () => {
-								initChatList();
-							}}
-						/>
 					{/if}
 
 					<div class=" flex-1 flex flex-col overflow-y-auto scrollbar-hidden">
@@ -1008,6 +965,7 @@
 										uiStyle={sidebarStyle}
 										id={chat.id}
 										title={chat.title}
+										assistantId={chat.assistant_id ?? $selectedAssistantScene?.id ?? null}
 										{shiftKey}
 										selected={selectedChatId === chat.id}
 										on:select={() => {

@@ -5,23 +5,112 @@
 	import { toast } from 'svelte-sonner';
 
 	import ArchivedChatsModal from '$lib/components/layout/Sidebar/ArchivedChatsModal.svelte';
+	import DataManagementStatus from '$lib/components/settings/DataManagementStatus.svelte';
+	import { getBackendConfig } from '$lib/apis';
+	import { getErrorDetail } from '$lib/apis/response';
 	import { chats, config, currentChatPage, scrollPaginationEnabled, user } from '$lib/stores';
 	import {
 		archiveAllChats,
-		createNewChat,
 		deleteAllChats,
 		getAllChats,
 		getAllUserChats,
-		getChatList
+		getChatList,
+		importChatsBatch
 	} from '$lib/apis/chats';
-	import { downloadDatabase } from '$lib/apis/utils';
 	import { exportConfig, importConfig } from '$lib/apis/configs';
+	import {
+		downloadDatabase,
+		inspectDatabaseRestore,
+		restoreDatabase
+	} from '$lib/apis/utils';
 	import { convertOpenAIChats, getImportOrigin } from '$lib/utils';
 
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
 
 	type DataManagementTab = 'chatManagement' | 'backups' | 'dangerZone';
+	type ImportMode = 'merge' | 'replace';
+	type OperationKey =
+		| 'chatImport'
+		| 'chatExport'
+		| 'configImport'
+		| 'configExport'
+		| 'databaseExport'
+		| 'databaseRestore'
+		| 'allUserChatsExport'
+		| 'archiveAll'
+		| 'deleteAll';
+	type OperationPhase = 'idle' | 'validating' | 'running' | 'success' | 'warning' | 'error';
+
+	type OperationState = {
+		phase: OperationPhase;
+		title: string;
+		detail: string;
+		updatedAt: number | null;
+	};
+
+	type NormalizedChatImportItem = {
+		chat: Record<string, any>;
+		meta: Record<string, any>;
+		pinned: boolean;
+		folder_id: string | null;
+		assistant_id: string | null;
+		title: string;
+	};
+
+	type ChatImportDraft = {
+		fileName: string;
+		origin: 'openai' | 'webui';
+		items: NormalizedChatImportItem[];
+		count: number;
+		invalidCount: number;
+		mode: ImportMode;
+		confirmReplace: boolean;
+	};
+
+	type ConfigImportDraft = {
+		fileName: string;
+		payload: Record<string, any>;
+		topLevelKeys: string[];
+		mode: ImportMode;
+		confirmReplace: boolean;
+	};
+
+	type DatabaseRestoreDraft = {
+		fileName: string;
+		fileSize: number;
+		token: string;
+		warnings: string[];
+		summary: {
+			table_count: number;
+			tables_preview: string[];
+			has_chat_table: boolean;
+			has_config_table: boolean;
+			has_user_table?: boolean;
+		};
+		confirmationPhrase: string;
+	};
+
+	const createInitialOperationState = (): OperationState => ({
+		phase: 'idle',
+		title: '',
+		detail: '',
+		updatedAt: null
+	});
+
+	const createOperationStateMap = (): Record<OperationKey, OperationState> => ({
+		chatImport: createInitialOperationState(),
+		chatExport: createInitialOperationState(),
+		configImport: createInitialOperationState(),
+		configExport: createInitialOperationState(),
+		databaseExport: createInitialOperationState(),
+		databaseRestore: createInitialOperationState(),
+		allUserChatsExport: createInitialOperationState(),
+		archiveAll: createInitialOperationState(),
+		deleteAll: createInitialOperationState()
+	});
+
+	let operationStates = createOperationStateMap();
 
 	// Historical route note: /settings/chats renders the Data Management page.
 	let selectedTab: DataManagementTab = 'chatManagement';
@@ -41,8 +130,8 @@
 			iconColor: 'text-blue-500 dark:text-blue-400'
 		},
 		backups: {
-			label: $i18n.t('Data Export'),
-			description: `${$i18n.t('Configuration')} · ${$i18n.t('Database')}`,
+			label: $i18n.t('Database'),
+			description: `${$i18n.t('Configuration')} · ${$i18n.t('Backup / Restore')}`,
 			badgeColor: 'bg-emerald-50 dark:bg-emerald-950/30',
 			iconColor: 'text-emerald-500 dark:text-emerald-400'
 		},
@@ -58,134 +147,693 @@
 	>;
 	$: activeTabMeta = tabMeta[selectedTab];
 
-	let importFiles: FileList | null = null;
+	$: databaseRestoreSupport = {
+		supported: Boolean($config?.features?.database_restore_supported ?? false),
+		backend: String($config?.features?.database_backend ?? ''),
+		reason: $config?.features?.database_restore_reason ?? null,
+		workerCount: Number($config?.features?.uvicorn_workers ?? 1)
+	};
+
 	let showArchiveConfirm = false;
 	let showDeleteConfirm = false;
 	let showArchivedChatsModal = false;
+
+	let chatImportDraft: ChatImportDraft | null = null;
+	let configImportDraft: ConfigImportDraft | null = null;
+	let databaseRestoreDraft: DatabaseRestoreDraft | null = null;
+	let databaseRestoreConfirmationInput = '';
+
 	let chatImportInputElement: HTMLInputElement;
 	let configImportInputElement: HTMLInputElement;
+	let databaseRestoreInputElement: HTMLInputElement;
 
 	const btnNeutral =
-		'shrink-0 inline-flex items-center justify-center h-8 px-4 text-xs font-medium rounded-lg glass-input text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/80 active:scale-[0.97] transition-all';
+		'shrink-0 inline-flex items-center justify-center gap-2 h-8 px-4 text-xs font-medium rounded-lg glass-input text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/80 active:scale-[0.97] transition-all disabled:cursor-not-allowed disabled:opacity-60';
 	const btnWarn =
-		'shrink-0 inline-flex items-center justify-center h-8 px-4 text-xs font-medium rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-600 dark:bg-orange-950/30 dark:hover:bg-orange-900/40 dark:text-orange-400 border border-orange-200/60 dark:border-orange-800/30 active:scale-[0.97] transition-all';
+		'shrink-0 inline-flex items-center justify-center gap-2 h-8 px-4 text-xs font-medium rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-600 dark:bg-orange-950/30 dark:hover:bg-orange-900/40 dark:text-orange-400 border border-orange-200/60 dark:border-orange-800/30 active:scale-[0.97] transition-all disabled:cursor-not-allowed disabled:opacity-60';
 	const btnDanger =
-		'shrink-0 inline-flex items-center justify-center h-8 px-4 text-xs font-medium rounded-lg bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-950/30 dark:hover:bg-red-900/40 dark:text-red-400 border border-red-200/60 dark:border-red-800/30 active:scale-[0.97] transition-all';
+		'shrink-0 inline-flex items-center justify-center gap-2 h-8 px-4 text-xs font-medium rounded-lg bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-950/30 dark:hover:bg-red-900/40 dark:text-red-400 border border-red-200/60 dark:border-red-800/30 active:scale-[0.97] transition-all disabled:cursor-not-allowed disabled:opacity-60';
 	const btnSmall =
 		'shrink-0 inline-flex items-center justify-center h-7 px-3 text-xs font-medium rounded-md glass-input text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/80 active:scale-[0.97] transition-all';
 	const btnSmallWarn =
 		'shrink-0 inline-flex items-center justify-center h-7 px-3 text-xs font-medium rounded-md bg-orange-50 hover:bg-orange-100 text-orange-600 dark:bg-orange-950/30 dark:hover:bg-orange-900/40 dark:text-orange-400 border border-orange-200/60 dark:border-orange-800/30 active:scale-[0.97] transition-all';
 	const btnSmallDanger =
 		'shrink-0 inline-flex items-center justify-center h-7 px-3 text-xs font-medium rounded-md bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-950/30 dark:hover:bg-red-900/40 dark:text-red-400 border border-red-200/60 dark:border-red-800/30 active:scale-[0.97] transition-all';
+	const badgeClass =
+		'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium';
+	const modeButtonBase =
+		'inline-flex items-center justify-center h-8 rounded-lg px-3 text-xs font-medium transition-all border';
+	const replaceConfirmationInputClass =
+		'w-full rounded-lg border border-red-200/70 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-200 dark:border-red-800/40 dark:bg-gray-900/70 dark:text-gray-100 dark:focus:border-red-700 dark:focus:ring-red-900/40';
 
-	$: if (importFiles) {
-		const reader = new FileReader();
-		reader.onload = (event) => {
-			let nextChats = JSON.parse(String(event.target?.result ?? '[]'));
-			if (getImportOrigin(nextChats) === 'openai') {
-				try {
-					nextChats = convertOpenAIChats(nextChats);
-				} catch (error) {
-					console.log('Unable to import chats:', error);
-				}
+	const setOperationState = (
+		key: OperationKey,
+		phase: OperationPhase,
+		title: string,
+		detail = ''
+	) => {
+		operationStates = {
+			...operationStates,
+			[key]: {
+				phase,
+				title,
+				detail,
+				updatedAt: Date.now()
 			}
-			importChats(nextChats);
 		};
+	};
 
-		if (importFiles.length > 0) {
-			reader.readAsText(importFiles[0]);
+	const hasOperationState = (key: OperationKey) => operationStates[key].updatedAt !== null;
+
+	const formatError = (error: unknown, fallback: string) => getErrorDetail(error, fallback);
+
+	const formatBytes = (size: number) => {
+		if (!Number.isFinite(size) || size <= 0) {
+			return '0 B';
 		}
-	}
 
-	const importChats = async (nextChats: any[]) => {
-		for (const chat of nextChats) {
-			if (chat.chat) {
-				await createNewChat(localStorage.token, chat.chat);
-			} else {
-				await createNewChat(localStorage.token, chat);
+		const units = ['B', 'KB', 'MB', 'GB'];
+		const power = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1);
+		const value = size / 1024 ** power;
+		return `${value >= 10 || power === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[power]}`;
+	};
+
+	const isRecord = (value: unknown): value is Record<string, any> =>
+		value !== null && typeof value === 'object' && !Array.isArray(value);
+
+	const readFileText = async (file: File): Promise<string> => {
+		return await new Promise((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = (event) => resolve(String(event.target?.result ?? ''));
+			reader.onerror = () => reject(new Error($i18n.t('Failed to read file')));
+			reader.readAsText(file);
+		});
+	};
+
+	const normalizeChatImportItems = (
+		raw: unknown
+	): {
+		items: NormalizedChatImportItem[];
+		origin: 'openai' | 'webui';
+		invalidCount: number;
+	} => {
+		if (!Array.isArray(raw)) {
+			throw new Error($i18n.t('Invalid JSON'));
+		}
+
+		let origin: 'openai' | 'webui' = 'webui';
+		if (raw.length > 0) {
+			try {
+				origin = getImportOrigin(raw) === 'openai' ? 'openai' : 'webui';
+			} catch {
+				origin = 'webui';
 			}
 		}
 
+		let sourceItems: any[] = raw;
+		let invalidCount = 0;
+		if (origin === 'openai') {
+			sourceItems = convertOpenAIChats(raw);
+			invalidCount = raw.length - sourceItems.length;
+		}
+
+		const items = sourceItems
+			.map((item) => {
+				if (isRecord(item) && isRecord(item.chat)) {
+					return {
+						chat: item.chat,
+						meta: isRecord(item.meta) ? item.meta : {},
+						pinned: Boolean(item.pinned),
+						folder_id: typeof item.folder_id === 'string' ? item.folder_id : null,
+						assistant_id:
+							typeof item.assistant_id === 'string' ? item.assistant_id : null,
+						title:
+							typeof item.title === 'string'
+								? item.title
+								: typeof item.chat.title === 'string'
+									? item.chat.title
+									: 'New Chat'
+					} satisfies NormalizedChatImportItem;
+				}
+
+				if (isRecord(item)) {
+					return {
+						chat: item,
+						meta: {},
+						pinned: false,
+						folder_id: null,
+						assistant_id: null,
+						title: typeof item.title === 'string' ? item.title : 'New Chat'
+					} satisfies NormalizedChatImportItem;
+				}
+
+				return null;
+			})
+			.filter(Boolean) as NormalizedChatImportItem[];
+
+		if (origin === 'webui') {
+			invalidCount += sourceItems.length - items.length;
+		}
+
+		return { items, origin, invalidCount };
+	};
+
+	const refreshChatList = async () => {
 		currentChatPage.set(1);
 		await chats.set(await getChatList(localStorage.token, $currentChatPage));
 		scrollPaginationEnabled.set(true);
 	};
 
-	const exportChats = async () => {
-		const blob = new Blob([JSON.stringify(await getAllChats(localStorage.token))], {
-			type: 'application/json'
-		});
-		saveAs(blob, `chat-export-${Date.now()}.json`);
+	const refreshBackendConfig = async () => {
+		await config.set(await getBackendConfig());
 	};
 
-	const exportAllUserChats = async () => {
-		const blob = new Blob([JSON.stringify(await getAllUserChats(localStorage.token))], {
-			type: 'application/json'
-		});
-		saveAs(blob, `all-chats-export-${Date.now()}.json`);
+	const resetChatImportDraft = () => {
+		chatImportDraft = null;
 	};
 
-	const archiveAllChatsHandler = async () => {
-		await goto('/');
-		await archiveAllChats(localStorage.token).catch((error) => {
-			toast.error(`${error}`);
-		});
-
-		currentChatPage.set(1);
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
-		scrollPaginationEnabled.set(true);
+	const resetConfigImportDraft = () => {
+		configImportDraft = null;
 	};
 
-	const deleteAllChatsHandler = async () => {
-		await goto('/');
-		await deleteAllChats(localStorage.token).catch((error) => {
-			toast.error(`${error}`);
-		});
-
-		currentChatPage.set(1);
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
-		scrollPaginationEnabled.set(true);
+	const resetDatabaseRestoreDraft = () => {
+		databaseRestoreDraft = null;
+		databaseRestoreConfirmationInput = '';
 	};
 
 	const handleArchivedChatsChange = async () => {
-		currentChatPage.set(1);
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
-		scrollPaginationEnabled.set(true);
+		await refreshChatList();
 	};
 
-	const importConfigFromFile = async (event: Event) => {
+	const handleChatImportFileChange = async (event: Event) => {
 		const target = event.currentTarget as HTMLInputElement | null;
 		const file = target?.files?.[0];
 		if (!file) return;
 
-		const reader = new FileReader();
-		reader.onload = async (loadEvent) => {
-			try {
-				const payload = JSON.parse(String(loadEvent.target?.result ?? '{}'));
-				const res = await importConfig(localStorage.token, payload).catch((error) => {
-					toast.error(`${error}`);
-					return null;
-				});
+		setOperationState(
+			'chatImport',
+			'validating',
+			$i18n.t('Checking chat file...'),
+			file.name
+		);
 
-				if (res) {
-					toast.success($i18n.t('Config imported successfully'));
-				}
-			} catch (error) {
-				toast.error($i18n.t('Invalid JSON file'));
-			} finally {
-				if (target) {
-					target.value = '';
-				}
+		try {
+			const rawContent = JSON.parse(await readFileText(file));
+			const { items, origin, invalidCount } = normalizeChatImportItems(rawContent);
+
+			chatImportDraft = {
+				fileName: file.name,
+				origin,
+				items,
+				count: items.length,
+				invalidCount,
+				mode: 'merge',
+				confirmReplace: false
+			};
+
+			const phase = invalidCount > 0 ? 'warning' : 'success';
+			const detail =
+				invalidCount > 0
+					? `${$i18n.t('Found {{count}} chats in {{fileName}}.', {
+							count: items.length,
+							fileName: file.name
+						})} ${$i18n.t('Skipped {{count}} invalid entries during precheck.', {
+							count: invalidCount
+						})}`
+					: $i18n.t('Found {{count}} chats in {{fileName}}.', {
+							count: items.length,
+							fileName: file.name
+						});
+
+			setOperationState('chatImport', phase, $i18n.t('Chat file is ready to import.'), detail);
+		} catch (error) {
+			chatImportDraft = null;
+			setOperationState(
+				'chatImport',
+				'error',
+				$i18n.t('Failed to inspect chat file.'),
+				formatError(error, $i18n.t('Invalid JSON'))
+			);
+			toast.error(formatError(error, $i18n.t('Invalid JSON')));
+		} finally {
+			if (target) {
+				target.value = '';
 			}
-		};
+		}
+	};
 
-		reader.readAsText(file);
+	const runChatImport = async () => {
+		if (!chatImportDraft) return;
+
+		if (chatImportDraft.mode === 'replace' && !chatImportDraft.confirmReplace) {
+			setOperationState(
+				'chatImport',
+				'warning',
+				$i18n.t('Replace mode needs confirmation.'),
+				$i18n.t('This will replace all current chats for your account.')
+			);
+			return;
+		}
+
+		const title =
+			chatImportDraft.mode === 'replace'
+				? $i18n.t('Restoring chats...')
+				: $i18n.t('Importing chats...');
+		setOperationState(
+			'chatImport',
+			'running',
+			title,
+			$i18n.t('{{count}} chats are being processed.', { count: chatImportDraft.count })
+		);
+
+		try {
+			const response = await importChatsBatch(
+				localStorage.token,
+				chatImportDraft.items,
+				chatImportDraft.mode
+			);
+
+			await refreshChatList();
+
+			const detail =
+				response.failed > 0
+					? $i18n.t('Imported {{imported}} chats and skipped {{failed}} failed items.', {
+							imported: response.imported,
+							failed: response.failed
+						})
+					: $i18n.t('Imported {{imported}} chats successfully.', {
+							imported: response.imported
+						});
+
+			setOperationState(
+				'chatImport',
+				response.failed > 0 ? 'warning' : 'success',
+				$i18n.t('Chat import finished.'),
+				detail
+			);
+
+			if (response.failed > 0) {
+				toast.warning(detail);
+			} else {
+				toast.success(detail);
+			}
+
+			resetChatImportDraft();
+		} catch (error) {
+			const detail = formatError(error, $i18n.t('Failed to import chats.'));
+			setOperationState('chatImport', 'error', $i18n.t('Failed to import chats.'), detail);
+			toast.error(detail);
+		}
+	};
+
+	const exportChats = async () => {
+		setOperationState(
+			'chatExport',
+			'running',
+			$i18n.t('Preparing chat export...'),
+			$i18n.t('Your chat export file is being generated.')
+		);
+
+		try {
+			const allChats = await getAllChats(localStorage.token);
+			const blob = new Blob([JSON.stringify(allChats)], { type: 'application/json' });
+			saveAs(blob, `chat-export-${Date.now()}.json`);
+
+			const detail = $i18n.t('Chat export download started for {{count}} chats.', {
+				count: allChats.length
+			});
+			setOperationState('chatExport', 'success', $i18n.t('Export Chats'), detail);
+			toast.info(detail);
+		} catch (error) {
+			const detail = formatError(error, $i18n.t('Failed to export chats.'));
+			setOperationState('chatExport', 'error', $i18n.t('Failed to export chats.'), detail);
+			toast.error(detail);
+		}
+	};
+
+	const handleConfigImportFileChange = async (event: Event) => {
+		const target = event.currentTarget as HTMLInputElement | null;
+		const file = target?.files?.[0];
+		if (!file) return;
+
+		setOperationState(
+			'configImport',
+			'validating',
+			$i18n.t('Checking configuration file...'),
+			file.name
+		);
+
+		try {
+			const payload = JSON.parse(await readFileText(file));
+			if (!isRecord(payload)) {
+				throw new Error($i18n.t('Invalid JSON'));
+			}
+
+			const topLevelKeys = Object.keys(payload);
+			configImportDraft = {
+				fileName: file.name,
+				payload,
+				topLevelKeys,
+				mode: 'merge',
+				confirmReplace: false
+			};
+
+			setOperationState(
+				'configImport',
+				'success',
+				$i18n.t('Configuration file is ready to import.'),
+				$i18n.t('Found {{count}} top-level config sections.', {
+					count: topLevelKeys.length
+				})
+			);
+		} catch (error) {
+			configImportDraft = null;
+			setOperationState(
+				'configImport',
+				'error',
+				$i18n.t('Failed to inspect configuration file.'),
+				formatError(error, $i18n.t('Invalid JSON'))
+			);
+			toast.error(formatError(error, $i18n.t('Invalid JSON')));
+		} finally {
+			if (target) {
+				target.value = '';
+			}
+		}
+	};
+
+	const runConfigImport = async () => {
+		if (!configImportDraft) return;
+
+		if (configImportDraft.mode === 'replace' && !configImportDraft.confirmReplace) {
+			setOperationState(
+				'configImport',
+				'warning',
+				$i18n.t('Replace mode needs confirmation.'),
+				$i18n.t('This will replace the current application configuration.')
+			);
+			return;
+		}
+
+		setOperationState(
+			'configImport',
+			'running',
+			configImportDraft.mode === 'replace'
+				? $i18n.t('Restoring configuration...')
+				: $i18n.t('Importing configuration...'),
+			configImportDraft.fileName
+		);
+
+		try {
+			await importConfig(localStorage.token, configImportDraft.payload, configImportDraft.mode);
+			await refreshBackendConfig();
+
+			setOperationState(
+				'configImport',
+				'success',
+				$i18n.t('Configuration import finished.'),
+				$i18n.t('Config imported successfully')
+			);
+			toast.success($i18n.t('Config imported successfully'));
+			resetConfigImportDraft();
+		} catch (error) {
+			const detail = formatError(error, $i18n.t('Failed to import configuration.'));
+			setOperationState(
+				'configImport',
+				'error',
+				$i18n.t('Failed to import configuration.'),
+				detail
+			);
+			toast.error(detail);
+		}
 	};
 
 	const exportConfigToFile = async () => {
-		const cfg = await exportConfig(localStorage.token);
-		const blob = new Blob([JSON.stringify(cfg)], { type: 'application/json' });
-		saveAs(blob, `config-${Date.now()}.json`);
+		setOperationState(
+			'configExport',
+			'running',
+			$i18n.t('Preparing config export...'),
+			$i18n.t('Your configuration export file is being generated.')
+		);
+
+		try {
+			const response = await exportConfig(localStorage.token);
+			const configPayload = response?.config ?? response;
+			const blob = new Blob([JSON.stringify(configPayload)], { type: 'application/json' });
+			saveAs(blob, `config-${Date.now()}.json`);
+
+			const detail = $i18n.t('Configuration export download started.');
+			setOperationState('configExport', 'success', $i18n.t('Export Config to JSON File'), detail);
+			toast.info(detail);
+		} catch (error) {
+			const detail = formatError(error, $i18n.t('Failed to export configuration.'));
+			setOperationState(
+				'configExport',
+				'error',
+				$i18n.t('Failed to export configuration.'),
+				detail
+			);
+			toast.error(detail);
+		}
+	};
+
+	const exportAllUserChats = async () => {
+		setOperationState(
+			'allUserChatsExport',
+			'running',
+			$i18n.t('Preparing all users chat export...'),
+			$i18n.t('The all-users chat export file is being generated.')
+		);
+
+		try {
+			const exportedChats = await getAllUserChats(localStorage.token);
+			const blob = new Blob([JSON.stringify(exportedChats)], {
+				type: 'application/json'
+			});
+			saveAs(blob, `all-chats-export-${Date.now()}.json`);
+
+			const detail = $i18n.t('All users chat export download started for {{count}} chats.', {
+				count: exportedChats.length
+			});
+			setOperationState(
+				'allUserChatsExport',
+				'success',
+				$i18n.t('Export All Chats (All Users)'),
+				detail
+			);
+			toast.info(detail);
+		} catch (error) {
+			const detail = formatError(error, $i18n.t('Failed to export all users chats.'));
+			setOperationState(
+				'allUserChatsExport',
+				'error',
+				$i18n.t('Failed to export all users chats.'),
+				detail
+			);
+			toast.error(detail);
+		}
+	};
+
+	const exportDatabase = async () => {
+		setOperationState(
+			'databaseExport',
+			'running',
+			$i18n.t('Preparing database backup...'),
+			$i18n.t('A SQLite snapshot backup is being generated.')
+		);
+
+		try {
+			await downloadDatabase(localStorage.token);
+			const detail = $i18n.t('Database backup download started.');
+			setOperationState('databaseExport', 'success', $i18n.t('Export Database'), detail);
+			toast.info(detail);
+		} catch (error) {
+			const detail = formatError(error, $i18n.t('Failed to export database backup.'));
+			setOperationState(
+				'databaseExport',
+				'error',
+				$i18n.t('Failed to export database backup.'),
+				detail
+			);
+			toast.error(detail);
+		}
+	};
+
+	const handleDatabaseRestoreFileChange = async (event: Event) => {
+		const target = event.currentTarget as HTMLInputElement | null;
+		const file = target?.files?.[0];
+		if (!file) return;
+
+		setOperationState(
+			'databaseRestore',
+			'validating',
+			$i18n.t('Inspecting database backup...'),
+			file.name
+		);
+
+		try {
+			const response = await inspectDatabaseRestore(localStorage.token, file);
+			databaseRestoreDraft = {
+				fileName: response.filename,
+				fileSize: response.size,
+				token: response.token,
+				warnings: response.warnings ?? [],
+				summary: response.summary,
+				confirmationPhrase: response.confirmation
+			};
+			databaseRestoreConfirmationInput = '';
+
+			const detail = $i18n.t('Found {{count}} tables in the backup.', {
+				count: response.summary?.table_count ?? 0
+			});
+			setOperationState(
+				'databaseRestore',
+				response.warnings?.length ? 'warning' : 'success',
+				$i18n.t('Database backup verified.'),
+				detail
+			);
+		} catch (error) {
+			resetDatabaseRestoreDraft();
+			const detail = formatError(error, $i18n.t('Failed to inspect database backup.'));
+			setOperationState(
+				'databaseRestore',
+				'error',
+				$i18n.t('Failed to inspect database backup.'),
+				detail
+			);
+			toast.error(detail);
+		} finally {
+			if (target) {
+				target.value = '';
+			}
+		}
+	};
+
+	const runDatabaseRestore = async () => {
+		if (!databaseRestoreDraft) return;
+
+		if (
+			databaseRestoreConfirmationInput.trim() !==
+			databaseRestoreDraft.confirmationPhrase
+		) {
+			setOperationState(
+				'databaseRestore',
+				'warning',
+				$i18n.t('Confirmation phrase does not match.'),
+				$i18n.t('Type `{{confirmation}}` to continue.', {
+					confirmation: databaseRestoreDraft.confirmationPhrase
+				})
+			);
+			return;
+		}
+
+		setOperationState(
+			'databaseRestore',
+			'running',
+			$i18n.t('Restoring database...'),
+			$i18n.t('The page will refresh after the restore finishes.')
+		);
+
+		try {
+			await restoreDatabase(localStorage.token, {
+				token: databaseRestoreDraft.token,
+				confirmation: databaseRestoreConfirmationInput.trim()
+			});
+
+			setOperationState(
+				'databaseRestore',
+				'success',
+				$i18n.t('Database restored. Refreshing the page...'),
+				$i18n.t('The page will refresh after the restore finishes.')
+			);
+			toast.success($i18n.t('Database restored. Refreshing the page...'));
+
+			setTimeout(() => {
+				if (typeof window !== 'undefined') {
+					window.location.reload();
+				}
+			}, 500);
+		} catch (error) {
+			const detail = formatError(error, $i18n.t('Failed to restore database.'));
+			setOperationState(
+				'databaseRestore',
+				'error',
+				$i18n.t('Failed to restore database.'),
+				detail
+			);
+			toast.error(detail);
+		}
+	};
+
+	const archiveAllChatsHandler = async () => {
+		setOperationState(
+			'archiveAll',
+			'running',
+			$i18n.t('Archiving chats...'),
+			$i18n.t('All current chats are being moved into the archive.')
+		);
+
+		try {
+			await goto('/');
+			await archiveAllChats(localStorage.token);
+			await refreshChatList();
+
+			setOperationState(
+				'archiveAll',
+				'success',
+				$i18n.t('Archive complete.'),
+				$i18n.t('All current chats were moved into the archive.')
+			);
+			toast.success($i18n.t('Archive complete.'));
+		} catch (error) {
+			const detail = formatError(error, $i18n.t('Failed to archive chats.'));
+			setOperationState('archiveAll', 'error', $i18n.t('Failed to archive chats.'), detail);
+			toast.error(detail);
+		}
+	};
+
+	const deleteAllChatsHandler = async () => {
+		setOperationState(
+			'deleteAll',
+			'running',
+			$i18n.t('Deleting chats...'),
+			$i18n.t('All chats are being permanently deleted.')
+		);
+
+		try {
+			await goto('/');
+			await deleteAllChats(localStorage.token);
+			await refreshChatList();
+
+			setOperationState(
+				'deleteAll',
+				'success',
+				$i18n.t('Delete complete.'),
+				$i18n.t('All chats were permanently deleted.')
+			);
+			toast.success($i18n.t('Delete complete.'));
+		} catch (error) {
+			const detail = formatError(error, $i18n.t('Failed to delete chats.'));
+			setOperationState('deleteAll', 'error', $i18n.t('Failed to delete chats.'), detail);
+			toast.error(detail);
+		}
+	};
+
+	const getRestoreUnavailableMessage = () => {
+		if (databaseRestoreSupport.reason === 'backend_not_sqlite') {
+			return $i18n.t('Database restore is only available for SQLite deployments.');
+		}
+
+		if (databaseRestoreSupport.reason === 'multiple_workers_not_supported') {
+			return $i18n.t(
+				'Database restore requires a single server worker. Current worker count: {{count}}.',
+				{
+					count: databaseRestoreSupport.workerCount
+				}
+			);
+		}
+
+		return $i18n.t('Database restore is unavailable in this environment.');
 	};
 </script>
 
@@ -194,10 +842,10 @@
 <input
 	id="chat-import-input"
 	bind:this={chatImportInputElement}
-	bind:files={importFiles}
 	type="file"
 	accept=".json"
 	hidden
+	on:change={handleChatImportFileChange}
 />
 
 <input
@@ -206,12 +854,20 @@
 	type="file"
 	accept=".json"
 	hidden
-	on:change={importConfigFromFile}
+	on:change={handleConfigImportFileChange}
+/>
+
+<input
+	id="database-restore-input"
+	bind:this={databaseRestoreInputElement}
+	type="file"
+	accept=".db,.sqlite,.sqlite3,.backup,.bak"
+	hidden
+	on:change={handleDatabaseRestoreFileChange}
 />
 
 <div class="h-full min-h-0 overflow-y-auto pr-1 scrollbar-hidden">
 	<div class="max-w-6xl mx-auto space-y-6">
-		<!-- ==================== Hero Section ==================== -->
 		<section class="glass-section p-5 space-y-5">
 			<div class="@container flex flex-col gap-5">
 				<div class="flex flex-col gap-4 @[64rem]:flex-row @[64rem]:items-start @[64rem]:justify-between">
@@ -275,45 +931,148 @@
 			</div>
 		</section>
 
-		<!-- ==================== Tab Content ==================== -->
 		{#if selectedTab === 'chatManagement'}
 			<section class="scroll-mt-2 p-5 space-y-5 transition-all duration-300 glass-section">
 				<div class="space-y-3">
-					<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1">
-						{$i18n.t('Import / Export')}
+					<div class="flex flex-wrap items-center gap-2 pl-1">
+						<div class="text-sm font-medium text-gray-500 dark:text-gray-400">
+							{$i18n.t('Import / Export')}
+						</div>
+						<span class="{badgeClass} border-blue-200/70 bg-blue-50/80 text-blue-700 dark:border-blue-800/40 dark:bg-blue-950/20 dark:text-blue-300">
+							{$i18n.t('Current user only')}
+						</span>
 					</div>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-						<div class="flex items-center justify-between glass-item px-4 py-3">
-							<div class="min-w-0 mr-3">
-								<div class="text-sm font-medium">{$i18n.t('Import Chats')}</div>
-								<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-									{$i18n.t('Import chat history from a JSON file')}
+						<div class="glass-item px-4 py-3 space-y-3">
+							<div class="flex items-center justify-between gap-3">
+								<div class="min-w-0">
+									<div class="text-sm font-medium">{$i18n.t('Import Chats')}</div>
+									<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+										{$i18n.t('Import chat history from a JSON file')}
+									</div>
 								</div>
+								<button class={btnNeutral} type="button" on:click={() => chatImportInputElement?.click()} disabled={operationStates.chatImport.phase === 'running'}>
+									{$i18n.t('Select File')}
+								</button>
 							</div>
-							<button
-								class={btnNeutral}
-								type="button"
-								on:click={() => chatImportInputElement.click()}
-							>
-								{$i18n.t('Import')}
-							</button>
+
+							{#if chatImportDraft}
+								<div class="rounded-2xl border border-gray-200/70 bg-white/70 p-3 space-y-3 dark:border-gray-800/40 dark:bg-gray-900/40">
+									<div class="space-y-1">
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+											{$i18n.t('Selected file')}
+										</div>
+										<div class="text-sm font-medium text-gray-800 dark:text-gray-100">
+											{chatImportDraft.fileName}
+										</div>
+										<div class="text-xs text-gray-500 dark:text-gray-400">
+											{$i18n.t('Source')}: {chatImportDraft.origin === 'openai' ? 'OpenAI' : 'Halo WebUI'}
+											· {$i18n.t('Found {{count}} chats.', { count: chatImportDraft.count })}
+										</div>
+									</div>
+
+									<div class="space-y-2">
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+											{$i18n.t('Import mode')}
+										</div>
+										<div class="flex flex-wrap gap-2">
+											<button
+												type="button"
+												class={`${modeButtonBase} ${chatImportDraft.mode === 'merge' ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800/40 dark:bg-blue-950/20 dark:text-blue-300' : 'border-gray-200 bg-white text-gray-600 dark:border-gray-800/40 dark:bg-gray-900/40 dark:text-gray-300'}`}
+												on:click={() => {
+													chatImportDraft = { ...chatImportDraft, mode: 'merge', confirmReplace: false };
+												}}
+											>
+												{$i18n.t('Merge with current chats')}
+											</button>
+											<button
+												type="button"
+												class={`${modeButtonBase} ${chatImportDraft.mode === 'replace' ? 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-800/40 dark:bg-orange-950/20 dark:text-orange-300' : 'border-gray-200 bg-white text-gray-600 dark:border-gray-800/40 dark:bg-gray-900/40 dark:text-gray-300'}`}
+												on:click={() => {
+													chatImportDraft = { ...chatImportDraft, mode: 'replace' };
+												}}
+											>
+												{$i18n.t('Replace current chats')}
+											</button>
+										</div>
+									</div>
+
+									{#if chatImportDraft.invalidCount > 0}
+										<div class="rounded-xl border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300">
+											{$i18n.t('Skipped {{count}} invalid entries during precheck.', {
+												count: chatImportDraft.invalidCount
+											})}
+										</div>
+									{/if}
+
+									{#if chatImportDraft.mode === 'replace'}
+										<div class="rounded-xl border border-orange-200/70 bg-orange-50/80 px-3 py-2 space-y-2 dark:border-orange-800/40 dark:bg-orange-950/20">
+											<div class="text-xs font-medium text-orange-700 dark:text-orange-300">
+												{$i18n.t('This will replace all current chats for your account.')}
+											</div>
+											<label class="flex items-center gap-2 text-xs text-orange-700 dark:text-orange-300">
+												<input
+													type="checkbox"
+													class="rounded border-orange-300 text-orange-600 focus:ring-orange-200 dark:border-orange-700 dark:bg-gray-900"
+													bind:checked={chatImportDraft.confirmReplace}
+												/>
+												<span>{$i18n.t('I understand that this operation cannot be undone from the UI.')}</span>
+											</label>
+										</div>
+									{/if}
+
+									<div class="flex items-center justify-end gap-2">
+										<button class={btnSmall} type="button" on:click={resetChatImportDraft}>
+											{$i18n.t('Cancel')}
+										</button>
+										<button
+											class={chatImportDraft.mode === 'replace' ? btnWarn : btnNeutral}
+											type="button"
+											on:click={runChatImport}
+											disabled={operationStates.chatImport.phase === 'running'}
+										>
+											{$i18n.t(chatImportDraft.mode === 'replace' ? 'Start restore' : 'Start import')}
+										</button>
+									</div>
+								</div>
+							{/if}
+
+							<DataManagementStatus
+								visible={hasOperationState('chatImport')}
+								phase={operationStates.chatImport.phase}
+								title={operationStates.chatImport.title}
+								detail={operationStates.chatImport.detail}
+							/>
 						</div>
 
-						<div class="flex items-center justify-between glass-item px-4 py-3">
-							<div class="min-w-0 mr-3">
-								<div class="text-sm font-medium">{$i18n.t('Export Chats')}</div>
-								<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-									{$i18n.t('Export your chat history to a JSON file')}
+						<div class="glass-item px-4 py-3 space-y-3">
+							<div class="flex items-center justify-between gap-3">
+								<div class="min-w-0">
+									<div class="text-sm font-medium">{$i18n.t('Export Chats')}</div>
+									<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+										{$i18n.t('Export your chat history to a JSON file')}
+									</div>
 								</div>
+								<button class={btnNeutral} type="button" on:click={exportChats} disabled={operationStates.chatExport.phase === 'running'}>
+									{$i18n.t(operationStates.chatExport.phase === 'running' ? 'Exporting...' : 'Export')}
+								</button>
 							</div>
-							<button class={btnNeutral} type="button" on:click={exportChats}>
-								{$i18n.t('Export')}
-							</button>
+							<DataManagementStatus
+								visible={hasOperationState('chatExport')}
+								phase={operationStates.chatExport.phase}
+								title={operationStates.chatExport.title}
+								detail={operationStates.chatExport.detail}
+							/>
 						</div>
 					</div>
 
-					<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1">
-						{$i18n.t('Chat Archive')}
+					<div class="flex flex-wrap items-center gap-2 pl-1">
+						<div class="text-sm font-medium text-gray-500 dark:text-gray-400">
+							{$i18n.t('Chat Archive')}
+						</div>
+						<span class="{badgeClass} border-blue-200/70 bg-blue-50/80 text-blue-700 dark:border-blue-800/40 dark:bg-blue-950/20 dark:text-blue-300">
+							{$i18n.t('Current user only')}
+						</span>
 					</div>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
 						<div class="flex items-center justify-between glass-item px-4 py-3">
@@ -323,54 +1082,50 @@
 									{$i18n.t('View and manage your archived conversations')}
 								</div>
 							</div>
-							<button
-								class={btnNeutral}
-								type="button"
-								on:click={() => (showArchivedChatsModal = true)}
-							>
+							<button class={btnNeutral} type="button" on:click={() => (showArchivedChatsModal = true)}>
 								{$i18n.t('View')}
 							</button>
 						</div>
 
-						<div class="flex items-center justify-between glass-item px-4 py-3">
-							<div class="min-w-0 mr-3">
-								<div class="text-sm font-medium">{$i18n.t('Archive All Chats')}</div>
-								<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-									{$i18n.t('Move all current conversations to the archive')}
+						<div class="glass-item px-4 py-3 space-y-3">
+							<div class="flex items-center justify-between gap-3">
+								<div class="min-w-0">
+									<div class="text-sm font-medium">{$i18n.t('Archive All Chats')}</div>
+									<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+										{$i18n.t('Move all current conversations to the archive')}
+									</div>
 								</div>
+								{#if showArchiveConfirm}
+									<div class="shrink-0 flex items-center gap-1.5">
+										<span class="text-xs text-orange-600/80 dark:text-orange-400/80 whitespace-nowrap">
+											{$i18n.t('Are you sure?')}
+										</span>
+										<button class={btnSmall} type="button" on:click={() => (showArchiveConfirm = false)}>
+											{$i18n.t('Cancel')}
+										</button>
+										<button
+											class={btnSmallWarn}
+											type="button"
+											on:click={() => {
+												archiveAllChatsHandler();
+												showArchiveConfirm = false;
+											}}
+										>
+											{$i18n.t('Confirm')}
+										</button>
+									</div>
+								{:else}
+									<button class={btnWarn} type="button" on:click={() => (showArchiveConfirm = true)} disabled={operationStates.archiveAll.phase === 'running'}>
+										{$i18n.t('Archive All')}
+									</button>
+								{/if}
 							</div>
-							{#if showArchiveConfirm}
-								<div class="shrink-0 flex items-center gap-1.5">
-									<span class="text-xs text-orange-600/80 dark:text-orange-400/80 whitespace-nowrap">
-										{$i18n.t('Are you sure?')}
-									</span>
-									<button
-										class={btnSmall}
-										type="button"
-										on:click={() => (showArchiveConfirm = false)}
-									>
-										{$i18n.t('Cancel')}
-									</button>
-									<button
-										class={btnSmallWarn}
-										type="button"
-										on:click={() => {
-											archiveAllChatsHandler();
-											showArchiveConfirm = false;
-										}}
-									>
-										{$i18n.t('Confirm')}
-									</button>
-								</div>
-							{:else}
-								<button
-									class={btnWarn}
-									type="button"
-									on:click={() => (showArchiveConfirm = true)}
-								>
-									{$i18n.t('Archive All')}
-								</button>
-							{/if}
+							<DataManagementStatus
+								visible={hasOperationState('archiveAll')}
+								phase={operationStates.archiveAll.phase}
+								title={operationStates.archiveAll.title}
+								detail={operationStates.archiveAll.detail}
+							/>
 						</div>
 					</div>
 				</div>
@@ -378,149 +1133,352 @@
 		{:else if selectedTab === 'backups' && isAdmin}
 			<section class="scroll-mt-2 p-5 space-y-5 transition-all duration-300 glass-section">
 				<div class="space-y-3">
-					<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1">
-						{$i18n.t('Configuration')}
+					<div class="flex flex-wrap items-center gap-2 pl-1">
+						<div class="text-sm font-medium text-gray-500 dark:text-gray-400">
+							{$i18n.t('Configuration')}
+						</div>
+						<span class="{badgeClass} border-emerald-200/70 bg-emerald-50/80 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+							{$i18n.t('Admin only')}
+						</span>
 					</div>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-						<div class="flex items-center justify-between glass-item px-4 py-3">
-							<div class="min-w-0 mr-3">
-								<div class="text-sm font-medium">{$i18n.t('Import Config from JSON File')}</div>
-								<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-									{$i18n.t('Import your application configuration from a JSON file')}
+						<div class="glass-item px-4 py-3 space-y-3">
+							<div class="flex items-center justify-between gap-3">
+								<div class="min-w-0">
+									<div class="text-sm font-medium">{$i18n.t('Import Config from JSON File')}</div>
+									<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+										{$i18n.t('Import your application configuration from a JSON file')}
+									</div>
 								</div>
+								<button class={btnNeutral} type="button" on:click={() => configImportInputElement?.click()} disabled={operationStates.configImport.phase === 'running'}>
+									{$i18n.t('Select File')}
+								</button>
 							</div>
-							<button
-								class={btnNeutral}
-								type="button"
-								on:click={() => configImportInputElement.click()}
-							>
-								{$i18n.t('Import')}
-							</button>
+
+							{#if configImportDraft}
+								<div class="rounded-2xl border border-gray-200/70 bg-white/70 p-3 space-y-3 dark:border-gray-800/40 dark:bg-gray-900/40">
+									<div class="space-y-1">
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+											{$i18n.t('Selected file')}
+										</div>
+										<div class="text-sm font-medium text-gray-800 dark:text-gray-100">
+											{configImportDraft.fileName}
+										</div>
+										<div class="text-xs text-gray-500 dark:text-gray-400">
+											{$i18n.t('Found {{count}} top-level config sections.', {
+												count: configImportDraft.topLevelKeys.length
+											})}
+										</div>
+									</div>
+
+									{#if configImportDraft.topLevelKeys.length > 0}
+										<div class="flex flex-wrap gap-2">
+											{#each configImportDraft.topLevelKeys.slice(0, 6) as key}
+												<span class="{badgeClass} border-gray-200/70 bg-gray-50/80 text-gray-600 dark:border-gray-800/40 dark:bg-gray-900/50 dark:text-gray-300">
+													{key}
+												</span>
+											{/each}
+										</div>
+									{/if}
+
+									<div class="space-y-2">
+										<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+											{$i18n.t('Import mode')}
+										</div>
+										<div class="flex flex-wrap gap-2">
+											<button
+												type="button"
+												class={`${modeButtonBase} ${configImportDraft.mode === 'merge' ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800/40 dark:bg-blue-950/20 dark:text-blue-300' : 'border-gray-200 bg-white text-gray-600 dark:border-gray-800/40 dark:bg-gray-900/40 dark:text-gray-300'}`}
+												on:click={() => {
+													configImportDraft = { ...configImportDraft, mode: 'merge', confirmReplace: false };
+												}}
+											>
+												{$i18n.t('Merge with current config')}
+											</button>
+											<button
+												type="button"
+												class={`${modeButtonBase} ${configImportDraft.mode === 'replace' ? 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-800/40 dark:bg-orange-950/20 dark:text-orange-300' : 'border-gray-200 bg-white text-gray-600 dark:border-gray-800/40 dark:bg-gray-900/40 dark:text-gray-300'}`}
+												on:click={() => {
+													configImportDraft = { ...configImportDraft, mode: 'replace' };
+												}}
+											>
+												{$i18n.t('Replace current config')}
+											</button>
+										</div>
+									</div>
+
+									{#if configImportDraft.mode === 'replace'}
+										<div class="rounded-xl border border-orange-200/70 bg-orange-50/80 px-3 py-2 space-y-2 dark:border-orange-800/40 dark:bg-orange-950/20">
+											<div class="text-xs font-medium text-orange-700 dark:text-orange-300">
+												{$i18n.t('This will replace the current application configuration.')}
+											</div>
+											<label class="flex items-center gap-2 text-xs text-orange-700 dark:text-orange-300">
+												<input
+													type="checkbox"
+													class="rounded border-orange-300 text-orange-600 focus:ring-orange-200 dark:border-orange-700 dark:bg-gray-900"
+													bind:checked={configImportDraft.confirmReplace}
+												/>
+												<span>{$i18n.t('I understand that this operation can change system behavior immediately.')}</span>
+											</label>
+										</div>
+									{/if}
+
+									<div class="flex items-center justify-end gap-2">
+										<button class={btnSmall} type="button" on:click={resetConfigImportDraft}>
+											{$i18n.t('Cancel')}
+										</button>
+										<button
+											class={configImportDraft.mode === 'replace' ? btnWarn : btnNeutral}
+											type="button"
+											on:click={runConfigImport}
+											disabled={operationStates.configImport.phase === 'running'}
+										>
+											{$i18n.t(configImportDraft.mode === 'replace' ? 'Start restore' : 'Start import')}
+										</button>
+									</div>
+								</div>
+							{/if}
+
+							<DataManagementStatus
+								visible={hasOperationState('configImport')}
+								phase={operationStates.configImport.phase}
+								title={operationStates.configImport.title}
+								detail={operationStates.configImport.detail}
+							/>
 						</div>
 
-						<div class="flex items-center justify-between glass-item px-4 py-3">
-							<div class="min-w-0 mr-3">
-								<div class="text-sm font-medium">{$i18n.t('Export Config to JSON File')}</div>
-								<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-									{$i18n.t('Export your current application configuration to a JSON file')}
+						<div class="glass-item px-4 py-3 space-y-3">
+							<div class="flex items-center justify-between gap-3">
+								<div class="min-w-0">
+									<div class="text-sm font-medium">{$i18n.t('Export Config to JSON File')}</div>
+									<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+										{$i18n.t('Export your current application configuration to a JSON file')}
+									</div>
 								</div>
+								<button class={btnNeutral} type="button" on:click={exportConfigToFile} disabled={operationStates.configExport.phase === 'running'}>
+									{$i18n.t(operationStates.configExport.phase === 'running' ? 'Exporting...' : 'Export')}
+								</button>
 							</div>
-							<button class={btnNeutral} type="button" on:click={exportConfigToFile}>
-								{$i18n.t('Export')}
-							</button>
+							<DataManagementStatus
+								visible={hasOperationState('configExport')}
+								phase={operationStates.configExport.phase}
+								title={operationStates.configExport.title}
+								detail={operationStates.configExport.detail}
+							/>
 						</div>
 					</div>
 
 					{#if $config?.features.enable_admin_export ?? true}
-						<div class="text-sm font-medium text-gray-500 dark:text-gray-400 pl-1">
-							{$i18n.t('Database')}
+						<div class="flex flex-wrap items-center gap-2 pl-1">
+							<div class="text-sm font-medium text-gray-500 dark:text-gray-400">
+								{$i18n.t('Database')}
+							</div>
+							<span class="{badgeClass} border-red-200/70 bg-red-50/80 text-red-700 dark:border-red-800/40 dark:bg-red-950/20 dark:text-red-300">
+								{$i18n.t('Entire system data')}
+							</span>
+							<span class="{badgeClass} border-orange-200/70 bg-orange-50/80 text-orange-700 dark:border-orange-800/40 dark:bg-orange-950/20 dark:text-orange-300">
+								{$i18n.t('Restore replaces current data')}
+							</span>
 						</div>
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-							<div class="flex items-center justify-between glass-item px-4 py-3">
-								<div class="min-w-0 mr-3">
-									<div class="text-sm font-medium">{$i18n.t('Export Database')}</div>
-									<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-										{$i18n.t('Export the complete SQLite database backup, containing all system data')}
+							<div class="glass-item px-4 py-3 space-y-3">
+								<div class="flex items-center justify-between gap-3">
+									<div class="min-w-0">
+										<div class="text-sm font-medium">{$i18n.t('Export Database')}</div>
+										<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+											{$i18n.t('Export the complete SQLite database backup, containing all system data')}
+										</div>
 									</div>
+									<button class={btnNeutral} type="button" on:click={exportDatabase} disabled={operationStates.databaseExport.phase === 'running'}>
+										{$i18n.t(operationStates.databaseExport.phase === 'running' ? 'Exporting...' : 'Export')}
+									</button>
 								</div>
-								<button
-									class={btnNeutral}
-									type="button"
-									on:click={() => {
-										downloadDatabase(localStorage.token).catch((error) => {
-											toast.error(`${error}`);
-										});
-									}}
-								>
-									{$i18n.t('Export')}
-								</button>
+								<DataManagementStatus
+									visible={hasOperationState('databaseExport')}
+									phase={operationStates.databaseExport.phase}
+									title={operationStates.databaseExport.title}
+									detail={operationStates.databaseExport.detail}
+								/>
 							</div>
 
-							<div class="flex items-center justify-between glass-item px-4 py-3">
-								<div class="min-w-0 mr-3">
-									<div class="text-sm font-medium">{$i18n.t('Export All Chats (All Users)')}</div>
-									<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-										{$i18n.t('Export all users chat records in JSON format')}
+							<div class="glass-item px-4 py-3 space-y-3">
+								<div class="flex items-center justify-between gap-3">
+									<div class="min-w-0">
+										<div class="text-sm font-medium">{$i18n.t('Restore Database')}</div>
+										<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+											{$i18n.t('Upload and inspect a SQLite backup before restoring it.')}
+										</div>
 									</div>
+									<button
+										class={btnNeutral}
+										type="button"
+										on:click={() => databaseRestoreInputElement?.click()}
+										disabled={!databaseRestoreSupport.supported || operationStates.databaseRestore.phase === 'running'}
+									>
+										{$i18n.t('Import')}
+									</button>
 								</div>
-								<button class={btnNeutral} type="button" on:click={exportAllUserChats}>
-									{$i18n.t('Export')}
-								</button>
+
+								{#if !databaseRestoreSupport.supported}
+									<div class="rounded-xl border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300">
+										{getRestoreUnavailableMessage()}
+									</div>
+								{/if}
+
+								{#if databaseRestoreDraft}
+									<div class="rounded-2xl border border-red-200/70 bg-red-50/40 p-3 space-y-3 dark:border-red-800/40 dark:bg-red-950/10">
+										<div class="space-y-1">
+											<div class="text-xs font-medium text-red-700 dark:text-red-300">
+												{$i18n.t('Backup file')}
+											</div>
+											<div class="text-sm font-medium text-gray-800 dark:text-gray-100">
+												{databaseRestoreDraft.fileName}
+											</div>
+											<div class="text-xs text-gray-500 dark:text-gray-400">
+												{formatBytes(databaseRestoreDraft.fileSize)} · {$i18n.t('Found {{count}} tables in the backup.', {
+													count: databaseRestoreDraft.summary.table_count
+												})}
+											</div>
+										</div>
+
+										<div class="flex flex-wrap gap-2">
+											{#each databaseRestoreDraft.summary.tables_preview as tableName}
+												<span class="{badgeClass} border-red-200/70 bg-white/80 text-red-700 dark:border-red-800/40 dark:bg-gray-900/60 dark:text-red-300">
+													{tableName}
+												</span>
+											{/each}
+										</div>
+
+										{#if databaseRestoreDraft.warnings.length > 0}
+											<div class="rounded-xl border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 space-y-1 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300">
+												{#each databaseRestoreDraft.warnings as warning}
+													<div>{warning}</div>
+												{/each}
+											</div>
+										{/if}
+
+										<div class="space-y-2">
+											<div class="text-xs font-medium text-red-700 dark:text-red-300">
+												{$i18n.t('Confirmation phrase')}
+											</div>
+											<input
+												class={replaceConfirmationInputClass}
+												type="text"
+												bind:value={databaseRestoreConfirmationInput}
+												placeholder={$i18n.t('Type `{{confirmation}}` to continue.', {
+													confirmation: databaseRestoreDraft.confirmationPhrase
+												})}
+											/>
+											<div class="text-xs text-red-600/80 dark:text-red-300/80">
+												{$i18n.t('Type `{{confirmation}}` to continue.', {
+													confirmation: databaseRestoreDraft.confirmationPhrase
+												})}
+											</div>
+										</div>
+
+										<div class="flex items-center justify-end gap-2">
+											<button class={btnSmall} type="button" on:click={resetDatabaseRestoreDraft}>
+												{$i18n.t('Cancel')}
+											</button>
+											<button class={btnDanger} type="button" on:click={runDatabaseRestore} disabled={operationStates.databaseRestore.phase === 'running'}>
+												{$i18n.t('Start restore')}
+											</button>
+										</div>
+									</div>
+								{/if}
+
+								<DataManagementStatus
+									visible={hasOperationState('databaseRestore')}
+									phase={operationStates.databaseRestore.phase}
+									title={operationStates.databaseRestore.title}
+									detail={operationStates.databaseRestore.detail}
+								/>
+							</div>
+
+							<div class="glass-item px-4 py-3 space-y-3 md:col-span-2">
+								<div class="flex items-center justify-between gap-3">
+									<div class="min-w-0">
+										<div class="text-sm font-medium">{$i18n.t('Export All Chats (All Users)')}</div>
+										<div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+											{$i18n.t('Export all users chat records in JSON format')}
+										</div>
+									</div>
+									<button class={btnNeutral} type="button" on:click={exportAllUserChats} disabled={operationStates.allUserChatsExport.phase === 'running'}>
+										{$i18n.t(operationStates.allUserChatsExport.phase === 'running' ? 'Exporting...' : 'Export')}
+									</button>
+								</div>
+								<DataManagementStatus
+									visible={hasOperationState('allUserChatsExport')}
+									phase={operationStates.allUserChatsExport.phase}
+									title={operationStates.allUserChatsExport.title}
+									detail={operationStates.allUserChatsExport.detail}
+								/>
 							</div>
 						</div>
 					{/if}
 				</div>
 			</section>
 		{:else if selectedTab === 'dangerZone'}
-			<section
-				class="scroll-mt-2 p-5 space-y-5 transition-all duration-300 glass-section border-red-200/60 dark:border-red-800/30"
-			>
-				<div class="flex items-center gap-3">
+			<section class="scroll-mt-2 p-5 space-y-5 transition-all duration-300 glass-section border-red-200/60 dark:border-red-800/30">
+				<div class="flex flex-wrap items-center gap-3">
 					<div class="glass-icon-badge bg-red-50 dark:bg-red-950/30">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke-width="1.5"
-							stroke="currentColor"
-							class="size-[18px] text-red-500 dark:text-red-400"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
-							/>
+						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-[18px] text-red-500 dark:text-red-400">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
 						</svg>
 					</div>
 					<div class="text-base font-semibold text-red-600 dark:text-red-400">
 						{$i18n.t('Danger Zone')}
 					</div>
+					<span class="{badgeClass} border-red-200/70 bg-red-50/80 text-red-700 dark:border-red-800/40 dark:bg-red-950/20 dark:text-red-300">
+						{$i18n.t('Cannot be undone')}
+					</span>
+					<span class="{badgeClass} border-orange-200/70 bg-orange-50/80 text-orange-700 dark:border-orange-800/40 dark:bg-orange-950/20 dark:text-orange-300">
+						{$i18n.t('Current user only')}
+					</span>
 				</div>
 
 				<div class="space-y-3">
-					<div
-						class="flex items-center justify-between glass-item px-4 py-3 border-red-200/60 dark:border-red-800/30"
-					>
-						<div class="min-w-0 mr-3">
-							<div class="text-sm font-medium text-red-700 dark:text-red-400">
-								{$i18n.t('Delete All Chats')}
+					<div class="glass-item px-4 py-3 border-red-200/60 dark:border-red-800/30 space-y-3">
+						<div class="flex items-center justify-between gap-3">
+							<div class="min-w-0 mr-3">
+								<div class="text-sm font-medium text-red-700 dark:text-red-400">
+									{$i18n.t('Delete All Chats')}
+								</div>
+								<div class="text-xs text-red-500/70 dark:text-red-400/70 mt-0.5">
+									{$i18n.t('Permanently delete all of your chat records. This action cannot be undone.')}
+								</div>
 							</div>
-							<div class="text-xs text-red-500/70 dark:text-red-400/70 mt-0.5">
-								{$i18n.t('Permanently delete all of your chat records. This action cannot be undone.')}
-							</div>
+							{#if showDeleteConfirm}
+								<div class="shrink-0 flex items-center gap-1.5">
+									<span class="text-xs text-red-600/70 dark:text-red-400/80 whitespace-nowrap">
+										{$i18n.t('Are you sure?')}
+									</span>
+									<button class={btnSmall} type="button" on:click={() => (showDeleteConfirm = false)}>
+										{$i18n.t('Cancel')}
+									</button>
+									<button
+										class={btnSmallDanger}
+										type="button"
+										on:click={() => {
+											deleteAllChatsHandler();
+											showDeleteConfirm = false;
+										}}
+									>
+										{$i18n.t('Confirm')}
+									</button>
+								</div>
+							{:else}
+								<button class={btnDanger} type="button" on:click={() => (showDeleteConfirm = true)} disabled={operationStates.deleteAll.phase === 'running'}>
+									{$i18n.t('Delete All')}
+								</button>
+							{/if}
 						</div>
-						{#if showDeleteConfirm}
-							<div class="shrink-0 flex items-center gap-1.5">
-								<span class="text-xs text-red-600/70 dark:text-red-400/80 whitespace-nowrap">
-									{$i18n.t('Are you sure?')}
-								</span>
-								<button
-									class={btnSmall}
-									type="button"
-									on:click={() => (showDeleteConfirm = false)}
-								>
-									{$i18n.t('Cancel')}
-								</button>
-								<button
-									class={btnSmallDanger}
-									type="button"
-									on:click={() => {
-										deleteAllChatsHandler();
-										showDeleteConfirm = false;
-									}}
-								>
-									{$i18n.t('Confirm')}
-								</button>
-							</div>
-						{:else}
-							<button
-								class={btnDanger}
-								type="button"
-								on:click={() => (showDeleteConfirm = true)}
-							>
-								{$i18n.t('Delete All')}
-							</button>
-						{/if}
+						<DataManagementStatus
+							visible={hasOperationState('deleteAll')}
+							phase={operationStates.deleteAll.phase}
+							title={operationStates.deleteAll.title}
+							detail={operationStates.deleteAll.detail}
+						/>
 					</div>
 				</div>
 			</section>

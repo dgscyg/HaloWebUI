@@ -291,6 +291,87 @@ class TestUsers(AbstractPostgresTest):
             "revision": 1,
         }
 
+    def test_get_user_settings_backfills_missing_admin_provider_connections_once(
+        self, monkeypatch
+    ):
+        from main import app
+
+        self.users.update_user_role_by_id("2", "admin")
+        self.users.update_user_by_id(
+            "2",
+            {
+                "settings": {
+                    "ui": {
+                        "connections": {
+                            "gemini": {
+                                "GEMINI_API_BASE_URLS": ["https://gemini.example.com/v1beta"],
+                                "GEMINI_API_KEYS": ["gem-key"],
+                                "GEMINI_API_CONFIGS": {"0": {"remark": "Gemini"}},
+                            }
+                        }
+                    }
+                }
+            },
+        )
+
+        monkeypatch.setattr(
+            app.state.config,
+            "OPENAI_API_BASE_URLS",
+            ["https://api.example.com/v1"],
+            raising=False,
+        )
+        monkeypatch.setattr(
+            app.state.config,
+            "OPENAI_API_KEYS",
+            ["sk-openai"],
+            raising=False,
+        )
+        monkeypatch.setattr(
+            app.state.config,
+            "OPENAI_API_CONFIGS",
+            {"0": {"remark": "OpenAI"}},
+            raising=False,
+        )
+
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.get(self.create_url("/user/settings"))
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ui"]["connections"]["gemini"]["GEMINI_API_BASE_URLS"] == [
+            "https://gemini.example.com/v1beta"
+        ]
+        assert data["ui"]["connections"]["openai"]["OPENAI_API_BASE_URLS"] == [
+            "https://api.example.com/v1"
+        ]
+        assert data["ui"]["_legacy_global_connections_seeded_v1"] is True
+
+        # Once the one-time backfill marker exists, removed providers should stay removed.
+        self.users.update_user_by_id(
+            "2",
+            {
+                "settings": {
+                    "ui": {
+                        "connections": {
+                            "gemini": {
+                                "GEMINI_API_BASE_URLS": ["https://gemini.example.com/v1beta"],
+                                "GEMINI_API_KEYS": ["gem-key"],
+                                "GEMINI_API_CONFIGS": {"0": {"remark": "Gemini"}},
+                            }
+                        },
+                        "_legacy_global_connections_seeded_v1": True,
+                    }
+                }
+            },
+        )
+
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.get(self.create_url("/user/settings"))
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "openai" not in data["ui"]["connections"]
+
     def test_update_user_settings_does_not_invalidate_model_cache_for_unrelated_ui_changes(
         self, monkeypatch
     ):

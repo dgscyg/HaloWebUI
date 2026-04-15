@@ -376,6 +376,18 @@ def get_config_value(config_path: str):
 PERSISTENT_CONFIG_REGISTRY = []
 
 
+def _sync_persistent_config_registry() -> None:
+    for config_item in PERSISTENT_CONFIG_REGISTRY:
+        new_value = get_config_value(config_item.config_path)
+        if new_value is not None and ENABLE_PERSISTENT_CONFIG:
+            config_item.value = new_value
+            config_item.config_value = new_value
+            log.info(f"Updated {config_item.env_name} to new value {config_item.value}")
+        else:
+            config_item.value = config_item.env_value
+            config_item.config_value = None
+
+
 def save_config(config):
     global CONFIG_DATA
     global PERSISTENT_CONFIG_REGISTRY
@@ -383,9 +395,7 @@ def save_config(config):
         save_to_db(config)
         CONFIG_DATA = config
 
-        # Trigger updates on all registered PersistentConfig entries
-        for config_item in PERSISTENT_CONFIG_REGISTRY:
-            config_item.update()
+        _sync_persistent_config_registry()
     except Exception as e:
         log.exception(e)
         return False

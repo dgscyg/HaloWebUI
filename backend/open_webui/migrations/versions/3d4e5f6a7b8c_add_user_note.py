@@ -1,7 +1,7 @@
 """Add user note column
 
 Revision ID: 3d4e5f6a7b8c
-Revises: 2c3d4e5f6a7b
+Revises: 5f6a7b8c9d0e
 Create Date: 2026-04-01 00:00:00.000000
 
 """
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "3d4e5f6a7b8c"
-down_revision = "2c3d4e5f6a7b"
+down_revision = "5f6a7b8c9d0e"
 branch_labels = None
 depends_on = None
 

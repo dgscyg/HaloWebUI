@@ -3,7 +3,14 @@
 	import { Pane, PaneResizer } from 'paneforge';
 
 	import { onDestroy, onMount, tick } from 'svelte';
-	import { showControls, showCallOverlay, showOverview, showArtifacts } from '$lib/stores';
+	import {
+		artifactAutoOpenDismissedMessageId,
+		artifactPreviewTarget,
+		showControls,
+		showCallOverlay,
+		showOverview,
+		showArtifacts
+	} from '$lib/stores';
 
 	import Controls from './Controls/Controls.svelte';
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
@@ -300,6 +307,11 @@
 	});
 
 	const closeHandler = () => {
+		if ($showArtifacts && $artifactPreviewTarget?.messageId) {
+			artifactAutoOpenDismissedMessageId.set($artifactPreviewTarget.messageId);
+		}
+
+		artifactPreviewTarget.set(null);
 		showControls.set(false);
 		showOverview.set(false);
 		showArtifacts.set(false);
@@ -334,9 +346,7 @@
 				placement={drawerPlacement}
 				className={drawerClassName}
 				show={$showControls}
-				on:close={() => {
-					showControls.set(false);
-				}}
+				on:close={closeHandler}
 			>
 				<div
 					class=" {$showCallOverlay || $showOverview || $showArtifacts
@@ -365,7 +375,7 @@
 						<Overview
 							{history}
 							on:nodeclick={(e) => {
-								showMessage(e.detail.node.data.message);
+								showMessage(e.detail.node.data.message, { source: 'overview' });
 							}}
 							on:close={() => {
 								showControls.set(false);
@@ -420,7 +430,7 @@
 						return;
 					}
 
-					showControls.set(false);
+					closeHandler();
 				}}
 				collapsible={true}
 				class=" z-10 "
@@ -458,7 +468,7 @@
 											history.messages[e.detail.node.data.message.id].favorite = null;
 										}
 
-										showMessage(e.detail.node.data.message);
+										showMessage(e.detail.node.data.message, { source: 'overview' });
 									}}
 									on:close={() => {
 										showControls.set(false);

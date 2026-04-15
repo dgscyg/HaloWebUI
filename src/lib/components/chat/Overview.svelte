@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getContext, createEventDispatcher, onDestroy } from 'svelte';
-	import { useSvelteFlow, useNodesInitialized, useStore } from '@xyflow/svelte';
+	import { useSvelteFlow, useNodesInitialized } from '@xyflow/svelte';
 
 	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
@@ -8,7 +8,7 @@
 	import { onMount, tick } from 'svelte';
 
 	import { writable } from 'svelte/store';
-	import { models, showOverview, theme, user } from '$lib/stores';
+	import { models, overviewFocusedMessageId, showOverview, user } from '$lib/stores';
 
 	import '@xyflow/svelte/dist/style.css';
 
@@ -17,14 +17,14 @@
 	import XMark from '../icons/XMark.svelte';
 	import ArrowLeft from '../icons/ArrowLeft.svelte';
 
-	const { width, height } = useStore();
-
-	const { fitView, getViewport } = useSvelteFlow();
+	const { fitView, flowToScreenPosition, getNodesBounds, getViewport, setViewport } = useSvelteFlow();
 	const nodesInitialized = useNodesInitialized();
 
 	export let history;
 
-	let selectedMessageId = null;
+	let highlightedMessageId = null;
+	let overviewElement: HTMLDivElement;
+	let headerElement: HTMLDivElement;
 
 	const nodes = writable([]);
 	const edges = writable([]);
@@ -33,23 +33,15 @@
 		custom: CustomNode
 	};
 
+	$: highlightedMessageId =
+		history?.messages?.[$overviewFocusedMessageId]
+			? $overviewFocusedMessageId
+			: history?.currentId ?? null;
+
 	$: if (history) {
+		highlightedMessageId;
 		drawFlow();
 	}
-
-	$: if (history && history.currentId) {
-		focusNode();
-	}
-
-	const focusNode = async () => {
-		if (selectedMessageId === null) {
-			await fitView({ nodes: [{ id: history.currentId }] });
-		} else {
-			await fitView({ nodes: [{ id: selectedMessageId }] });
-		}
-
-		selectedMessageId = null;
-	};
 
 	const drawFlow = async () => {
 		const nodeList = [];
@@ -91,10 +83,14 @@
 			nodeList.push({
 				id: pos.id,
 				type: 'custom',
+				selected: highlightedMessageId === pos.id,
 				data: {
 					user: $user,
 					message: history.messages[id],
-					model: $models.find((model) => model.id === history.messages[id].model)
+					model: $models.find((model) => model.id === history.messages[id].model),
+					isCurrent: highlightedMessageId === pos.id,
+					isOnCurrentPath:
+						highlightedMessageId === id || recurseCheckChild(id, highlightedMessageId)
 				},
 				position: { x, y }
 			});
@@ -107,9 +103,12 @@
 					source: parentId,
 					target: pos.id,
 					selectable: false,
-					class: ' dark:fill-gray-300 fill-gray-300',
+					class:
+						highlightedMessageId === id || recurseCheckChild(id, highlightedMessageId)
+							? 'overview-edge-active'
+							: 'overview-edge',
 					type: 'smoothstep',
-					animated: history.currentId === id || recurseCheckChild(id, history.currentId)
+					animated: highlightedMessageId === id || recurseCheckChild(id, highlightedMessageId)
 				});
 			}
 		});
@@ -126,27 +125,82 @@
 		);
 	};
 
+	const nudgeNodeIntoView = async (messageId: string) => {
+		if (!messageId || !overviewElement) {
+			return;
+		}
+
+		let bounds;
+		try {
+			bounds = getNodesBounds([messageId]);
+		} catch (error) {
+			return;
+		}
+
+		if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height)) {
+			return;
+		}
+
+		const topLeft = flowToScreenPosition({ x: bounds.x, y: bounds.y });
+		const bottomRight = flowToScreenPosition({
+			x: bounds.x + bounds.width,
+			y: bounds.y + bounds.height
+		});
+
+		const panelRect = overviewElement.getBoundingClientRect();
+		const headerRect = headerElement?.getBoundingClientRect();
+		const safeInsetX = 24;
+		const safeInsetBottom = 28;
+		const safeInsetTop = 18;
+
+		const safeLeft = panelRect.left + safeInsetX;
+		const safeRight = panelRect.right - safeInsetX;
+		const safeTop = Math.max(
+			panelRect.top + safeInsetTop,
+			(headerRect?.bottom ?? panelRect.top) + safeInsetTop
+		);
+		const safeBottom = panelRect.bottom - safeInsetBottom;
+
+		let deltaX = 0;
+		let deltaY = 0;
+
+		if (topLeft.x < safeLeft) {
+			deltaX = safeLeft - topLeft.x;
+		} else if (bottomRight.x > safeRight) {
+			deltaX = safeRight - bottomRight.x;
+		}
+
+		if (topLeft.y < safeTop) {
+			deltaY = safeTop - topLeft.y;
+		} else if (bottomRight.y > safeBottom) {
+			deltaY = safeBottom - bottomRight.y;
+		}
+
+		if (deltaX === 0 && deltaY === 0) {
+			return;
+		}
+
+		const viewport = getViewport();
+		await setViewport(
+			{
+				...viewport,
+				x: viewport.x + deltaX,
+				y: viewport.y + deltaY
+			},
+			{ duration: 180 }
+		);
+	};
+
 	onMount(() => {
 		drawFlow();
 
 		nodesInitialized.subscribe(async (initialized) => {
 			if (initialized) {
 				await tick();
-				const res = await fitView({ nodes: [{ id: history.currentId }] });
-			}
-		});
-
-		width.subscribe((value) => {
-			if (value) {
-				// fitView();
-				fitView({ nodes: [{ id: history.currentId }] });
-			}
-		});
-
-		height.subscribe((value) => {
-			if (value) {
-				// fitView();
-				fitView({ nodes: [{ id: history.currentId }] });
+				const focusId = highlightedMessageId ?? history?.currentId ?? null;
+				if (focusId) {
+					await fitView({ nodes: [{ id: focusId }] });
+				}
 			}
 		});
 	});
@@ -159,8 +213,11 @@
 	});
 </script>
 
-<div class="w-full h-full relative">
-	<div class=" absolute z-50 w-full flex justify-between dark:text-gray-100 px-4 py-3.5">
+<div bind:this={overviewElement} class="w-full h-full relative">
+	<div
+		bind:this={headerElement}
+		class=" absolute z-50 w-full flex justify-between dark:text-gray-100 px-4 py-3.5"
+	>
 		<div class="flex items-center gap-2.5">
 			<button
 				class="self-center p-0.5"
@@ -189,11 +246,31 @@
 			{nodeTypes}
 			{edges}
 			on:nodeclick={(e) => {
-				console.log(e.detail.node.data);
 				dispatch('nodeclick', e.detail);
-				selectedMessageId = e.detail.node.data.message.id;
-				fitView({ nodes: [{ id: selectedMessageId }] });
+				const messageId = e.detail.node.data.message.id;
+				overviewFocusedMessageId.set(messageId);
+				void tick().then(() => nudgeNodeIntoView(messageId));
 			}}
 		/>
 	{/if}
 </div>
+
+<style>
+	:global(.overview-edge path) {
+		stroke: rgba(148, 163, 184, 0.55);
+		stroke-width: 1.5px;
+	}
+
+	:global(.dark .overview-edge path) {
+		stroke: rgba(148, 163, 184, 0.3);
+	}
+
+	:global(.overview-edge-active path) {
+		stroke: rgba(14, 165, 233, 0.72);
+		stroke-width: 2.5px;
+	}
+
+	:global(.dark .overview-edge-active path) {
+		stroke: rgba(56, 189, 248, 0.8);
+	}
+</style>

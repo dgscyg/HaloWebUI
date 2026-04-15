@@ -463,6 +463,7 @@ from open_webui.env import (
     WEBUI_ADMIN_NAME,
     ENABLE_API_RATE_LIMIT,
     API_RATE_LIMIT_RPM,
+    UVICORN_WORKERS,
     load_changelog,
 )
 
@@ -926,6 +927,8 @@ app.state.config.RAG_OLLAMA_API_KEY = RAG_OLLAMA_API_KEY
 
 app.state.config.PDF_EXTRACT_IMAGES = PDF_EXTRACT_IMAGES
 app.state.config.PDF_LOADING_MODE = PDF_LOADING_MODE
+# Legacy alias kept for older clients still sending/reading `PDF_LOADER_MODE`.
+app.state.config.PDF_LOADER_MODE = PDF_LOADING_MODE
 
 app.state.config.YOUTUBE_LOADER_LANGUAGE = YOUTUBE_LOADER_LANGUAGE
 app.state.config.YOUTUBE_LOADER_PROXY_URL = YOUTUBE_LOADER_PROXY_URL
@@ -1839,6 +1842,19 @@ async def get_app_config(request: Request):
     if user is None:
         onboarding = user_count == 0
 
+    database_restore_support = {
+        "backend": "sqlite" if engine.name == "sqlite" else engine.name,
+        "worker_count": UVICORN_WORKERS,
+        "supported": engine.name == "sqlite" and UVICORN_WORKERS == 1,
+        "reason": (
+            "backend_not_sqlite"
+            if engine.name != "sqlite"
+            else (
+                "multiple_workers_not_supported" if UVICORN_WORKERS != 1 else None
+            )
+        ),
+    }
+
     return {
         **({"onboarding": True} if onboarding else {}),
         "status": True,
@@ -1882,6 +1898,10 @@ async def get_app_config(request: Request):
                     "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     "enable_onedrive_integration": app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
                     "enable_prompt_suggestions": app.state.config.ENABLE_DEFAULT_PROMPT_SUGGESTIONS,
+                    "database_backend": database_restore_support["backend"],
+                    "database_restore_supported": database_restore_support["supported"],
+                    "database_restore_reason": database_restore_support["reason"],
+                    "uvicorn_workers": database_restore_support["worker_count"],
                 }
                 if user is not None
                 else {}

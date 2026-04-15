@@ -42,6 +42,7 @@ from open_webui.utils.user_tools import (
     set_user_native_tools_config,
     set_user_tool_server_connections,
 )
+from open_webui.utils.data_management import deep_merge_dict
 
 
 router = APIRouter()
@@ -68,12 +69,21 @@ def _log_background_task_exception(task: asyncio.Task, *, label: str) -> None:
 
 class ImportConfigForm(BaseModel):
     config: dict
+    mode: Literal["merge", "replace"] = "replace"
 
 
 @router.post("/import", response_model=dict)
 async def import_config(form_data: ImportConfigForm, user=Depends(get_admin_user)):
-    save_config(form_data.config)
-    return get_config()
+    next_config = (
+        deep_merge_dict(get_config(), form_data.config)
+        if form_data.mode == "merge"
+        else form_data.config
+    )
+
+    if not save_config(next_config):
+        raise HTTPException(status_code=400, detail="Failed to import config.")
+
+    return {"mode": form_data.mode, "config": get_config()}
 
 
 ############################

@@ -895,15 +895,11 @@ async def update_rag_config(
         form_data.PDF_LOADING_MODE
         if form_data.PDF_LOADING_MODE is not None
         else (
+            # Accept the legacy request field, but persist only the canonical config key.
             form_data.PDF_LOADER_MODE
             if form_data.PDF_LOADER_MODE is not None
             else request.app.state.config.PDF_LOADING_MODE
         )
-    )
-    request.app.state.config.PDF_LOADER_MODE = (
-        request.app.state.config.PDF_LOADING_MODE
-        if request.app.state.config.PDF_LOADING_MODE is not None
-        else request.app.state.config.PDF_LOADING_MODE
     )
     request.app.state.config.TIKA_SERVER_URL = (
         form_data.TIKA_SERVER_URL

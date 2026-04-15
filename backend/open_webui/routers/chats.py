@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 
 from open_webui.socket.main import get_event_emitter
@@ -51,6 +51,45 @@ def _chat_response_list(chats) -> list[ChatResponse]:
 class ChatContextResponse(BaseModel):
     tags: list[TagModel] = Field(default_factory=list)
     task_ids: list[str] = Field(default_factory=list)
+
+
+class ChatImportItemForm(BaseModel):
+    chat: dict
+    meta: dict = Field(default_factory=dict)
+    pinned: Optional[bool] = False
+    folder_id: Optional[str] = None
+    assistant_id: Optional[str] = None
+
+
+class ChatBatchImportForm(BaseModel):
+    items: list[ChatImportItemForm] = Field(default_factory=list)
+    mode: Literal["merge", "replace"] = "merge"
+
+
+class ChatImportFailure(BaseModel):
+    index: int
+    title: str
+    detail: str
+
+
+class ChatBatchImportResponse(BaseModel):
+    mode: Literal["merge", "replace"]
+    total: int
+    imported: int
+    failed: int
+    failures: list[ChatImportFailure] = Field(default_factory=list)
+
+
+def _sync_imported_chat_tags(chat, user_id: str) -> None:
+    tags = chat.meta.get("tags", []) if chat else []
+    for tag_id in tags:
+        tag_id = tag_id.replace(" ", "_").lower()
+        tag_name = " ".join([word.capitalize() for word in tag_id.split("_")])
+        if (
+            tag_id != "none"
+            and Tags.get_tag_by_name_and_user_id(tag_name, user_id) is None
+        ):
+            Tags.insert_new_tag(tag_name, user_id)
 
 ############################
 # GetChatList
@@ -139,23 +178,77 @@ async def create_new_chat(form_data: ChatForm, user=Depends(get_verified_user)):
 async def import_chat(form_data: ChatImportForm, user=Depends(get_verified_user)):
     try:
         chat = Chats.import_chat(user.id, form_data)
-        if chat:
-            tags = chat.meta.get("tags", [])
-            for tag_id in tags:
-                tag_id = tag_id.replace(" ", "_").lower()
-                tag_name = " ".join([word.capitalize() for word in tag_id.split("_")])
-                if (
-                    tag_id != "none"
-                    and Tags.get_tag_by_name_and_user_id(tag_name, user.id) is None
-                ):
-                    Tags.insert_new_tag(tag_name, user.id)
-
+        _sync_imported_chat_tags(chat, user.id)
         return _chat_response(chat)
     except Exception as e:
         log.exception(e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT()
         )
+
+
+@router.post("/import/batch", response_model=ChatBatchImportResponse)
+async def import_chats_batch(
+    form_data: ChatBatchImportForm, user=Depends(get_verified_user)
+):
+    total = len(form_data.items)
+
+    if form_data.mode == "replace":
+        try:
+            import_forms = [ChatImportForm(**item.model_dump()) for item in form_data.items]
+            chats = Chats.replace_chats_by_user_id(user.id, import_forms)
+            for chat in chats:
+                _sync_imported_chat_tags(chat, user.id)
+
+            return ChatBatchImportResponse(
+                mode=form_data.mode,
+                total=total,
+                imported=len(chats),
+                failed=0,
+                failures=[],
+            )
+        except Exception as e:
+            log.exception(e)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e) or ERROR_MESSAGES.DEFAULT(),
+            )
+
+    imported = 0
+    failures: list[ChatImportFailure] = []
+
+    for index, item in enumerate(form_data.items):
+        try:
+            chat = Chats.import_chat(user.id, ChatImportForm(**item.model_dump()))
+            if chat is None:
+                failures.append(
+                    ChatImportFailure(
+                        index=index,
+                        title=item.chat.get("title", "New Chat"),
+                        detail=ERROR_MESSAGES.DEFAULT(),
+                    )
+                )
+                continue
+
+            _sync_imported_chat_tags(chat, user.id)
+            imported += 1
+        except Exception as e:
+            log.exception(e)
+            failures.append(
+                ChatImportFailure(
+                    index=index,
+                    title=item.chat.get("title", "New Chat"),
+                    detail=str(e) or ERROR_MESSAGES.DEFAULT(),
+                )
+            )
+
+    return ChatBatchImportResponse(
+        mode=form_data.mode,
+        total=total,
+        imported=imported,
+        failed=len(failures),
+        failures=failures,
+    )
 
 
 ############################
@@ -209,6 +302,62 @@ async def get_chats_by_folder_id(folder_id: str, user=Depends(get_verified_user)
     return _chat_response_list(
         Chats.get_chats_by_folder_ids_and_user_id(folder_ids, user.id)
     )
+
+
+@router.get("/folder/{folder_id}/list", response_model=list[ChatTitleIdResponse])
+async def get_chat_list_by_folder_id(
+    folder_id: str, page: Optional[int] = 1, user=Depends(get_verified_user)
+):
+    try:
+        limit = 10
+        skip = max((page or 1) - 1, 0) * limit
+
+        return [
+            ChatTitleIdResponse(
+                id=chat.id,
+                title=chat.title,
+                updated_at=chat.updated_at,
+                created_at=chat.created_at,
+                assistant_id=chat.assistant_id,
+            )
+            for chat in Chats.get_chats_by_folder_id_and_user_id(
+                folder_id, user.id, skip=skip, limit=limit
+            )
+        ]
+    except Exception as e:
+        log.exception(e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(),
+        )
+
+
+@router.get("/assistant/{assistant_id}/list", response_model=list[ChatTitleIdResponse])
+async def get_chat_list_by_assistant_id(
+    assistant_id: str, page: Optional[int] = 1, user=Depends(get_verified_user)
+):
+    try:
+        limit = 10
+        skip = max((page or 1) - 1, 0) * limit
+
+        return [
+            ChatTitleIdResponse(
+                id=chat.id,
+                title=chat.title,
+                updated_at=chat.updated_at,
+                created_at=chat.created_at,
+                assistant_id=chat.assistant_id,
+            )
+            for chat in Chats.get_chats_by_assistant_id_and_user_id(
+                assistant_id, user.id, skip=skip, limit=limit
+            )
+        ]
+    except Exception as e:
+        log.exception(e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(),
+        )
 
 
 ############################
@@ -616,7 +765,10 @@ async def clone_chat_by_id(
             "title": form_data.title if form_data.title else f"Clone of {chat.title}",
         }
 
-        chat = Chats.insert_new_chat(user.id, ChatForm(**{"chat": updated_chat}))
+        chat = Chats.insert_new_chat(
+            user.id,
+            ChatForm(**{"chat": updated_chat, "assistant_id": chat.assistant_id}),
+        )
         return _chat_response(chat)
     else:
         raise HTTPException(

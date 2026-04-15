@@ -154,6 +154,63 @@ export const downloadDatabase = async (token: string) => {
 	}
 };
 
+export const inspectDatabaseRestore = async (token: string, file: File) => {
+	let error = null;
+	const formData = new FormData();
+	formData.append('file', file);
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/utils/db/restore/inspect`, {
+		method: 'POST',
+		headers: {
+			Authorization: `Bearer ${token}`
+		},
+		body: formData
+	})
+		.then(parseJsonResponse)
+		.catch((err) => {
+			console.log(err);
+			error = err;
+			return null;
+		});
+
+	if (error) {
+		throw error?.detail ?? error;
+	}
+
+	return res;
+};
+
+export const restoreDatabase = async (
+	token: string,
+	payload: {
+		token: string;
+		confirmation: string;
+	}
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/utils/db/restore`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify(payload)
+	})
+		.then(parseJsonResponse)
+		.catch((err) => {
+			console.log(err);
+			error = err;
+			return null;
+		});
+
+	if (error) {
+		throw error?.detail ?? error;
+	}
+
+	return res;
+};
+
 export const downloadLiteLLMConfig = async (token: string) => {
 	try {
 		const response = await fetch(`${WEBUI_API_BASE_URL}/utils/litellm/config`, {

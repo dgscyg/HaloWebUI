@@ -734,6 +734,7 @@ def _migrate_070_family(conn: Connection, backend: str) -> None:
     _ensure_note_columns(conn, backend, source_has_access_grants=False)
     _ensure_knowledge_columns(conn, backend, source_has_access_grants=False)
     _ensure_folder_system_prompt(conn)
+    _ensure_chat_assistant_id(conn)
     _ensure_access_control_columns(conn, backend, use_access_grants=False)
     _ensure_skill_table(conn, backend, source_has_access_grants=False)
     _rebuild_chat_message_table(conn, backend, source_has_chat_message=False)
@@ -747,6 +748,7 @@ def _migrate_080_family(conn: Connection, backend: str) -> None:
     _ensure_note_columns(conn, backend, source_has_access_grants=True)
     _ensure_knowledge_columns(conn, backend, source_has_access_grants=True)
     _ensure_folder_system_prompt(conn)
+    _ensure_chat_assistant_id(conn)
     _ensure_access_control_columns(conn, backend, use_access_grants=True)
     _ensure_skill_table(conn, backend, source_has_access_grants=True)
     _rebuild_chat_message_table(conn, backend, source_has_chat_message=True)
@@ -1007,6 +1009,18 @@ def _ensure_folder_system_prompt(conn: Connection) -> None:
                 text('UPDATE "folder" SET system_prompt = :system_prompt WHERE id = :id'),
                 {"system_prompt": str(system_prompt), "id": row["id"]},
             )
+
+
+def _ensure_chat_assistant_id(conn: Connection) -> None:
+    if not _table_exists(conn, "chat"):
+        return
+
+    _ensure_column(conn, "chat", "assistant_id", "TEXT")
+    conn.execute(
+        text(
+            'CREATE INDEX IF NOT EXISTS "ix_chat_assistant_id" ON "chat" ("assistant_id")'
+        )
+    )
 
 
 def _ensure_access_control_columns(

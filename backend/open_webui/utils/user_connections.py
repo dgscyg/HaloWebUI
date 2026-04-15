@@ -25,6 +25,7 @@ from open_webui.models.users import Users, UserModel
 
 UI_KEY = "ui"
 CONNECTIONS_KEY = "connections"
+LEGACY_GLOBAL_CONNECTIONS_SEEDED_KEY = "_legacy_global_connections_seeded_v1"
 
 
 def _as_dict(v: Any) -> dict:
@@ -92,12 +93,13 @@ def maybe_migrate_user_connections(request, user: UserModel) -> UserModel:
     Migration rules:
     - Never delete legacy fields (e.g. ui.directConnections) or global configs.
     - Only fill missing provider configs from legacy ui.directConnections.
-    - Admin users: if no per-user provider configs exist yet at all, seed them once from global app.state.config.
+    - Admin users: backfill missing legacy global provider configs once, then stop auto-seeding.
     - All users: seed OpenAI-compatible connections from legacy ui.directConnections if present.
     """
 
     ui = _get_ui_settings(user)
     connections = _as_dict(ui.get(CONNECTIONS_KEY))
+    legacy_global_seeded = bool(ui.get(LEGACY_GLOBAL_CONNECTIONS_SEEDED_KEY))
 
     changed = False
 
@@ -110,10 +112,14 @@ def maybe_migrate_user_connections(request, user: UserModel) -> UserModel:
             connections["openai"] = deepcopy(legacy_direct)
             changed = True
 
-    # 2) Admin seeding from global configs is a one-time migration only.
-    # Once a user has any per-user connections recorded, do not silently
-    # reintroduce provider configs from the legacy global state.
-    should_seed_from_global = getattr(user, "role", None) == "admin" and len(connections) == 0
+    # 2) Admin seeding from global configs is a one-time compatibility migration.
+    # Older installs can already have a partially-migrated ui.connections tree
+    # (for example only one provider present). In that case we still need to
+    # backfill missing providers once, then remember we've done it so deleted
+    # providers do not reappear forever on future requests.
+    should_seed_from_global = (
+        getattr(user, "role", None) == "admin" and not legacy_global_seeded
+    )
 
     if should_seed_from_global:
         cfg = getattr(getattr(request, "app", None), "state", None)
@@ -139,8 +145,8 @@ def maybe_migrate_user_connections(request, user: UserModel) -> UserModel:
                 "OLLAMA_API_CONFIGS": deepcopy(getattr(cfg, "OLLAMA_API_CONFIGS", {}) or {}),
             }
 
-            # Seed all available providers once when no per-user connections exist yet.
-            # If openai already came from legacy_direct, keep it.
+            # Backfill only missing providers once. If openai already came from
+            # legacy_direct, keep it.
             if "openai" not in connections and _has_provider_values(
                 global_openai, "OPENAI_API_BASE_URLS", "OPENAI_API_KEYS", "OPENAI_API_CONFIGS"
             ):
@@ -162,11 +168,17 @@ def maybe_migrate_user_connections(request, user: UserModel) -> UserModel:
                 connections["ollama"] = global_ollama
                 changed = True
 
+            if not legacy_global_seeded:
+                legacy_global_seeded = True
+                changed = True
+
     if not changed:
         return user
 
     next_ui = dict(ui)
     next_ui[CONNECTIONS_KEY] = connections
+    if legacy_global_seeded:
+        next_ui[LEGACY_GLOBAL_CONNECTIONS_SEEDED_KEY] = True
 
     # Preserve any other ui keys.
     next_settings = {UI_KEY: next_ui}
