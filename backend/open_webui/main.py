@@ -49,7 +49,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
-from starlette.responses import Response, StreamingResponse
+from starlette.responses import FileResponse, Response, StreamingResponse
 
 
 from open_webui.utils import logger
@@ -67,6 +67,7 @@ from open_webui.routers import (
     ollama,
     openai,
     gemini,
+    grok,
     anthropic,
     retrieval,
     tasks,
@@ -93,6 +94,7 @@ from open_webui.routers import (
 )
 
 from open_webui.haloclaw.router import router as haloclaw_router
+from open_webui.external_api.router import router as external_api_router
 
 from open_webui.retrieval.runtime import ensure_embedding_runtime
 
@@ -119,8 +121,12 @@ from open_webui.config import (
     OLLAMA_API_CONFIGS,
     # OpenAI
     ENABLE_OPENAI_API,
+    ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION,
+    CHAT_STREAM_RESPONSE_CHUNK_MAX_BUFFER_SIZE,
     # Gemini
     ENABLE_GEMINI_API,
+    # Grok
+    ENABLE_GROK_API,
     ONEDRIVE_CLIENT_ID,
     OPENAI_API_BASE_URLS,
     OPENAI_API_KEYS,
@@ -128,6 +134,9 @@ from open_webui.config import (
     GEMINI_API_BASE_URLS,
     GEMINI_API_KEYS,
     GEMINI_API_CONFIGS,
+    GROK_API_BASE_URLS,
+    GROK_API_KEYS,
+    GROK_API_CONFIGS,
     # Anthropic
     ENABLE_ANTHROPIC_API,
     ANTHROPIC_API_BASE_URLS,
@@ -191,6 +200,8 @@ from open_webui.config import (
     IMAGE_GENERATION_MODEL,
     IMAGE_MODEL_FILTER_REGEX,
     IMAGE_SIZE,
+    IMAGE_ASPECT_RATIO,
+    IMAGE_RESOLUTION,
     IMAGE_STEPS,
     IMAGES_OPENAI_API_BASE_URL,
     IMAGES_OPENAI_API_FORCE_MODE,
@@ -198,6 +209,8 @@ from open_webui.config import (
     IMAGES_GEMINI_API_BASE_URL,
     IMAGES_GEMINI_API_FORCE_MODE,
     IMAGES_GEMINI_API_KEY,
+    IMAGES_GROK_API_BASE_URL,
+    IMAGES_GROK_API_KEY,
     # Audio
     AUDIO_STT_ENGINE,
     AUDIO_STT_MODEL,
@@ -435,6 +448,7 @@ from open_webui.config import (
 from open_webui.env import (
     AUDIT_EXCLUDED_PATHS,
     AUDIT_LOG_LEVEL,
+    BASE_DIR,
     CHANGELOG,
     REDIS_URL,
     REDIS_KEY_PREFIX,
@@ -473,6 +487,7 @@ from open_webui.utils.models import (
     get_all_base_models,
     check_model_access,
 )
+from open_webui.utils.model_identity import resolve_model_from_lookup
 from open_webui.utils.chat import (
     generate_chat_completion as chat_completion_handler,
     chat_completed as chat_completed_handler,
@@ -516,6 +531,18 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 class SPAStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope):
+        response = await self._get_response(path, scope)
+
+        if path.startswith("_app/immutable/"):
+            response.headers.setdefault(
+                "Cache-Control", "public, max-age=31536000, immutable"
+            )
+        elif path.startswith(("assets/", "wasm/")):
+            response.headers.setdefault("Cache-Control", "public, max-age=86400")
+
+        return response
+
+    async def _get_response(self, path: str, scope):
         try:
             return await super().get_response(path, scope)
         except (HTTPException, StarletteHTTPException) as ex:
@@ -662,6 +689,12 @@ app.state.config.ENABLE_OPENAI_API = ENABLE_OPENAI_API
 app.state.config.OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS
 app.state.config.OPENAI_API_KEYS = OPENAI_API_KEYS
 app.state.config.OPENAI_API_CONFIGS = OPENAI_API_CONFIGS
+app.state.config.ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION = (
+    ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION
+)
+app.state.config.CHAT_STREAM_RESPONSE_CHUNK_MAX_BUFFER_SIZE = (
+    CHAT_STREAM_RESPONSE_CHUNK_MAX_BUFFER_SIZE
+)
 
 app.state.OPENAI_MODELS = {}
 
@@ -678,6 +711,19 @@ app.state.config.GEMINI_API_KEYS = GEMINI_API_KEYS
 app.state.config.GEMINI_API_CONFIGS = GEMINI_API_CONFIGS
 
 app.state.GEMINI_MODELS = {}
+
+########################################
+#
+# GROK
+#
+########################################
+
+app.state.config.ENABLE_GROK_API = ENABLE_GROK_API
+app.state.config.GROK_API_BASE_URLS = GROK_API_BASE_URLS
+app.state.config.GROK_API_KEYS = GROK_API_KEYS
+app.state.config.GROK_API_CONFIGS = GROK_API_CONFIGS
+
+app.state.GROK_MODELS = {}
 
 ########################################
 #
@@ -1055,6 +1101,9 @@ app.state.config.IMAGES_GEMINI_API_BASE_URL = IMAGES_GEMINI_API_BASE_URL
 app.state.config.IMAGES_GEMINI_API_FORCE_MODE = IMAGES_GEMINI_API_FORCE_MODE
 app.state.config.IMAGES_GEMINI_API_KEY = IMAGES_GEMINI_API_KEY
 
+app.state.config.IMAGES_GROK_API_BASE_URL = IMAGES_GROK_API_BASE_URL
+app.state.config.IMAGES_GROK_API_KEY = IMAGES_GROK_API_KEY
+
 app.state.config.IMAGE_GENERATION_MODEL = IMAGE_GENERATION_MODEL
 app.state.config.IMAGE_MODEL_FILTER_REGEX = IMAGE_MODEL_FILTER_REGEX
 
@@ -1069,6 +1118,8 @@ app.state.config.COMFYUI_WORKFLOW = COMFYUI_WORKFLOW
 app.state.config.COMFYUI_WORKFLOW_NODES = COMFYUI_WORKFLOW_NODES
 
 app.state.config.IMAGE_SIZE = IMAGE_SIZE
+app.state.config.IMAGE_ASPECT_RATIO = IMAGE_ASPECT_RATIO
+app.state.config.IMAGE_RESOLUTION = IMAGE_RESOLUTION
 app.state.config.IMAGE_STEPS = IMAGE_STEPS
 
 
@@ -1297,6 +1348,7 @@ app.mount("/ws", socket_app)
 app.include_router(ollama.router, prefix="/ollama", tags=["ollama"])
 app.include_router(openai.router, prefix="/openai", tags=["openai"])
 app.include_router(gemini.router, prefix="/gemini", tags=["gemini"])
+app.include_router(grok.router, prefix="/grok", tags=["grok"])
 app.include_router(anthropic.router, prefix="/anthropic", tags=["anthropic"])
 
 
@@ -1333,6 +1385,9 @@ app.include_router(terminal.router, prefix="/api/v1/terminal", tags=["terminal"]
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 
 app.include_router(haloclaw_router, prefix="/api/v1/haloclaw", tags=["haloclaw"])
+app.include_router(
+    external_api_router, prefix="/api/v1/external_api", tags=["external_api"]
+)
 
 app.include_router(scim.router, prefix="/scim/v2", tags=["scim"])
 
@@ -1382,9 +1437,23 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
     model_order_list = request.app.state.config.MODEL_ORDER_LIST
     if model_order_list:
         model_order_dict = {model_id: i for i, model_id in enumerate(model_order_list)}
+
+        def get_model_order_index(model):
+            aliases = [
+                model.get("selection_id"),
+                model.get("id"),
+                model.get("model_id"),
+                model.get("original_id"),
+                *(model.get("legacy_ids") or []),
+            ]
+            return min(
+                (model_order_dict[alias] for alias in aliases if alias in model_order_dict),
+                default=float("inf"),
+            )
+
         # Sort models by order list priority, with fallback for those not in the list
         models.sort(
-            key=lambda x: (model_order_dict.get(x["id"], float("inf")), x["name"])
+            key=lambda x: (get_model_order_index(x), x["name"])
         )
 
     # Filter out workspace/shared models that the user does not have access to.
@@ -1406,6 +1475,45 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
         f"/api/models returned filtered models accessible to the user: {json.dumps([model['id'] for model in models])}"
     )
     return {"data": models}
+
+
+def _apply_connection_owner_for_model(request: Request, user, model: dict | None):
+    if not isinstance(model, dict):
+        return
+
+    try:
+        model_info = Models.get_model_by_id(model.get("id"))
+        if model_info and model_info.user_id and model_info.user_id != user.id:
+            from open_webui.models.users import Users  # local import to avoid heavy coupling
+            from open_webui.utils.user_connections import maybe_migrate_user_connections
+
+            owner = Users.get_user_by_id(model_info.user_id)
+            if owner:
+                owner = maybe_migrate_user_connections(request, owner)
+                request.state.connection_user = owner
+    except Exception:
+        pass
+
+
+def _get_http_error_message(exc: Exception) -> str:
+    if isinstance(exc, HTTPException):
+        detail = exc.detail
+        if isinstance(detail, dict):
+            message = detail.get("message") or detail.get("detail") or detail.get("code")
+            if message:
+                return str(message)
+        if detail is not None:
+            return str(detail)
+    return str(exc)
+
+
+def _raise_preserving_http_exception(exc: Exception, default_status: int) -> None:
+    if isinstance(exc, HTTPException):
+        raise exc
+    raise HTTPException(
+        status_code=default_status,
+        detail=str(exc),
+    )
 
 
 @app.get("/api/models/base")
@@ -1431,28 +1539,23 @@ async def chat_completion(
             # Build a user-scoped model map for this request.
             await get_all_models(request, user=user)
             models_map = getattr(request.state, "MODELS", {}) or {}
+            ambiguous_model_aliases = getattr(request.state, "MODELS_AMBIGUOUS", set()) or set()
 
             model_id = form_data.get("model", None)
-            if model_id not in models_map:
+            model = resolve_model_from_lookup(
+                models_map,
+                ambiguous_model_aliases,
+                model_id,
+            )
+            if not model:
                 raise Exception("Model not found")
 
-            model = models_map[model_id]
-            model_info = Models.get_model_by_id(model_id)
+            model_info = Models.get_model_by_id(model.get("id"))
+            request.state.model = model
 
             # Shared model: route provider requests through the owning user's connections
             # (admin shares models by marking them public/private in the Models table).
-            if model_info and model_info.user_id and model_info.user_id != user.id:
-                try:
-                    from open_webui.models.users import (
-                        Users,
-                    )  # local import to avoid heavy coupling
-
-                    owner = Users.get_user_by_id(model_info.user_id)
-                    if owner:
-                        request.state.connection_user = owner
-                except Exception:
-                    # Best effort; provider routers will fall back to the request user.
-                    pass
+            _apply_connection_owner_for_model(request, user, model)
 
             # Check if user has access to the model
             if not BYPASS_MODEL_ACCESS_CONTROL and user.role == "user":
@@ -1524,6 +1627,7 @@ async def chat_completion(
             "preview_tool_compat": preview_tool_compat,
             "tool_calling_mode": effective_tool_calling_mode,
             "tool_ids": form_data.get("tool_ids", None),
+            "skill_ids": form_data.get("skill_ids", None),
             "tool_servers": form_data.pop("tool_servers", None),
             "files": form_data.get("files", None),
             "features": form_data.get("features", None),
@@ -1539,6 +1643,7 @@ async def chat_completion(
         form_data, metadata, events = await process_chat_payload(
             request, form_data, user, metadata, model
         )
+        request.state.metadata = metadata
 
     except Exception as e:
         log.debug(f"Error processing chat payload: {e}")
@@ -1548,16 +1653,25 @@ async def chat_completion(
                 metadata["chat_id"],
                 metadata["message_id"],
                 {
-                    "error": {"content": str(e)},
+                    "error": {"content": _get_http_error_message(e)},
                 },
             )
 
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+        _raise_preserving_http_exception(e, status.HTTP_400_BAD_REQUEST)
 
     try:
+        if metadata.get("local_response") is not None:
+            return await process_chat_response(
+                request,
+                metadata["local_response"],
+                form_data,
+                user,
+                metadata,
+                model,
+                events,
+                tasks,
+            )
+
         _emitter = get_event_emitter(metadata)
         if _emitter:
             await _emitter(
@@ -1676,10 +1790,7 @@ async def chat_completion(
             except Exception:
                 pass
 
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+        _raise_preserving_http_exception(e, status.HTTP_400_BAD_REQUEST)
 
 
 # Alias for chat_completion (Legacy)
@@ -1740,24 +1851,17 @@ async def chat_completed(
             request.state.model = model_item
         else:
             await get_all_models(request, user=user)
-            try:
-                model_id = form_data.get("model")
-                model_info = Models.get_model_by_id(model_id) if model_id else None
-                if model_info and model_info.user_id and model_info.user_id != user.id:
-                    from open_webui.models.users import Users
-
-                    owner = Users.get_user_by_id(model_info.user_id)
-                    if owner:
-                        request.state.connection_user = owner
-            except Exception:
-                pass
+            model_id = form_data.get("model")
+            model = resolve_model_from_lookup(
+                getattr(request.state, "MODELS", {}) or {},
+                getattr(request.state, "MODELS_AMBIGUOUS", set()) or set(),
+                model_id,
+            )
+            _apply_connection_owner_for_model(request, user, model)
 
         return await chat_completed_handler(request, form_data, user)
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+        _raise_preserving_http_exception(e, status.HTTP_400_BAD_REQUEST)
 
 
 @app.post("/api/chat/actions/{action_id}")
@@ -1772,24 +1876,17 @@ async def chat_action(
             request.state.model = model_item
         else:
             await get_all_models(request, user=user)
-            try:
-                model_id = form_data.get("model")
-                model_info = Models.get_model_by_id(model_id) if model_id else None
-                if model_info and model_info.user_id and model_info.user_id != user.id:
-                    from open_webui.models.users import Users
-
-                    owner = Users.get_user_by_id(model_info.user_id)
-                    if owner:
-                        request.state.connection_user = owner
-            except Exception:
-                pass
+            model_id = form_data.get("model")
+            model = resolve_model_from_lookup(
+                getattr(request.state, "MODELS", {}) or {},
+                getattr(request.state, "MODELS_AMBIGUOUS", set()) or set(),
+                model_id,
+            )
+            _apply_connection_owner_for_model(request, user, model)
 
         return await chat_action_handler(request, action_id, form_data, user)
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+        _raise_preserving_http_exception(e, status.HTTP_400_BAD_REQUEST)
 
 
 @app.post("/api/tasks/stop/{task_id}")
@@ -2082,30 +2179,86 @@ async def oauth_callback(provider: str, request: Request, response: Response):
 async def get_manifest_json():
     if app.state.EXTERNAL_PWA_MANIFEST_URL:
         return requests.get(app.state.EXTERNAL_PWA_MANIFEST_URL).json()
-    else:
-        return {
-            "name": app.state.WEBUI_NAME,
-            "short_name": app.state.WEBUI_NAME,
-            "description": "Open WebUI is an open, extensible, user-friendly interface for AI that adapts to your workflow.",
-            "start_url": "/",
-            "display": "standalone",
-            "background_color": "#343541",
-            "orientation": "natural",
-            "icons": [
-                {
-                    "src": "/static/logo.png",
-                    "type": "image/png",
-                    "sizes": "500x500",
-                    "purpose": "any",
-                },
-                {
-                    "src": "/static/logo.png",
-                    "type": "image/png",
-                    "sizes": "500x500",
-                    "purpose": "maskable",
-                },
-            ],
-        }
+
+    manifest_candidates = [
+        BASE_DIR / "static" / "manifest.json",
+        STATIC_DIR / "manifest.json",
+    ]
+
+    for manifest_path in manifest_candidates:
+        try:
+            if manifest_path.exists():
+                with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+                    return json.load(manifest_file)
+        except Exception as exc:
+            log.warning(f"Failed to load PWA manifest from {manifest_path}: {exc}")
+
+    return {
+        "name": "Halo WebUI",
+        "short_name": "Halo",
+        "id": "/",
+        "scope": "/",
+        "description": "Halo WebUI - AI Chat Interface",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#171717",
+        "theme_color": "#171717",
+        "orientation": "natural",
+        "share_target": {
+            "action": "/",
+            "method": "GET",
+            "params": {
+                "text": "q",
+            },
+        },
+        "icons": [
+            {
+                "src": "/static/web-app-manifest-192x192.png",
+                "sizes": "192x192",
+                "type": "image/png",
+                "purpose": "any",
+            },
+            {
+                "src": "/static/web-app-manifest-512x512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "any",
+            },
+            {
+                "src": "/static/web-app-manifest-maskable-192x192.png",
+                "sizes": "192x192",
+                "type": "image/png",
+                "purpose": "maskable",
+            },
+            {
+                "src": "/static/web-app-manifest-maskable-512x512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "maskable",
+            },
+        ],
+    }
+
+
+@app.get("/sw.js")
+async def get_service_worker():
+    sw_candidates = [
+        FRONTEND_BUILD_DIR / "sw.js",
+        BASE_DIR / "static" / "sw.js",
+        STATIC_DIR / "sw.js",
+    ]
+
+    for sw_path in sw_candidates:
+        try:
+            if sw_path.exists():
+                response = FileResponse(sw_path, media_type="application/javascript")
+                response.headers["Cache-Control"] = "no-cache"
+                response.headers["Service-Worker-Allowed"] = "/"
+                return response
+        except Exception as exc:
+            log.warning(f"Failed to load service worker from {sw_path}: {exc}")
+
+    raise HTTPException(status_code=404, detail="Service worker not found")
 
 
 @app.get("/opensearch.xml")
@@ -2134,7 +2287,7 @@ async def healthcheck_with_db():
     return {"status": True}
 
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/static", StaticFilesWithCache(directory=STATIC_DIR), name="static")
 app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
 
 

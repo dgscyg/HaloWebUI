@@ -10,6 +10,7 @@
 	import { getOllamaConfig, updateOllamaConfig } from '$lib/apis/ollama';
 	import { getOpenAIConfig, updateOpenAIConfig } from '$lib/apis/openai';
 	import { getGeminiConfig, updateGeminiConfig } from '$lib/apis/gemini';
+	import { getGrokConfig, updateGrokConfig } from '$lib/apis/grok';
 	import { getAnthropicConfig, updateAnthropicConfig } from '$lib/apis/anthropic';
 	import { getBackendConfig } from '$lib/apis';
 	import { getConnectionsConfig, setConnectionsConfig } from '$lib/apis/configs';
@@ -23,6 +24,7 @@
 		ollamaConfigCache,
 		openaiConfigCache,
 		geminiConfigCache,
+		grokConfigCache,
 		anthropicConfigCache,
 		connectionsConfigCache
 	} from '$lib/stores';
@@ -31,11 +33,13 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
 	import Plus from '$lib/components/icons/Plus.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 
 	import OpenAIConnection from './Connections/OpenAIConnection.svelte';
 	import GeminiConnection from './Connections/GeminiConnection.svelte';
+	import GrokConnection from './Connections/GrokConnection.svelte';
 	import AnthropicConnection from './Connections/AnthropicConnection.svelte';
 	import AddConnectionModal from '$lib/components/AddConnectionModal.svelte';
 	import OllamaConnection from './Connections/OllamaConnection.svelte';
@@ -46,6 +50,7 @@
 	let expandedSections = {
 		openai: true,
 		gemini: true,
+		grok: true,
 		anthropic: true,
 		ollama: true,
 		advanced: true
@@ -54,9 +59,12 @@
 
 	let sectionEl_openai: HTMLElement;
 	let sectionEl_gemini: HTMLElement;
+	let sectionEl_grok: HTMLElement;
 	let sectionEl_anthropic: HTMLElement;
 	let sectionEl_ollama: HTMLElement;
 	let sectionEl_advanced: HTMLElement;
+
+	const GROK_PROVIDER_ICON = '/static/connection-avatars/xai.svg';
 
 	type SectionKey = keyof typeof expandedSections;
 	const revealIfExpanded = async (section: SectionKey, sectionEl: HTMLElement | undefined) => {
@@ -69,6 +77,21 @@
 	const getConnectionRenderKey = (url: string, key: string | undefined, config: any) =>
 		config ?? `${url}::${key ?? ''}`;
 	const getOllamaRenderKey = (url: string, config: any) => config ?? url;
+	const SETTINGS_CONFLICT_DETAIL =
+		'User settings were updated elsewhere. Please retry with the latest settings.';
+	const formatSettingsSaveError = (error: unknown) => {
+		const message =
+			error instanceof Error
+				? error.message
+				: typeof error === 'string'
+					? error
+					: `${(error as any)?.detail ?? error ?? ''}`;
+		return message.includes(SETTINGS_CONFLICT_DETAIL)
+			? $i18n.t(
+					'Settings changed in another tab. The latest settings have been reloaded; please review and save again.'
+				)
+			: message;
+	};
 
 	const initExpandedSections = () => {
 		if (expandedSectionsInitialized) return;
@@ -78,6 +101,8 @@
 			OPENAI_API_BASE_URLS.length > 0 && OPENAI_API_BASE_URLS.length <= AUTO_EXPAND_MAX_CONNECTIONS;
 		expandedSections.gemini =
 			GEMINI_API_BASE_URLS.length > 0 && GEMINI_API_BASE_URLS.length <= AUTO_EXPAND_MAX_CONNECTIONS;
+		expandedSections.grok =
+			GROK_API_BASE_URLS.length > 0 && GROK_API_BASE_URLS.length <= AUTO_EXPAND_MAX_CONNECTIONS;
 		expandedSections.anthropic =
 			ANTHROPIC_API_BASE_URLS.length > 0 &&
 			ANTHROPIC_API_BASE_URLS.length <= AUTO_EXPAND_MAX_CONNECTIONS;
@@ -100,6 +125,10 @@
 	let GEMINI_API_BASE_URLS = [''];
 	let GEMINI_API_CONFIGS: any = {};
 
+	let GROK_API_KEYS = [''];
+	let GROK_API_BASE_URLS = [''];
+	let GROK_API_CONFIGS: any = {};
+
 	let ANTHROPIC_API_KEYS = [''];
 	let ANTHROPIC_API_BASE_URLS = [''];
 	let ANTHROPIC_API_CONFIGS: any = {};
@@ -107,12 +136,14 @@
 	let ENABLE_OPENAI_API: null | boolean = null;
 	let ENABLE_OLLAMA_API: null | boolean = null;
 	let ENABLE_GEMINI_API: null | boolean = null;
+	let ENABLE_GROK_API: null | boolean = null;
 	let ENABLE_ANTHROPIC_API: null | boolean = null;
 
 	let connectionsConfig: any = null;
 
 	let showAddOpenAIConnectionModal = false;
 	let showAddGeminiConnectionModal = false;
+	let showAddGrokConnectionModal = false;
 	let showAddAnthropicConnectionModal = false;
 	let showAddOllamaConnectionModal = false;
 
@@ -121,6 +152,7 @@
 
 	let showDisableOpenAIAPIConfirm = false;
 	let showDisableGeminiAPIConfirm = false;
+	let showDisableGrokAPIConfirm = false;
 	let showDisableAnthropicAPIConfirm = false;
 	let showDisableOllamaAPIConfirm = false;
 
@@ -128,6 +160,7 @@
 	let openaiUpdateVersion = 0;
 	let ollamaUpdateVersion = 0;
 	let geminiUpdateVersion = 0;
+	let grokUpdateVersion = 0;
 	let anthropicUpdateVersion = 0;
 
 	const updateOpenAIHandler = async (refreshModels = true) => {
@@ -160,7 +193,7 @@
 			OPENAI_API_KEYS: OPENAI_API_KEYS,
 			OPENAI_API_CONFIGS: OPENAI_API_CONFIGS
 		}).catch((error) => {
-			toast.error(`${error}`);
+			toast.error(formatSettingsSaveError(error));
 			return null;
 		});
 
@@ -209,7 +242,7 @@
 			OLLAMA_BASE_URLS: OLLAMA_BASE_URLS,
 			OLLAMA_API_CONFIGS: OLLAMA_API_CONFIGS
 		}).catch((error) => {
-			toast.error(`${error}`);
+			toast.error(formatSettingsSaveError(error));
 			return null;
 		});
 
@@ -245,7 +278,7 @@
 
 	const updateConnectionsHandler = async () => {
 		const res = await setConnectionsConfig(localStorage.token, connectionsConfig).catch((error) => {
-			toast.error(`${error}`);
+			toast.error(formatSettingsSaveError(error));
 		});
 
 		if (res) {
@@ -326,7 +359,7 @@
 			GEMINI_API_KEYS: GEMINI_API_KEYS,
 			GEMINI_API_CONFIGS: GEMINI_API_CONFIGS
 		}).catch((error) => {
-			toast.error(`${error}`);
+			toast.error(formatSettingsSaveError(error));
 			return null;
 		});
 
@@ -373,6 +406,75 @@
 		}
 	};
 
+	const updateGrokHandler = async (refreshModels = true) => {
+		if (ENABLE_GROK_API === null) return false;
+
+		const thisVersion = ++grokUpdateVersion;
+
+		GROK_API_BASE_URLS = GROK_API_BASE_URLS.map((url) => url.replace(/\/$/, ''));
+
+		if (GROK_API_KEYS.length !== GROK_API_BASE_URLS.length) {
+			if (GROK_API_KEYS.length > GROK_API_BASE_URLS.length) {
+				GROK_API_KEYS = GROK_API_KEYS.slice(0, GROK_API_BASE_URLS.length);
+			}
+			if (GROK_API_KEYS.length < GROK_API_BASE_URLS.length) {
+				const diff = GROK_API_BASE_URLS.length - GROK_API_KEYS.length;
+				for (let i = 0; i < diff; i++) {
+					GROK_API_KEYS.push('');
+				}
+			}
+		}
+
+		const res = await updateGrokConfig(localStorage.token, {
+			ENABLE_GROK_API: ENABLE_GROK_API,
+			GROK_API_BASE_URLS: GROK_API_BASE_URLS,
+			GROK_API_KEYS: GROK_API_KEYS,
+			GROK_API_CONFIGS: GROK_API_CONFIGS
+		}).catch((error) => {
+			toast.error(formatSettingsSaveError(error));
+			return null;
+		});
+
+		if (thisVersion !== grokUpdateVersion) return false;
+		if (!res) return false;
+
+		ENABLE_GROK_API = res?.ENABLE_GROK_API ?? ENABLE_GROK_API;
+		GROK_API_BASE_URLS = res?.GROK_API_BASE_URLS ?? GROK_API_BASE_URLS;
+		GROK_API_KEYS = res?.GROK_API_KEYS ?? GROK_API_KEYS;
+		GROK_API_CONFIGS = res?.GROK_API_CONFIGS ?? GROK_API_CONFIGS;
+
+		for (const [idx, url] of GROK_API_BASE_URLS.entries()) {
+			if (!GROK_API_CONFIGS[idx]) {
+				GROK_API_CONFIGS[idx] = GROK_API_CONFIGS[url] || {};
+			}
+		}
+
+		grokConfigCache.set({
+			ENABLE_GROK_API,
+			GROK_API_BASE_URLS,
+			GROK_API_KEYS,
+			GROK_API_CONFIGS
+		});
+		toast.success($i18n.t('Grok API settings updated'));
+		if (refreshModels) {
+			await refreshModelsStore(localStorage.token, { force: true, reason: 'admin-connections' });
+		}
+
+		return true;
+	};
+
+	const addGrokConnectionHandler = async (connection: any) => {
+		expandedSections.grok = true;
+		GROK_API_BASE_URLS = [...GROK_API_BASE_URLS, connection.url];
+		GROK_API_KEYS = [...GROK_API_KEYS, connection.key];
+		GROK_API_CONFIGS[GROK_API_BASE_URLS.length - 1] = connection.config;
+
+		const ok = await updateGrokHandler(!!ENABLE_GROK_API);
+		if (!ok) {
+			throw new Error($i18n.t('Failed to save connections'));
+		}
+	};
+
 	const updateAnthropicHandler = async (refreshModels = true) => {
 		if (ENABLE_ANTHROPIC_API === null) return false;
 
@@ -400,7 +502,7 @@
 			ANTHROPIC_API_KEYS: ANTHROPIC_API_KEYS,
 			ANTHROPIC_API_CONFIGS: ANTHROPIC_API_CONFIGS
 		}).catch((error) => {
-			toast.error(`${error}`);
+			toast.error(formatSettingsSaveError(error));
 			return null;
 		});
 
@@ -452,6 +554,7 @@
 			let ollamaConfig: any = {};
 			let openaiConfig: any = {};
 			let geminiConfig: any = {};
+			let grokConfig: any = {};
 			let anthropicConfig: any = {};
 
 			await Promise.all([
@@ -508,6 +611,24 @@
 							GEMINI_API_BASE_URLS: [],
 							GEMINI_API_KEYS: [],
 							GEMINI_API_CONFIGS: {}
+						};
+					}
+				})(),
+				(async () => {
+					try {
+						if ($grokConfigCache) {
+							grokConfig = $grokConfigCache;
+						} else {
+							grokConfig = await getGrokConfig(localStorage.token);
+							grokConfigCache.set(grokConfig);
+						}
+					} catch (error) {
+						console.error(error);
+						grokConfig = {
+							ENABLE_GROK_API: false,
+							GROK_API_BASE_URLS: [],
+							GROK_API_KEYS: [],
+							GROK_API_CONFIGS: {}
 						};
 					}
 				})(),
@@ -579,6 +700,11 @@
 			GEMINI_API_KEYS = geminiConfig?.GEMINI_API_KEYS ?? [];
 			GEMINI_API_CONFIGS = geminiConfig?.GEMINI_API_CONFIGS ?? {};
 
+			ENABLE_GROK_API = grokConfig?.ENABLE_GROK_API ?? false;
+			GROK_API_BASE_URLS = grokConfig?.GROK_API_BASE_URLS ?? [];
+			GROK_API_KEYS = grokConfig?.GROK_API_KEYS ?? [];
+			GROK_API_CONFIGS = grokConfig?.GROK_API_CONFIGS ?? {};
+
 			ENABLE_ANTHROPIC_API = anthropicConfig?.ENABLE_ANTHROPIC_API ?? false;
 			ANTHROPIC_API_BASE_URLS = anthropicConfig?.ANTHROPIC_API_BASE_URLS ?? [];
 			ANTHROPIC_API_KEYS = anthropicConfig?.ANTHROPIC_API_KEYS ?? [];
@@ -591,6 +717,12 @@
 			for (const [idx] of GEMINI_API_BASE_URLS.entries()) {
 				if (!GEMINI_API_CONFIGS[idx]) {
 					GEMINI_API_CONFIGS[idx] = {};
+				}
+			}
+
+			for (const [idx] of GROK_API_BASE_URLS.entries()) {
+				if (!GROK_API_CONFIGS[idx]) {
+					GROK_API_CONFIGS[idx] = {};
 				}
 			}
 
@@ -607,7 +739,13 @@
 	const submitHandler = async () => {
 		// Don't refresh models on form submit - only save configs
 		// Wait for both saves to complete before dispatching success
-		await Promise.all([updateOpenAIHandler(false), updateOllamaHandler(false)]);
+		await Promise.all([
+			updateOpenAIHandler(false),
+			updateGeminiHandler(false),
+			updateGrokHandler(false),
+			updateAnthropicHandler(false),
+			updateOllamaHandler(false)
+		]);
 
 		dispatch('save');
 
@@ -627,6 +765,12 @@
 />
 
 <AddConnectionModal
+	grok
+	bind:show={showAddGrokConnectionModal}
+	onSubmit={addGrokConnectionHandler}
+/>
+
+<AddConnectionModal
 	anthropic
 	bind:show={showAddAnthropicConnectionModal}
 	onSubmit={addAnthropicConnectionHandler}
@@ -643,7 +787,7 @@
 	on:submit|preventDefault={submitHandler}
 >
 	<div class="overflow-y-auto scrollbar-hidden h-full pr-2">
-		{#if ENABLE_OPENAI_API !== null && ENABLE_OLLAMA_API !== null && ENABLE_GEMINI_API !== null && ENABLE_ANTHROPIC_API !== null && connectionsConfig !== null}
+		{#if ENABLE_OPENAI_API !== null && ENABLE_OLLAMA_API !== null && ENABLE_GEMINI_API !== null && ENABLE_GROK_API !== null && ENABLE_ANTHROPIC_API !== null && connectionsConfig !== null}
 			<div class="max-w-6xl mx-auto space-y-3">
 				<div bind:this={sectionEl_openai} class="scroll-mt-2">
 					<div
@@ -894,6 +1038,128 @@
 										aria-label={$i18n.t('Add Connection')}
 										on:click={() => {
 											showAddGeminiConnectionModal = true;
+										}}
+									>
+										<div
+											class="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-700 dark:text-gray-200"
+										>
+											<Plus className="size-3" />
+										</div>
+										<div
+											class="text-xs font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap"
+										>
+											{$i18n.t('Click to add a new connection')}
+										</div>
+									</button>
+								</div>
+							</div>
+						{/if}
+					</div>
+				</div>
+
+				<!-- Grok API Section -->
+				<div bind:this={sectionEl_grok} class="scroll-mt-2">
+					<div class="rounded-2xl border bg-gray-50 border-gray-100 dark:bg-gray-850 dark:border-gray-800">
+						<div
+							class="w-full flex items-center justify-between px-5 py-4 text-left cursor-pointer select-none"
+							role="button"
+							tabindex="0"
+							aria-expanded={expandedSections.grok}
+							on:click={async (e) => {
+								const target = e.target;
+								if (
+									target instanceof Element &&
+									target.closest('button, a, input, select, textarea, [data-no-toggle]')
+								) {
+									return;
+								}
+								expandedSections.grok = !expandedSections.grok;
+								await revealIfExpanded('grok', sectionEl_grok);
+							}}
+							on:keydown={async (e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									expandedSections.grok = !expandedSections.grok;
+									await revealIfExpanded('grok', sectionEl_grok);
+								}
+							}}
+						>
+							<div class="flex items-center gap-3">
+								<div class="glass-icon-badge bg-slate-100/80 dark:bg-slate-900/30">
+									<ModelIcon
+										src={GROK_PROVIDER_ICON}
+										alt="Grok"
+										bare
+										className="size-[18px]"
+									/>
+								</div>
+								<div class="text-base font-semibold text-gray-800 dark:text-gray-100 tracking-tight">
+									{$i18n.t('Grok API')}
+								</div>
+							</div>
+
+							<div class="flex items-center gap-3">
+								<div data-no-toggle>
+									<Switch
+										bind:state={ENABLE_GROK_API}
+										on:change={async () => {
+											if (ENABLE_GROK_API) {
+												expandedSections.grok = true;
+												updateGrokHandler(false);
+												return;
+											}
+
+											showDisableGrokAPIConfirm = true;
+										}}
+									/>
+								</div>
+
+								<div
+									class="transform transition-transform duration-200 {expandedSections.grok
+										? 'rotate-180'
+										: ''}"
+								>
+									<ChevronDown className="size-5 text-gray-400" />
+								</div>
+							</div>
+						</div>
+
+						{#if expandedSections.grok}
+							<div transition:slide={{ duration: 200, easing: quintOut }} class="px-5 pb-5">
+								<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+									{#each GROK_API_BASE_URLS as url, idx (getConnectionRenderKey(url, GROK_API_KEYS[idx], GROK_API_CONFIGS[idx]))}
+										<GrokConnection
+											bind:url={GROK_API_BASE_URLS[idx]}
+											bind:key={GROK_API_KEYS[idx]}
+											bind:config={GROK_API_CONFIGS[idx]}
+											onSubmit={async () => {
+												const ok = await updateGrokHandler(!!ENABLE_GROK_API);
+												if (!ok) {
+													throw new Error($i18n.t('Failed to save connections'));
+												}
+											}}
+											onDelete={() => {
+												GROK_API_BASE_URLS = GROK_API_BASE_URLS.filter(
+													(u, urlIdx) => !(urlIdx === idx && u === url)
+												);
+												GROK_API_KEYS = GROK_API_KEYS.filter((key, keyIdx) => idx !== keyIdx);
+
+												let newConfig = {};
+												GROK_API_BASE_URLS.forEach((u, newIdx) => {
+													newConfig[newIdx] =
+														GROK_API_CONFIGS[newIdx < idx ? newIdx : newIdx + 1];
+												});
+												GROK_API_CONFIGS = newConfig;
+												updateGrokHandler(!!ENABLE_GROK_API);
+											}}
+										/>
+									{/each}
+									<button
+										type="button"
+										class="w-full min-h-[62px] bg-white dark:bg-gray-900 rounded-lg px-4 py-3 border border-dashed border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition flex items-center justify-center gap-2 text-gray-500 dark:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:focus:ring-gray-700"
+										aria-label={$i18n.t('Add Connection')}
+										on:click={() => {
+											showAddGrokConnectionModal = true;
 										}}
 									>
 										<div
@@ -1241,25 +1507,6 @@
 							>
 								<div>
 									<div class="flex justify-between items-center text-sm">
-										<div class="font-medium">{$i18n.t('Direct Connections')}</div>
-										<Switch
-											bind:state={connectionsConfig.ENABLE_DIRECT_CONNECTIONS}
-											on:change={async () => {
-												updateConnectionsHandler();
-											}}
-										/>
-									</div>
-									<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
-										{$i18n.t(
-											'Direct Connections allow users to connect to their own OpenAI compatible API endpoints.'
-										)}
-									</div>
-								</div>
-
-								<hr class="border-gray-100 dark:border-gray-800" />
-
-								<div>
-									<div class="flex justify-between items-center text-sm">
 										<div class="font-medium">{$i18n.t('Cache Base Model List')}</div>
 										<Switch
 											bind:state={connectionsConfig.ENABLE_BASE_MODELS_CACHE}
@@ -1335,6 +1582,21 @@
 	}}
 	onConfirm={async () => {
 		await updateGeminiHandler(false);
+	}}
+/>
+
+<ConfirmDialog
+	bind:show={showDisableGrokAPIConfirm}
+	title={$i18n.t('Disable Grok API?')}
+	message={$i18n.t(
+		'Turning off Grok API will disable all connections under it. Your connection settings will be kept.'
+	)}
+	confirmLabel={$i18n.t('Disable')}
+	on:cancel={() => {
+		ENABLE_GROK_API = true;
+	}}
+	onConfirm={async () => {
+		await updateGrokHandler(false);
 	}}
 />
 

@@ -61,6 +61,11 @@
 		bottom: number;
 	};
 
+	type CopyPayload = {
+		text: string;
+		html: string;
+	};
+
 	export let id;
 	export let content;
 	export let history;
@@ -72,6 +77,7 @@
 	export let actions = [];
 	export let streaming = false;
 	export let isLastMessage = false;
+	export let forceExpand = false;
 
 	export let onSourceClick = () => {};
 	export let onTaskClick = () => {};
@@ -98,6 +104,9 @@
 	let resizeObserver: ResizeObserver | undefined;
 	let messagesContainerElement: HTMLElement | null = null;
 	let syncThreadLayoutsRaf = 0;
+	let hadThreadLayouts = false;
+
+	const INLINE_CITATION_SELECTOR = '[data-inline-citation="true"]';
 
 	const getVisibleBounds = (): VisibleBounds => {
 		const parentRect = contentContainerElement?.getBoundingClientRect();
@@ -120,7 +129,130 @@
 		};
 	};
 
+	const normalizeCopyFragment = (container: HTMLElement) => {
+		container.querySelectorAll(INLINE_CITATION_SELECTOR).forEach((node) => node.remove());
+
+		container.querySelectorAll('table').forEach((table) => {
+			table.style.borderCollapse = 'collapse';
+			table.style.width = 'auto';
+			table.style.tableLayout = 'auto';
+		});
+
+		container.querySelectorAll('th').forEach((th) => {
+			th.style.whiteSpace = 'nowrap';
+			th.style.padding = '4px 8px';
+		});
+	};
+
+	const getPlainTextFromFragment = (container: HTMLElement): string => {
+		const measurementHost = document.createElement('div');
+		measurementHost.style.position = 'fixed';
+		measurementHost.style.left = '-99999px';
+		measurementHost.style.top = '0';
+		measurementHost.style.opacity = '0';
+		measurementHost.style.pointerEvents = 'none';
+		measurementHost.style.width = '960px';
+		measurementHost.appendChild(container);
+		document.body.appendChild(measurementHost);
+
+		const text = (measurementHost.innerText || measurementHost.textContent || '')
+			.replace(/\u00a0/g, ' ')
+			.trim();
+
+		measurementHost.remove();
+		return text;
+	};
+
+	const buildCopyPayloadFromClone = (clone: Node | DocumentFragment | null): CopyPayload | null => {
+		if (!clone) {
+			return null;
+		}
+
+		const container = document.createElement('div');
+		container.appendChild(clone);
+		normalizeCopyFragment(container);
+
+		const text = getPlainTextFromFragment(container.cloneNode(true) as HTMLElement);
+		const html = container.innerHTML.trim();
+
+		if (text === '' && html === '') {
+			return null;
+		}
+
+		return {
+			text,
+			html
+		};
+	};
+
+	export function getCopyPayload(): CopyPayload | null {
+		if (!contentContainerElement) {
+			return null;
+		}
+
+		const fragment = document.createDocumentFragment();
+		Array.from(contentContainerElement.childNodes).forEach((node) => {
+			fragment.appendChild(node.cloneNode(true));
+		});
+
+		return buildCopyPayloadFromClone(fragment);
+	}
+
+	export function getSelectionCopyPayload(selection: Selection | null = window.getSelection()) {
+		if (
+			!contentContainerElement ||
+			!selection ||
+			selection.rangeCount === 0 ||
+			selection.toString().trim() === ''
+		) {
+			return null;
+		}
+
+		const range = selection.getRangeAt(0);
+		const selectionTouchesThisMessage =
+			contentContainerElement.contains(range.commonAncestorContainer) ||
+			contentContainerElement.contains(range.startContainer) ||
+			contentContainerElement.contains(range.endContainer);
+
+		if (!selectionTouchesThisMessage) {
+			return null;
+		}
+
+		return buildCopyPayloadFromClone(range.cloneContents());
+	}
+
+	const handleContentCopy = (event: ClipboardEvent) => {
+		const payload = getSelectionCopyPayload(window.getSelection());
+		if (!payload || !event.clipboardData) {
+			return;
+		}
+
+		event.preventDefault();
+		event.clipboardData.setData('text/plain', payload.text);
+		event.clipboardData.setData('text/html', payload.html);
+	};
+
+	const resetThreadLayoutsIfIdle = () => {
+		if (!hadThreadLayouts && Object.keys(threadLayouts).length === 0) {
+			return;
+		}
+
+		if (syncThreadLayoutsRaf) {
+			cancelAnimationFrame(syncThreadLayoutsRaf);
+			syncThreadLayoutsRaf = 0;
+		}
+
+		threadLayouts = {};
+		hadThreadLayouts = false;
+		clearSelectionHighlights();
+	};
+
 	const scheduleThreadLayoutSync = () => {
+		if (currentMessageThreads.length === 0) {
+			resetThreadLayoutsIfIdle();
+			return;
+		}
+
 		if (syncThreadLayoutsRaf) {
 			cancelAnimationFrame(syncThreadLayoutsRaf);
 		}
@@ -139,7 +271,7 @@
 	let shouldCollapseHistoricalLongResponses = false;
 
 	$: shouldCollapseHistoricalLongResponses =
-		!isLastMessage && ($settings?.collapseHistoricalLongResponses ?? true);
+		!forceExpand && !isLastMessage && ($settings?.collapseHistoricalLongResponses ?? true);
 
 	$: currentMessageThreads = (($selectionThreadsStore.items ?? []) as SelectionThread[])
 		.filter((thread) => thread.sourceMessageId === id)
@@ -301,7 +433,15 @@
 	const syncThreadLayouts = async () => {
 		if (!contentContainerElement) {
 			threadLayouts = {};
-			clearSelectionHighlights();
+			if (hadThreadLayouts) {
+				clearSelectionHighlights();
+			}
+			hadThreadLayouts = false;
+			return;
+		}
+
+		if (currentMessageThreads.length === 0) {
+			resetThreadLayoutsIfIdle();
 			return;
 		}
 
@@ -335,6 +475,7 @@
 		}
 
 		threadLayouts = nextLayouts;
+		hadThreadLayouts = true;
 		applySelectionHighlights(regularRanges, activeRanges);
 
 		if (invalidThreadIds.length > 0) {
@@ -541,7 +682,9 @@
 <div class="relative overflow-visible">
 	<div
 		bind:this={contentContainerElement}
+		data-inline-citations-hidden={($settings?.showInlineCitations ?? true) ? undefined : 'true'}
 		class="relative message-selection-surface"
+		on:copy={handleContentCopy}
 		style={needsTruncation && !isExpanded
 			? `max-height: ${MAX_CONTENT_HEIGHT}px; overflow: hidden;`
 			: ''}
@@ -708,5 +851,9 @@
 
 	:global(.dark .message-selection-surface ::selection) {
 		background: rgba(56, 189, 248, 0.3);
+	}
+
+	:global([data-inline-citations-hidden='true'] [data-inline-citation='true']) {
+		display: none !important;
 	}
 </style>

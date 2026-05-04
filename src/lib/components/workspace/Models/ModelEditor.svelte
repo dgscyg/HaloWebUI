@@ -23,6 +23,13 @@
 	import InlineDirtyActions from '$lib/components/admin/Settings/InlineDirtyActions.svelte';
 	import { DEFAULT_MODEL_ICON, resolveModelIcon } from '$lib/utils/model-icons';
 	import { getModelBaseName, getModelChatDisplayName } from '$lib/utils/model-display';
+	import {
+		findModelByIdentity,
+		findModelByRef,
+		getModelRef,
+		getModelSelectionId,
+		resolveModelSelectionId
+	} from '$lib/utils/model-identity';
 	import { cloneSettingsSnapshot, isSettingsSnapshotEqual } from '$lib/utils/settings-dirty';
 	import { getTools } from '$lib/apis/tools';
 	import { getFunctions } from '$lib/apis/functions';
@@ -31,8 +38,11 @@
 	import AccessControl from '../common/AccessControl.svelte';
 	import { toast } from 'svelte-sonner';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
+	import { translateWithDefault } from '$lib/i18n';
 
 	const i18n = getContext('i18n');
+	const tr = (key: string, defaultValue: string) =>
+		translateWithDefault($i18n, key, defaultValue);
 
 	export let onSubmit: Function;
 	export let onBack: null | Function = null;
@@ -61,7 +71,9 @@
 	const tabMeta: Array<{
 		key: ModelEditorTab;
 		titleKey: string;
+		titleDefault: string;
 		descKey: string;
+		descDefault: string;
 		badgeColor: string;
 		iconColor: string;
 		iconPaths: string[];
@@ -69,7 +81,9 @@
 		{
 			key: 'profile',
 			titleKey: '模型信息',
+			titleDefault: 'Model Info',
 			descKey: '头像、名称、基础模型、描述、标签、访问控制',
+			descDefault: 'Avatar, name, base model, description, tags, and access control',
 			badgeColor: 'bg-amber-50 dark:bg-amber-950/30',
 			iconColor: 'text-amber-500 dark:text-amber-400',
 			iconPaths: [
@@ -79,7 +93,9 @@
 		{
 			key: 'behavior',
 			titleKey: '行为设置',
+			titleDefault: 'Behavior Settings',
 			descKey: '系统提示词、高级参数、提示建议',
+			descDefault: 'System prompt, advanced parameters, and suggestion prompts',
 			badgeColor: 'bg-indigo-50 dark:bg-indigo-950/30',
 			iconColor: 'text-indigo-500 dark:text-indigo-400',
 			iconPaths: [
@@ -90,7 +106,9 @@
 		{
 			key: 'integrations',
 			titleKey: '集成配置',
+			titleDefault: 'Integrations',
 			descKey: '知识库、工具、技能、过滤器、动作、内置工具',
+			descDefault: 'Knowledge bases, tools, skills, filters, actions, and built-in tools',
 			badgeColor: 'bg-cyan-50 dark:bg-cyan-950/30',
 			iconColor: 'text-cyan-500 dark:text-cyan-400',
 			iconPaths: [
@@ -100,7 +118,9 @@
 		{
 			key: 'capabilities',
 			titleKey: '能力与预览',
+			titleDefault: 'Capabilities & Preview',
 			descKey: '模型能力开关、JSON 配置预览',
+			descDefault: 'Model capability toggles and JSON config preview',
 			badgeColor: 'bg-emerald-50 dark:bg-emerald-950/30',
 			iconColor: 'text-emerald-500 dark:text-emerald-400',
 			iconPaths: [
@@ -111,8 +131,8 @@
 
 	$: allTabs = tabMeta.map((t) => ({
 		...t,
-		title: $i18n.t(t.titleKey),
-		description: $i18n.t(t.descKey)
+		title: tr(t.titleKey, t.titleDefault),
+		description: tr(t.descKey, t.descDefault)
 	}));
 
 	$: activeTab = allTabs.find((t) => t.key === selectedTab) ?? allTabs[0];
@@ -158,9 +178,7 @@
 	};
 
 	const getMatchedProfileImage = (baseModelId: string | null) => {
-		const baseModel = baseModelId
-			? $models.find((candidate) => candidate.id === baseModelId)
-			: null;
+		const baseModel = baseModelId ? findModelByIdentity($models, baseModelId) : null;
 
 		const resolved = baseModel
 			? resolveModelIcon(baseModel as any)
@@ -386,8 +404,26 @@
 	const isBaseModelOption = (candidate: any) =>
 		(candidate?.info?.base_model_id ?? candidate?.base_model_id ?? null) == null;
 
+	const findBaseModelOption = (baseModelId: string | null | undefined, sourceModel: any = null) => {
+		const candidates = ($models ?? []).filter((m) => isBaseModelOption(m));
+		const ids = [
+			baseModelId,
+			baseModelId ? `${baseModelId}:latest` : '',
+			resolveModelSelectionId($models, baseModelId ?? ''),
+			sourceModel?.meta?.base_selection_id
+		].filter((id) => typeof id === 'string' && id.trim() !== '');
+
+		const direct = candidates.find(
+			(m) => ids.includes(getModelSelectionId(m)) || ids.includes(m.id)
+		);
+		if (direct) return direct;
+
+		const baseModelRef = sourceModel?.meta?.base_model_ref ?? sourceModel?.meta?.model_ref ?? null;
+		return findModelByRef(candidates, baseModelRef, sourceModel?.meta?.base_selection_id ?? baseModelId);
+	};
+
 	const addUsage = (base_model_id) => {
-		const baseModel = $models.find((m) => m.id === base_model_id);
+		const baseModel = findModelByIdentity($models, base_model_id);
 
 		if (baseModel) {
 			if (baseModel.owned_by === 'openai') {
@@ -425,6 +461,20 @@
 			loading = false;
 			saving = false;
 			return;
+		}
+		if (preset && modelInfo.base_model_id) {
+			const baseModel = findBaseModelOption(modelInfo.base_model_id, modelInfo);
+			const baseModelRef = getModelRef(baseModel);
+			modelInfo.base_model_id = baseModel
+				? getModelSelectionId(baseModel)
+				: modelInfo.base_model_id;
+			if (baseModelRef) {
+				modelInfo.meta.base_model_ref = baseModelRef;
+				modelInfo.meta.base_selection_id = getModelSelectionId(baseModel);
+			} else if (!modelInfo.meta.base_model_ref && !modelInfo.meta.base_selection_id) {
+				delete modelInfo.meta.base_model_ref;
+				delete modelInfo.meta.base_selection_id;
+			}
 		}
 
 		if (Object.keys(builtinToolConfig).length > 0) {
@@ -528,19 +578,12 @@
 			enableDescription = model?.meta?.description !== null;
 
 			if (model.base_model_id) {
-				const base_model = $models
-					// Shared base models can be marked as preset by the backend when injected
-					// from the owner's connections, so we must detect true base models by
-					// the absence of an upstream base_model_id instead of `preset`.
-					.filter((m) => isBaseModelOption(m))
-					.find((m) => [model.base_model_id, `${model.base_model_id}:latest`].includes(m.id));
+				const base_model = findBaseModelOption(model.base_model_id, model);
 
 				console.log('base_model', base_model);
 
 				if (base_model) {
-					model.base_model_id = base_model.id;
-				} else {
-					model.base_model_id = null;
+					model.base_model_id = getModelSelectionId(base_model);
 				}
 			}
 
@@ -897,7 +940,7 @@
 											...$models
 												.filter((m) => (model ? m.id !== model.id : true) && isBaseModelOption(m))
 												.map((m) => ({
-													value: m.id,
+													value: getModelSelectionId(m),
 													label: getModelChatDisplayName(m)
 												}))
 										]}

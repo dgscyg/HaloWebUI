@@ -1,0 +1,5 @@
+- generic [ref=e2]:
+  - img "model profile" [ref=e4]
+  - generic [ref=e5]:
+    - generic [ref=e6]: OP.tngtech/deepseek-r1t2-
+    - generic [ref=e7]: 这是一段测试文字，用来确认 html2canvas 截 SVG 图标时会不会把左侧头像画成异常大图。

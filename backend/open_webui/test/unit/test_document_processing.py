@@ -18,6 +18,7 @@ from open_webui.retrieval.document_processing import (  # noqa: E402
     FILE_PROCESSING_MODE_FULL_CONTEXT,
     FILE_PROCESSING_MODE_NATIVE_FILE,
     FILE_PROCESSING_MODE_RETRIEVAL,
+    _merge_document_metadata,
     _get_loader_for_provider,
     build_default_document_provider_configs,
     extract_documents_for_file,
@@ -187,3 +188,46 @@ def test_force_local_engine_bypasses_advanced_parser():
     )
 
     assert loader.engine == ""
+
+
+def test_merge_document_metadata_keeps_loader_fields_without_file_state():
+    file_obj = SimpleNamespace(
+        filename="report.pdf",
+        user_id="user-1",
+        id="file-1",
+        meta={
+            "content_type": "application/pdf",
+            "size": 123,
+            "processing_mode": FILE_PROCESSING_MODE_RETRIEVAL,
+            "resolved_processing_mode": FILE_PROCESSING_MODE_RETRIEVAL,
+            "collection_name": "kb-1",
+            "fallback_reason": "timeout",
+        },
+    )
+    docs = [
+        Document(
+            page_content="hello",
+            metadata={
+                "page": 0,
+                "title": "Intro",
+                "url": "https://example.com/doc",
+                "headings": ["Section 1"],
+                "content": "raw content",
+                "pages": [1, 2],
+            },
+        )
+    ]
+
+    merged = _merge_document_metadata(file_obj, docs)
+
+    assert len(merged) == 1
+    assert merged[0].metadata == {
+        "page": 0,
+        "title": "Intro",
+        "url": "https://example.com/doc",
+        "headings": ["Section 1"],
+        "name": "report.pdf",
+        "created_by": "user-1",
+        "file_id": "file-1",
+        "source": "report.pdf",
+    }

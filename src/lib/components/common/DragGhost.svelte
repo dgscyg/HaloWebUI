@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
+	import { lockBodyScroll, unlockBodyScroll } from '$lib/utils/body-scroll-lock';
 
 	export let x;
 	export let y;
@@ -8,12 +9,14 @@
 
 	onMount(() => {
 		document.body.appendChild(popupElement);
-		document.body.style.overflow = 'hidden';
+		lockBodyScroll();
 	});
 
 	onDestroy(() => {
-		document.body.removeChild(popupElement);
-		document.body.style.overflow = 'unset';
+		if (document.body.contains(popupElement)) {
+			document.body.removeChild(popupElement);
+		}
+		unlockBodyScroll();
 	});
 </script>
 

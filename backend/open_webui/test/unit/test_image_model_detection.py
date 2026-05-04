@@ -7,17 +7,36 @@ if str(_BACKEND_DIR) not in sys.path:
 
 from open_webui.routers.images import (  # noqa: E402
     _classify_gemini_image_model,
+    _classify_grok_image_model,
     _classify_openai_image_model,
     _extract_generated_images_from_openai_response,
     load_b64_image_data,
 )
 
 
-def test_openai_output_image_metadata_prefers_chat_image_mode_for_relays():
+def test_openai_dedicated_image_model_uses_images_mode_for_relays():
     classified = _classify_openai_image_model(
         {
             "id": "openai/gpt-image-1",
             "name": "OpenAI GPT Image 1",
+            "architecture": {"output_modalities": ["text", "image"]},
+        },
+        base_url="https://openrouter.ai/api/v1",
+        api_config={},
+        source={"effective_source": "personal"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_images"
+    assert classified["text_output_supported"] is False
+    assert classified["detection_method"] == "metadata"
+
+
+def test_openai_output_image_chat_model_uses_chat_image_mode_for_relays():
+    classified = _classify_openai_image_model(
+        {
+            "id": "relay-image-preview",
+            "name": "Relay Image Preview",
             "architecture": {"output_modalities": ["text", "image"]},
         },
         base_url="https://openrouter.ai/api/v1",
@@ -46,6 +65,23 @@ def test_openai_official_gpt_image_family_prefers_images_endpoint_mode():
     assert classified["supports_background"] is True
 
 
+def test_official_xai_openai_compat_models_use_xai_images_mode():
+    classified = _classify_openai_image_model(
+        {
+            "id": "grok-imagine-image",
+            "name": "Grok Imagine Image",
+        },
+        base_url="https://api.x.ai/v1",
+        api_config={},
+        source={"effective_source": "shared", "provider": "openai"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "xai_images"
+    assert classified["size_mode"] == "aspect_ratio"
+    assert classified["supports_resolution"] is True
+
+
 def test_openai_seedream_description_is_detected_as_image_model():
     classified = _classify_openai_image_model(
         {
@@ -59,7 +95,22 @@ def test_openai_seedream_description_is_detected_as_image_model():
     )
 
     assert classified is not None
-    assert classified["generation_mode"] == "openai_chat_image"
+    assert classified["generation_mode"] == "openai_images"
+
+
+def test_openai_flux_name_is_detected_as_dedicated_image_model():
+    classified = _classify_openai_image_model(
+        {
+            "id": "black-forest-labs/flux-kontext-pro",
+            "name": "FLUX Kontext Pro",
+        },
+        base_url="https://api.example.com/v1",
+        api_config={},
+        source={"effective_source": "shared"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_images"
 
 
 def test_volcengine_seedream_prefers_images_endpoint_mode():
@@ -136,6 +187,63 @@ def test_gemini_generate_content_image_preview_is_detected():
     assert classified["generation_mode"] == "gemini_generate_content_image"
 
 
+def test_gemini_image_model_without_preview_suffix_is_detected():
+    classified = _classify_gemini_image_model(
+        {
+            "id": "gemini-3.0-pro-image-4k",
+            "displayName": "gemini-3.0-pro-image-4k",
+            "supportedGenerationMethods": ["generateContent"],
+        },
+        source={"effective_source": "personal"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "gemini_generate_content_image"
+    assert classified["supports_image_size"] is True
+
+
+def test_gemini_image_understanding_model_is_not_detected_as_generation():
+    classified = _classify_gemini_image_model(
+        {
+            "id": "gemini-image-understanding",
+            "displayName": "gemini-image-understanding",
+            "supportedGenerationMethods": ["generateContent"],
+        },
+        source={"effective_source": "personal"},
+    )
+
+    assert classified is None
+
+
+def test_openai_compatible_gemini_image_model_without_preview_suffix_is_detected():
+    classified = _classify_openai_image_model(
+        {
+            "id": "google/gemini-2.5-flash-image",
+            "name": "google/gemini-2.5-flash-image",
+        },
+        base_url="https://relay.example/v1",
+        api_config={},
+        source={"effective_source": "personal", "provider": "openai"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "openai_chat_image"
+
+
+def test_grok_image_model_is_detected():
+    classified = _classify_grok_image_model(
+        {
+            "id": "grok-imagine-image",
+            "name": "Grok Imagine Image",
+        },
+        source={"effective_source": "personal", "provider": "grok"},
+    )
+
+    assert classified is not None
+    assert classified["generation_mode"] == "xai_images"
+    assert classified["supports_resolution"] is True
+
+
 def test_gemini_camelcase_modalities_are_detected_as_image_model():
     classified = _classify_gemini_image_model(
         {
@@ -171,3 +279,55 @@ def test_openai_response_extracts_markdown_embedded_image_data():
     )
 
     assert images == [(b"abc", "image/png")]
+
+
+def test_openai_response_extracts_stream_delta_images():
+    images = _extract_generated_images_from_openai_response(
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "images": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": "data:image/png;base64,YWJj"},
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    )
+
+    assert images == [(b"abc", "image/png")]
+
+
+def test_openai_response_extracts_top_level_message_images():
+    images = _extract_generated_images_from_openai_response(
+        {
+            "message": {
+                "images": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,YWJj"},
+                    }
+                ]
+            }
+        }
+    )
+
+    assert images == [(b"abc", "image/png")]
+
+
+def test_openai_response_extracts_file_image_event():
+    images = _extract_generated_images_from_openai_response(
+        {
+            "type": "file",
+            "file": {
+                "mediaType": "image/jpeg",
+                "base64": "YWJj",
+            },
+        }
+    )
+
+    assert images == [(b"abc", "image/jpeg")]

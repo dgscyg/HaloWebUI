@@ -36,6 +36,7 @@ from open_webui.retrieval.document_processing_shared import (
 )
 from open_webui.retrieval.loaders.main import Loader
 from open_webui.retrieval.loaders.mistral import MistralLoader
+from open_webui.retrieval.vector.utils import filter_metadata
 from open_webui.storage.provider import Storage
 from open_webui.utils.error_handling import (
     extract_error_detail,
@@ -305,8 +306,7 @@ def _merge_document_metadata(
         Document(
             page_content=doc.page_content,
             metadata={
-                **(doc.metadata or {}),
-                **(file_obj.meta or {}),
+                **filter_metadata(doc.metadata or {}),
                 "name": file_obj.filename,
                 "created_by": file_obj.user_id,
                 "file_id": file_obj.id,

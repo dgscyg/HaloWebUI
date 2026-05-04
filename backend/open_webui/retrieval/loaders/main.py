@@ -177,6 +177,47 @@ class DoclingLoader:
             raise Exception(f"Error calling Docling: {error_msg}")
 
 
+class PptxLoader:
+    """Fallback PowerPoint loader using python-pptx for .pptx files."""
+
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+
+    def load(self) -> list[Document]:
+        try:
+            from pptx import Presentation
+        except ImportError as exc:
+            raise OptionalDependencyError(
+                format_optional_dependency_error(
+                    feature="PowerPoint document parsing",
+                    packages=["python-pptx"],
+                    install_profiles=["core", "full"],
+                    details="Missing module: `pptx`.",
+                )
+            ) from exc
+
+        prs = Presentation(self.file_path)
+        text_parts: list[str] = []
+
+        for index, slide in enumerate(prs.slides, start=1):
+            slide_texts: list[str] = []
+            for shape in slide.shapes:
+                if getattr(shape, "has_text_frame", False):
+                    text = getattr(shape.text_frame, "text", "").strip()
+                    if text:
+                        slide_texts.append(text)
+
+            if slide_texts:
+                text_parts.append(f"Slide {index}:\n" + "\n".join(slide_texts))
+
+        return [
+            Document(
+                page_content="\n\n".join(text_parts),
+                metadata={"source": self.file_path},
+            )
+        ]
+
+
 class Loader:
     def __init__(self, engine: str = "", **kwargs):
         self.engine = engine
@@ -186,8 +227,8 @@ class Loader:
     def load(
         self, filename: str, file_content_type: str, file_path: str
     ) -> list[Document]:
-        loader = self._get_loader(filename, file_content_type, file_path)
         try:
+            loader = self._get_loader(filename, file_content_type, file_path)
             docs = loader.load()
         except Exception as exc:
             raise FileUploadDiagnosticError(
@@ -490,11 +531,27 @@ class Loader:
                 "application/vnd.ms-powerpoint",
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             ] or file_ext in ["ppt", "pptx"]:
-                UnstructuredPowerPointLoader = self._get_optional_docs_loader(
-                    "UnstructuredPowerPointLoader",
-                    feature="PowerPoint document parsing",
+                is_pptx = (
+                    file_content_type
+                    == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    or file_ext == "pptx"
                 )
-                loader = UnstructuredPowerPointLoader(file_path)
+                try:
+                    UnstructuredPowerPointLoader = self._get_optional_docs_loader(
+                        "UnstructuredPowerPointLoader",
+                        feature="PowerPoint document parsing",
+                    )
+                    loader = UnstructuredPowerPointLoader(file_path)
+                except (ImportError, OptionalDependencyError) as exc:
+                    if not is_pptx:
+                        raise
+
+                    log.warning(
+                        "PowerPoint parser fallback: using python-pptx for %s because unstructured is unavailable (%s)",
+                        basename(filename),
+                        exc,
+                    )
+                    loader = PptxLoader(file_path)
             elif file_ext == "rst":
                 UnstructuredRSTLoader = self._get_optional_docs_loader(
                     "UnstructuredRSTLoader",

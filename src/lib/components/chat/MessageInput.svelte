@@ -22,7 +22,6 @@
 	} from '$lib/stores';
 
 	import {
-		blobToFile,
 		compressImage,
 		convertHeicToJpeg,
 		createMessagesList,
@@ -43,6 +42,10 @@
 		getLocalizedFileUploadDiagnostic,
 		localizeFileUploadError
 	} from '$lib/utils/file-upload-errors';
+	import {
+		findModelByIdentity,
+		getModelSelectionId
+	} from '$lib/utils/model-identity';
 	import { transcribeAudio } from '$lib/apis/audio';
 	import { uploadFile } from '$lib/apis/files';
 	import { generateAutoCompletion } from '$lib/apis';
@@ -68,13 +71,18 @@
 	import Image from '../common/Image.svelte';
 	import ModelIcon from '../common/ModelIcon.svelte';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { isDedicatedImageGenerationModel } from '$lib/utils/model-capabilities';
 	import type { ChatAssistantSnapshot } from '$lib/utils/chat-assistants';
 	import {
 		isWebSearchEnabled,
 		normalizeWebSearchMode,
-		type WebSearchMode
+		type WebSearchMode,
+		type WebSearchModeSource
 	} from '$lib/utils/web-search-mode';
-	import { buildWebSearchModeOptions } from '$lib/utils/native-web-search';
+	import {
+		buildWebSearchModeOptions
+	} from '$lib/utils/native-web-search';
+	import { translateWithDefault } from '$lib/i18n';
 
 	import XMark from '../icons/XMark.svelte';
 	import Headphone from '../icons/Headphone.svelte';
@@ -84,6 +92,7 @@
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import ToolServersModal from './ToolServersModal.svelte';
 	import Wrench from '../icons/Wrench.svelte';
+	import Sparkles from '../icons/Sparkles.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -101,7 +110,14 @@
 	export let onDeactivateAssistant: (() => void) | null = null;
 
 	let selectedModelIds = [];
-	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
+	$: selectedModelIds =
+		atSelectedModel !== undefined ? [getModelSelectionId(atSelectedModel)] : selectedModels;
+
+	const shouldSkipTextEnhancements = () =>
+		imageGenerationEnabled ||
+		(selectedModelIds.length === 1 &&
+			typeof selectedModelIds[0] === 'string' &&
+			isDedicatedImageGenerationModel(selectedModelIds[0]));
 
 	export let history;
 	export let taskIds = null;
@@ -112,14 +128,21 @@
 	export let toolServers = [];
 
 	export let selectedToolIds = [];
+	export let toolSelectionTouched = false;
+	export let selectedSkillIds = [];
+	export let skillSelectionTouched = false;
+	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
+		translateWithDefault($i18n, key, defaultValue, options);
 
 	export let imageGenerationEnabled = false;
 	export let imageGenerationOptions: {
 		image_size?: string | null;
 		aspect_ratio?: string | null;
+		resolution?: string | null;
 		n?: number | null;
 	} = {};
 	export let webSearchMode: WebSearchMode = 'off';
+	export let webSearchModeSource: WebSearchModeSource = 'default';
 	export let codeInterpreterEnabled = false;
 
 	export let reasoningEffort: string | null = null;
@@ -129,9 +152,14 @@
 		prompt,
 		files,
 		selectedToolIds,
+		toolSelectionTouched,
+		selectedSkillIds,
+		skillSelectionTouched,
 		imageGenerationEnabled,
 		imageGenerationOptions,
 		webSearchMode,
+		webSearchModeSource,
+		webSearchModeTouched: webSearchModeSource === 'user',
 		reasoningEffort,
 		maxThinkingTokens
 	});
@@ -270,21 +298,22 @@
 	$: webSearchFeatureEnabled =
 		Boolean($config?.features?.enable_halo_web_search ?? $config?.features?.enable_web_search) ||
 		Boolean($config?.features?.enable_native_web_search);
-	$: selectedModelLookupIds = selectedModelIds.filter(
-		(id) => typeof id === 'string' && id.trim() !== ''
-	);
+	$: selectedModelLookupIds = selectedModelIds.filter((id) => typeof id === 'string' && id.trim() !== '');
 	$: selectedModelObjects = selectedModelIds
 		.map((id) =>
-			atSelectedModel && atSelectedModel.id === id
+			atSelectedModel && getModelSelectionId(atSelectedModel) === id
 				? atSelectedModel
-				: $models.find((model) => model.id === id)
+				: findModelByIdentity($models, id)
 		)
 		.filter(Boolean);
 	$: hasResolvedSelectedModels =
-		selectedModelLookupIds.length === 0 ||
-		selectedModelObjects.length === selectedModelLookupIds.length;
+		selectedModelLookupIds.length === 0 || selectedModelObjects.length === selectedModelLookupIds.length;
 	$: primarySelectedModel =
-		atSelectedModel ?? (selectedModelObjects.length === 1 ? selectedModelObjects[0] : null);
+		atSelectedModel ??
+		(selectedModelObjects.length === 1 ? selectedModelObjects[0] : null);
+	$: atSelectedModelListItem = atSelectedModel
+		? (findModelByIdentity($models, getModelSelectionId(atSelectedModel)) ?? atSelectedModel)
+		: null;
 	$: webSearchModeOptions = buildWebSearchModeOptions(
 		(key, options) => $i18n.t(key, options),
 		$config,
@@ -315,6 +344,11 @@
 		) {
 			webSearchMode = fallbackWebSearchMode;
 		}
+	};
+
+	const setWebSearchModeFromUser = (nextMode: WebSearchMode) => {
+		webSearchMode = normalizeWebSearchMode(nextMode, 'off');
+		webSearchModeSource = 'user';
 	};
 
 	afterUpdate(() => {
@@ -367,14 +401,17 @@
 
 	let inputFiles;
 	let dragged = false;
+	let dragCounter = 0;
 
 	let user = null;
 	export let placeholder = '';
 
 	let visionCapableModels = [];
-	$: visionCapableModels = [...(atSelectedModel ? [atSelectedModel] : selectedModels)].filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.vision ?? true
-	);
+	$: visionCapableModels = (
+		atSelectedModel
+			? [atSelectedModel]
+			: selectedModels.map((modelId) => findModelByIdentity($models, modelId)).filter(Boolean)
+	).filter((model) => model?.info?.meta?.capabilities?.vision ?? true);
 
 	const scrollToBottom = () => {
 		const element = document.getElementById('messages-container');
@@ -486,10 +523,14 @@
 			// bring back focus to this current tab, so that the user can see the screen capture
 			window.focus();
 
-			// Convert the canvas to a Base64 image URL
-			const imageUrl = canvas.toDataURL('image/png');
-			// Add the captured image to the files array to render it
-			files = [...files, { type: 'image', url: imageUrl }];
+			const imageBlob = await new Promise<Blob | null>((resolve) =>
+				canvas.toBlob(resolve, 'image/png')
+			);
+			if (!imageBlob) {
+				throw new Error('Failed to capture screen image');
+			}
+
+			await uploadImageFileHandler(createNamedImageFile(imageBlob, 'Screen_Capture'));
 			// Clean memory: Clear video srcObject
 			video.srcObject = null;
 		} catch (error) {
@@ -501,6 +542,30 @@
 	const getUploadLocalizeOptions = () => ({
 		isAdmin: $_user?.role === 'admin'
 	});
+
+	const IMAGE_INPUT_MIME_TYPES = [
+		'image/gif',
+		'image/webp',
+		'image/jpeg',
+		'image/png',
+		'image/avif'
+	];
+
+	const buildUploadedImageContentUrl = (id: string) => `${WEBUI_API_BASE_URL}/files/${id}/content`;
+
+	const revokePreviewUrl = (value: unknown) => {
+		if (typeof value === 'string' && value.startsWith('blob:')) {
+			URL.revokeObjectURL(value);
+		}
+	};
+
+	const createNamedImageFile = (blob: Blob, namePrefix: string) => {
+		const mimeType = blob.type || 'image/png';
+		const extension = mimeType.split('/').at(1)?.split('+').at(0) || 'png';
+		const existingName = blob instanceof File ? blob.name : '';
+		const filename = existingName || `${namePrefix}_${Date.now()}.${extension}`;
+		return new File([blob], filename, { type: mimeType });
+	};
 
 	const setUploadFailure = (tempItemId: string, error: unknown) => {
 		const localized = getLocalizedFileUploadDiagnostic(
@@ -532,6 +597,72 @@
 		toast.error(localizeFileUploadError(error, $i18n.t.bind($i18n), getUploadLocalizeOptions()));
 	};
 
+	const uploadImageFileHandler = async (file: File) => {
+		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
+			toast.error($i18n.t('You do not have permission to upload files.'));
+			return null;
+		}
+
+		const tempItemId = uuidv4();
+		const previewUrl = URL.createObjectURL(file);
+		const fileItem = {
+			type: 'image',
+			id: null,
+			url: '',
+			name: file.name,
+			size: file.size,
+			content_type: file.type,
+			status: 'uploading',
+			error: '',
+			errorTitle: '',
+			errorHint: '',
+			diagnostic: null,
+			itemId: tempItemId,
+			preview_url: previewUrl
+		};
+
+		if (fileItem.size == 0) {
+			revokePreviewUrl(previewUrl);
+			toast.error($i18n.t('You cannot upload an empty file.'));
+			return null;
+		}
+
+		files = [...files, fileItem];
+
+		try {
+			const uploadedFile = await uploadFile(localStorage.token, file, {
+				process: false
+			});
+
+			if (uploadedFile) {
+				if (uploadedFile.error) {
+					toast.warning(
+						localizeFileUploadError(
+							uploadedFile.error,
+							$i18n.t.bind($i18n),
+							getUploadLocalizeOptions()
+						)
+					);
+				}
+
+				fileItem.status = 'uploaded';
+				fileItem.id = uploadedFile.id;
+				fileItem.name = uploadedFile?.meta?.name ?? file.name;
+				fileItem.size = uploadedFile?.meta?.size ?? file.size;
+				fileItem.content_type = uploadedFile?.meta?.content_type ?? file.type;
+				fileItem.url = buildUploadedImageContentUrl(uploadedFile.id);
+				revokePreviewUrl(fileItem.preview_url);
+				delete fileItem.preview_url;
+
+				files = files;
+			} else {
+				setUploadFailure(tempItemId, new Error($i18n.t('Failed to upload file.')));
+			}
+		} catch (e) {
+			setUploadFailure(tempItemId, e);
+		}
+	};
+
 	const uploadFileHandler = async (file, fullContext: boolean = false) => {
 		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
@@ -553,7 +684,9 @@
 			errorHint: '',
 			diagnostic: null,
 			itemId: tempItemId,
-			...(fullContext ? { context: 'full', processing_mode: 'full_context' } : {})
+			...(fullContext
+				? { context: 'full', processing_mode: 'full_context' }
+				: {})
 		};
 
 		if (fileItem.size == 0) {
@@ -647,75 +780,88 @@
 			}
 
 			if (
-				['image/gif', 'image/webp', 'image/jpeg', 'image/png', 'image/avif'].includes(file['type'])
+				IMAGE_INPUT_MIME_TYPES.includes(file['type'])
 			) {
 				if (visionCapableModels.length === 0) {
 					toast.error($i18n.t('Selected model(s) do not support image inputs'));
 					continue;
 				}
-				let reader = new FileReader();
-				reader.onload = async (event) => {
-					let imageUrl = event.target.result;
+				if (($settings?.imageCompression ?? false) && !isAnimatedImage(file)) {
+					const width = $settings?.imageCompressionSize?.width ?? null;
+					const height = $settings?.imageCompressionSize?.height ?? null;
 
-					if (($settings?.imageCompression ?? false) && !isAnimatedImage(file)) {
-						const width = $settings?.imageCompressionSize?.width ?? null;
-						const height = $settings?.imageCompressionSize?.height ?? null;
-
-						if (width || height) {
-							imageUrl = await compressImage(imageUrl, width, height);
-						}
+					if (width || height) {
+						const tempPreviewUrl = URL.createObjectURL(file);
+						const imageUrl = await compressImage(tempPreviewUrl, width, height).finally(() => {
+							revokePreviewUrl(tempPreviewUrl);
+						});
+						const response = await fetch(imageUrl);
+						const imageBlob = await response.blob();
+						file = createNamedImageFile(imageBlob, file.name.replace(/\.[^.]+$/, '') || 'Image');
 					}
+				}
 
-					files = [
-						...files,
-						{
-							type: 'image',
-							url: `${imageUrl}`
-						}
-					];
-				};
-				reader.readAsDataURL(file);
+				await uploadImageFileHandler(file);
 			} else {
-				uploadFileHandler(file);
+				await uploadFileHandler(file);
 			}
 		}
+	};
+
+	const removeInputFile = async (fileIdx: number) => {
+		const file = files[fileIdx];
+		if (!file) {
+			return;
+		}
+
+		if (file.itemId && file.id && file.type !== 'collection' && !file?.collection) {
+			try {
+				await deleteFileById(localStorage.token, file.id);
+			} catch (error) {
+				console.error('Failed to delete uploaded file:', error);
+			}
+		}
+
+		revokePreviewUrl(file?.preview_url);
+		files.splice(fileIdx, 1);
+		files = files;
 	};
 
 	const handleKeyDown = (event: KeyboardEvent) => {
 		if (event.key === 'Escape') {
 			console.log('Escape');
+			dragCounter = 0;
 			dragged = false;
 		}
+	};
+
+	const onDragEnter = (e) => {
+		if (!e.dataTransfer?.types?.includes('Files')) return;
+		dragCounter++;
+		dragged = true;
 	};
 
 	const onDragOver = (e) => {
 		e.preventDefault();
-
-		// Check if a file is being dragged.
-		if (e.dataTransfer?.types?.includes('Files')) {
-			dragged = true;
-		} else {
-			dragged = false;
-		}
 	};
 
 	const onDragLeave = () => {
-		dragged = false;
+		if (dragCounter > 0) dragCounter--;
+		if (dragCounter === 0) dragged = false;
 	};
 
 	const onDrop = async (e) => {
 		e.preventDefault();
-		console.log(e);
+
+		dragCounter = 0;
+		dragged = false;
 
 		if (e.dataTransfer?.files) {
 			const inputFiles = Array.from(e.dataTransfer?.files);
 			if (inputFiles && inputFiles.length > 0) {
-				console.log(inputFiles);
-				inputFilesHandler(inputFiles);
+				await inputFilesHandler(inputFiles);
 			}
 		}
-
-		dragged = false;
 	};
 
 	onMount(async () => {
@@ -772,6 +918,7 @@
 
 		const dropzoneElement = document.getElementById('chat-container');
 
+		dropzoneElement?.addEventListener('dragenter', onDragEnter);
 		dropzoneElement?.addEventListener('dragover', onDragOver);
 		dropzoneElement?.addEventListener('drop', onDrop);
 		dropzoneElement?.addEventListener('dragleave', onDragLeave);
@@ -783,16 +930,21 @@
 		const dropzoneElement = document.getElementById('chat-container');
 
 		if (dropzoneElement) {
+			dropzoneElement?.removeEventListener('dragenter', onDragEnter);
 			dropzoneElement?.removeEventListener('dragover', onDragOver);
 			dropzoneElement?.removeEventListener('drop', onDrop);
 			dropzoneElement?.removeEventListener('dragleave', onDragLeave);
+		}
+
+		for (const file of files) {
+			revokePreviewUrl(file?.preview_url);
 		}
 	});
 </script>
 
 <FilesOverlay show={dragged} />
 
-<ToolServersModal bind:show={showTools} {selectedToolIds} />
+<ToolServersModal bind:show={showTools} {selectedToolIds} {selectedSkillIds} />
 <InputVariablesModal
 	bind:show={showInputVariablesModal}
 	variables={inputVariables}
@@ -837,7 +989,7 @@
 				</div>
 
 				<div class="w-full relative">
-					{#if atSelectedModel !== undefined || selectedToolIds.length > 0 || webSearchActive || imageGenerationEnabled || codeInterpreterEnabled}
+					{#if atSelectedModel !== undefined || selectedToolIds.length > 0 || selectedSkillIds.length > 0 || webSearchActive || imageGenerationEnabled || codeInterpreterEnabled}
 						<div
 							class="px-3 pb-0.5 pt-1.5 text-left w-full flex flex-col absolute bottom-0 left-0 right-0 bg-linear-to-t from-white dark:from-gray-900 z-10"
 						>
@@ -847,13 +999,9 @@
 										<ModelIcon
 											alt="model profile"
 											className="size-3.5 max-w-[28px] rounded-lg"
-											src={$models.find((model) => model.id === atSelectedModel.id)?.info?.meta
-												?.profile_image_url ??
-												$models.find((model) => model.id === atSelectedModel.id)?.meta
-													?.profile_image_url ??
-												($i18n.language === 'dg-DG'
-													? `/doge.png`
-													: `${WEBUI_BASE_URL}/static/favicon.png`)}
+											src={atSelectedModelListItem?.info?.meta?.profile_image_url ??
+												atSelectedModelListItem?.meta?.profile_image_url ??
+												`${WEBUI_BASE_URL}/static/favicon.png`}
 										/>
 										<div class="translate-y-[0.5px]">
 											Talking to <span class=" font-medium"
@@ -916,7 +1064,7 @@
 						on:change={async () => {
 							if (inputFiles && inputFiles.length > 0) {
 								const _inputFiles = Array.from(inputFiles);
-								inputFilesHandler(_inputFiles);
+								await inputFilesHandler(_inputFiles);
 							} else {
 								toast.error($i18n.t(`File not found.`));
 							}
@@ -970,17 +1118,13 @@
 								/>
 
 								{#if files.length > 0}
-									<div
-										class="px-2.5 mt-0.5 mb-1.5 pt-1.5 flex items-end gap-2 overflow-x-auto scrollbar-none"
-									>
+									<div class="px-2.5 mt-0.5 mb-1.5 pt-1.5 flex items-end gap-2 overflow-x-auto scrollbar-none">
 										{#each files as file, fileIdx}
 											{#if file.type === 'image'}
 												<div class="relative group shrink-0">
-													<div
-														class="relative flex items-center rounded-xl ring-1 ring-gray-200/60 dark:ring-white/10"
-													>
+													<div class="relative flex items-center rounded-xl ring-1 ring-gray-200/60 dark:ring-white/10">
 														<Image
-															src={file.url}
+															src={file.preview_url || file.url}
 															alt="input"
 															imageClassName=" size-14 rounded-xl object-cover"
 														/>
@@ -1014,9 +1158,8 @@
 														<button
 															class="bg-gray-900/70 dark:bg-gray-700/90 text-white border border-white/20 dark:border-gray-500/30 rounded-full group-hover:visible invisible transition backdrop-blur-sm p-px"
 															type="button"
-															on:click={() => {
-																files.splice(fileIdx, 1);
-																files = files;
+															on:click={async () => {
+																await removeInputFile(fileIdx);
 															}}
 														>
 															<svg
@@ -1043,7 +1186,7 @@
 													dismissible={true}
 													edit={true}
 													on:dismiss={async () => {
-														if (file.type !== 'collection' && !file?.collection) {
+														if (file.itemId && file.type !== 'collection' && !file?.collection) {
 															if (file.id) {
 																// This will handle both file deletion and Chroma cleanup
 																await deleteFileById(localStorage.token, file.id);
@@ -1083,9 +1226,7 @@
 															navigator.maxTouchPoints > 0 ||
 															navigator.msMaxTouchPoints > 0
 														))}
-												placeholder={placeholder
-													? placeholder
-													: $i18n.t('How can I help you today?')}
+												placeholder={placeholder ? placeholder : $i18n.t('How can I help you today?')}
 												largeTextAsFile={$settings?.largeTextAsFile ?? false}
 												autocomplete={$config?.features?.enable_autocomplete_generation &&
 													($settings?.promptAutocomplete ?? false)}
@@ -1105,7 +1246,11 @@
 														text,
 														history?.currentId
 															? createMessagesList(history, history.currentId)
-															: null
+															: null,
+														'search query',
+														{
+															skipTextEnhancements: shouldSkipTextEnhancements()
+														}
 													).catch((error) => {
 														console.log(error);
 
@@ -1177,13 +1322,16 @@
 														}
 													}
 
-													if (e.key === 'Escape') {
-														atSelectedModel = undefined;
-														selectedToolIds = [];
-														webSearchMode = 'off';
-														imageGenerationEnabled = false;
-													}
-												}}
+															if (e.key === 'Escape') {
+																atSelectedModel = undefined;
+																selectedToolIds = [];
+																toolSelectionTouched = true;
+																selectedSkillIds = [];
+																skillSelectionTouched = true;
+																setWebSearchModeFromUser('off');
+																imageGenerationEnabled = false;
+															}
+													}}
 												on:paste={async (e) => {
 													e = e.detail.event;
 
@@ -1201,19 +1349,9 @@
 																		continue;
 																	}
 																}
-																const reader = new FileReader();
-
-																reader.onload = function (e) {
-																	files = [
-																		...files,
-																		{
-																			type: 'image',
-																			url: `${e.target.result}`
-																		}
-																	];
-																};
-
-																reader.readAsDataURL(blob);
+																await uploadImageFileHandler(
+																	createNamedImageFile(blob, 'Pasted_Image')
+																);
 															} else if (item.type === 'text/plain') {
 																if ($settings?.largeTextAsFile ?? false) {
 																	const text = clipboardData.getData('text/plain');
@@ -1378,14 +1516,17 @@
 													e.target.style.height = Math.min(e.target.scrollHeight, 320) + 'px';
 												}
 
-												if (e.key === 'Escape') {
-													console.log('Escape');
-													atSelectedModel = undefined;
-													selectedToolIds = [];
-													webSearchMode = 'off';
-													imageGenerationEnabled = false;
-												}
-											}}
+													if (e.key === 'Escape') {
+														console.log('Escape');
+														atSelectedModel = undefined;
+														selectedToolIds = [];
+														toolSelectionTouched = true;
+														selectedSkillIds = [];
+														skillSelectionTouched = true;
+														setWebSearchModeFromUser('off');
+														imageGenerationEnabled = false;
+													}
+												}}
 											rows="1"
 											on:input={async (e) => {
 												e.target.style.height = '';
@@ -1410,19 +1551,9 @@
 																	continue;
 																}
 															}
-															const reader = new FileReader();
-
-															reader.onload = function (e) {
-																files = [
-																	...files,
-																	{
-																		type: 'image',
-																		url: `${e.target.result}`
-																	}
-																];
-															};
-
-															reader.readAsDataURL(blob);
+															await uploadImageFileHandler(
+																createNamedImageFile(blob, 'Pasted_Image')
+															);
 														} else if (item.type === 'text/plain') {
 															if ($settings?.largeTextAsFile ?? false) {
 																const text = clipboardData.getData('text/plain');
@@ -1449,8 +1580,12 @@
 									<div class="ml-1 self-end flex items-center flex-1 max-w-[80%] gap-0.5">
 										<InputMenu
 											bind:selectedToolIds
+											bind:toolSelectionTouched
+											bind:selectedSkillIds
+											bind:skillSelectionTouched
 											bind:webSearchMode
 											{webSearchModeOptions}
+											onWebSearchModeChange={setWebSearchModeFromUser}
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
 											{screenCaptureHandler}
@@ -1542,15 +1677,37 @@
 												</Tooltip>
 											{/if}
 
+											{#if selectedSkillIds.length > 0}
+												<Tooltip
+													content={`已选择 ${selectedSkillIds.length} 个技能`}
+												>
+													<button
+														class="translate-y-[0.5px] flex gap-1 items-center text-amber-700 dark:text-amber-300 hover:text-amber-800 dark:hover:text-amber-200 rounded-lg p-1 self-center transition"
+														aria-label="Selected Skills"
+														type="button"
+														on:click={() => {
+															showTools = !showTools;
+														}}
+													>
+														<Sparkles className="size-4" />
+														<span class="text-sm font-medium">
+															{selectedSkillIds.length}
+														</span>
+													</button>
+												</Tooltip>
+											{/if}
+
 											{#if activeAssistant}
 												<Tooltip
-													content={`当前助手：${activeAssistant.name}${activeAssistant.description ? `\n${activeAssistant.description}` : ''}`}
+													content={`${tr('当前助手', 'Current Assistant')}: ${activeAssistant.name}${activeAssistant.description ? `\n${activeAssistant.description}` : ''}`}
 													placement="top"
 												>
 													<button
 														type="button"
 														class={`${featureBadgeBaseClass} px-2.5 py-1.5 gap-1.5 max-w-[13rem]`}
-														aria-label={`关闭助手 ${activeAssistant.name}`}
+														aria-label={tr('关闭助手 {{name}}', 'Close assistant {{name}}', {
+															name: activeAssistant.name
+														})}
 														on:click={() => {
 															onDeactivateAssistant?.();
 														}}
@@ -1570,16 +1727,19 @@
 											{/if}
 
 											{#if $_user}
-												{#if webSearchFeatureEnabled && ($_user.role === 'admin' || $_user?.permissions?.features?.web_search) && webSearchActive}
-													<Tooltip content={`${currentWebSearchTooltip}，点击关闭`} placement="top">
+													{#if webSearchFeatureEnabled && ($_user.role === 'admin' || $_user?.permissions?.features?.web_search) && webSearchActive}
+													<Tooltip
+														content={`${currentWebSearchTooltip} ${tr('点击关闭', 'Click to disable')}`}
+														placement="top"
+													>
 														<button
 															type="button"
 															class={webSearchBadgeClass}
-															aria-label={$i18n.t('关闭联网搜索')}
-															on:click={() => {
-																webSearchMode = 'off';
-															}}
-														>
+																aria-label={$i18n.t('关闭联网搜索')}
+																on:click={() => {
+																	setWebSearchModeFromUser('off');
+																}}
+															>
 															<span class={featureBadgeIconSlotClass}>
 																<GlobeAlt
 																	className={`${webSearchIconClass} ${featureBadgePrimaryIconMotionClass}`}
@@ -1609,10 +1769,7 @@
 																	className={`${imageGenerationIconClass} ${featureBadgePrimaryIconMotionClass}`}
 																	strokeWidth="1.75"
 																/>
-																<XMark
-																	className={imageGenerationCloseIconClass}
-																	strokeWidth="2.5"
-																/>
+																<XMark className={imageGenerationCloseIconClass} strokeWidth="2.5" />
 															</span>
 														</button>
 													</Tooltip>
@@ -1633,10 +1790,7 @@
 																	className={`${codeInterpreterIconClass} ${featureBadgePrimaryIconMotionClass}`}
 																	strokeWidth="1.75"
 																/>
-																<XMark
-																	className={codeInterpreterCloseIconClass}
-																	strokeWidth="2.5"
-																/>
+																<XMark className={codeInterpreterCloseIconClass} strokeWidth="2.5" />
 															</span>
 														</button>
 													</Tooltip>

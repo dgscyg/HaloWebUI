@@ -7,6 +7,10 @@
 	import { blobToFile } from '$lib/utils';
 	import { generateEmoji } from '$lib/apis';
 	import { synthesizeOpenAISpeech, transcribeAudio } from '$lib/apis/audio';
+	import { uploadFile } from '$lib/apis/files';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { isDedicatedImageGenerationModel } from '$lib/utils/model-capabilities';
+	import { findModelByIdentity } from '$lib/utils/model-identity';
 
 	import { toast } from 'svelte-sonner';
 
@@ -22,6 +26,7 @@
 	export let files;
 	export let chatId;
 	export let modelId;
+	export let imageGenerationEnabled = false;
 
 	let wakeLock = null;
 
@@ -115,12 +120,12 @@
 		cameraStream = null;
 	};
 
-	const takeScreenshot = () => {
+	const takeScreenshot = async () => {
 		const video = document.getElementById('camera-feed');
 		const canvas = document.getElementById('camera-canvas');
 
 		if (!canvas) {
-			return;
+			return null;
 		}
 
 		const context = canvas.getContext('2d');
@@ -132,11 +137,24 @@
 		// Draw the image from the video onto the canvas
 		context.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
 
-		// Convert the canvas to a data base64 URL and console log it
-		const dataURL = canvas.toDataURL('image/png');
-		console.log(dataURL);
+		return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+	};
 
-		return dataURL;
+	const uploadCapturedImage = async (imageBlob: Blob) => {
+		const imageFile = blobToFile(imageBlob, `Call_Screenshot_${Date.now()}.png`);
+		const uploadedFile = await uploadFile(localStorage.token, imageFile, { process: false });
+		if (!uploadedFile?.id) {
+			throw new Error('Failed to upload captured image');
+		}
+
+		return {
+			type: 'image',
+			id: uploadedFile.id,
+			name: uploadedFile?.meta?.name ?? imageFile.name,
+			url: `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}/content`,
+			size: uploadedFile?.meta?.size ?? imageFile.size,
+			content_type: uploadedFile?.meta?.content_type ?? imageFile.type
+		};
 	};
 
 	const stopCamera = async () => {
@@ -187,14 +205,18 @@
 				emoji = null;
 
 				if (cameraStream) {
-					const imageUrl = takeScreenshot();
-
-					files = [
-						{
-							type: 'image',
-							url: imageUrl
+					const imageBlob = await takeScreenshot();
+					if (imageBlob) {
+						try {
+							files = [await uploadCapturedImage(imageBlob)];
+						} catch (error) {
+							console.error('Failed to upload captured call image:', error);
+							toast.error($i18n.t('Failed to upload captured image.'));
+							files = [];
 						}
-					];
+					} else {
+						files = [];
+					}
 				}
 
 				const audioBlob = new Blob(_audioChunks, { type: 'audio/wav' });
@@ -456,7 +478,11 @@
 			try {
 				// Set the emoji for the content if needed
 				if ($settings?.showEmojiInCall ?? false) {
-					const emoji = await generateEmoji(localStorage.token, modelId, content, chatId);
+					const emoji = await generateEmoji(localStorage.token, modelId, content, chatId, {
+						skipTextEnhancements:
+							imageGenerationEnabled ||
+							(model?.id ? isDedicatedImageGenerationModel(model.id) : false)
+					});
 					if (emoji) {
 						emojiCache.set(content, emoji);
 					}
@@ -641,7 +667,7 @@
 			});
 		}
 
-		model = $models.find((m) => m.id === modelId);
+		model = findModelByIdentity($models, modelId);
 
 		startRecording();
 

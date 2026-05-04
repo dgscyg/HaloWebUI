@@ -2,11 +2,12 @@ import logging
 import math
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 import uuid
 
 
 from open_webui.utils.misc import get_last_user_message, get_messages_content
+from open_webui.utils.model_identity import get_model_selection_id, resolve_model_from_lookup
 
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.config import DEFAULT_RAG_TEMPLATE
@@ -15,14 +16,121 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
+DEDICATED_IMAGE_MODEL_HINTS = (
+    "gpt-image",
+    "chatgpt-image",
+    "dall-e",
+    "dalle",
+    "gemini-2.0-flash-preview-image-generation",
+    "gemini-2.5-flash-image",
+    "imagen",
+    "grok-imagine",
+    "qwen-image",
+    "glm-image",
+    "hunyuan-image",
+    "seedream",
+    "flux",
+    "stable-diffusion",
+    "sdxl",
+    "midjourney",
+    "ideogram",
+    "recraft",
+    "kolors",
+    "wanx",
+    "cogview",
+    "playground",
+    "agnes-image",
+    "nano-banana",
+    "janus",
+    "kandinsky",
+)
+
+IMAGE_ONLY_REGEXES = (
+    re.compile(r"^gemini-3(?:\.\d+)?-(?:flash|pro)-image(?:[-.\w]+)?$"),
+    re.compile(r"^grok(?:[-.\w]+)?-image(?:[-.\w]+)?$"),
+    re.compile(r"^sd[-.\w]+$"),
+)
+
+
+def _get_model_identity(model: Optional[dict[str, Any]]) -> str:
+    if not isinstance(model, dict):
+        return ""
+
+    info = model.get("info")
+    if isinstance(info, dict):
+        base_model_id = str(info.get("base_model_id") or "").strip()
+        if base_model_id:
+            return base_model_id
+
+    for key in ("model_id", "original_id", "id", "name"):
+        value = str(model.get(key) or "").strip()
+        if value:
+            return value
+
+    return ""
+
+
+def _get_model_base_name(model: Optional[dict[str, Any]]) -> str:
+    identity = _get_model_identity(model)
+    if "/" in identity:
+        identity = identity.rsplit("/", 1)[-1]
+    return identity.strip().lower()
+
+
+def is_dedicated_image_generation_model(model: Optional[dict[str, Any]]) -> bool:
+    if not isinstance(model, dict):
+        return False
+
+    candidate_names: list[str] = []
+    info = model.get("info")
+    if isinstance(info, dict):
+        candidate_names.append(str(info.get("base_model_id") or "").strip())
+
+    for key in ("model_id", "original_id", "id", "name"):
+        candidate_names.append(str(model.get(key) or "").strip())
+
+    for identity in candidate_names:
+        if not identity:
+            continue
+        if "/" in identity:
+            identity = identity.rsplit("/", 1)[-1]
+        base_name = identity.strip().lower()
+
+        if "vision" in base_name and "image" not in base_name:
+            continue
+
+        if any(pattern.search(base_name) for pattern in IMAGE_ONLY_REGEXES):
+            return True
+
+        if any(hint in base_name for hint in DEDICATED_IMAGE_MODEL_HINTS):
+            return True
+
+    return False
+
+
 def get_task_model_id(
-    default_model_id: str, task_model: str, task_model_external: str, models
+    default_model_id: str,
+    task_model: str,
+    task_model_external: str,
+    models,
+    ambiguous_model_aliases=None,
 ) -> str:
     # Set the task model
     task_model_id = default_model_id
     # Check if the user has a custom task model and use that model
-    if task_model_external and task_model_external in models:
-        task_model_id = task_model_external
+    if task_model_external:
+        external_task_model = resolve_model_from_lookup(
+            models,
+            ambiguous_model_aliases or set(),
+            task_model_external,
+        )
+    else:
+        external_task_model = None
+
+    if isinstance(external_task_model, dict):
+        task_model_id = (
+            get_model_selection_id(external_task_model)
+        ) or task_model_external
 
     return task_model_id
 

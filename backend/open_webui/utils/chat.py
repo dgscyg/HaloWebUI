@@ -44,7 +44,9 @@ from open_webui.models.models import Models
 
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.models import get_all_models, check_model_access
+from open_webui.utils.model_identity import resolve_model_from_lookup
 from open_webui.utils.payload import convert_payload_openai_to_ollama
+from open_webui.utils.chat_image_refs import materialize_openai_image_message_refs
 from open_webui.utils.response import (
     convert_response_ollama_to_openai,
     convert_streaming_response_ollama_to_openai,
@@ -56,6 +58,7 @@ from open_webui.utils.filter import (
 )
 
 from open_webui.env import SRC_LOG_LEVELS, GLOBAL_LOG_LEVEL, BYPASS_MODEL_ACCESS_CONTROL
+
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -204,22 +207,22 @@ async def generate_chat_completion(
         models = getattr(request.state, "MODELS", None) or request.app.state.MODELS
 
     model_id = form_data["model"]
-    if model_id not in models:
+    ambiguous_model_aliases = getattr(request.state, "MODELS_AMBIGUOUS", set()) or set()
+    model = resolve_model_from_lookup(models, ambiguous_model_aliases, model_id)
+    if not model:
         raise Exception("Model not found")
-
-    model = models[model_id]
 
     # Shared model: route through the owning user's connections.
     # This matters for task endpoints that call generate_chat_completion directly.
     try:
         model_info = Models.get_model_by_id(model.get("id"))
         if model_info and model_info.user_id and model_info.user_id != user.id:
-            from open_webui.models.users import (
-                Users,
-            )  # local import to avoid heavy coupling
+            from open_webui.models.users import Users  # local import to avoid heavy coupling
+            from open_webui.utils.user_connections import maybe_migrate_user_connections
 
             owner = Users.get_user_by_id(model_info.user_id)
             if owner:
+                owner = maybe_migrate_user_connections(request, owner)
                 request.state.connection_user = owner
     except Exception:
         pass
@@ -242,6 +245,11 @@ async def generate_chat_completion(
                 request, form_data, user=user, models=models
             )
         if model.get("owned_by") == "ollama":
+            form_data = materialize_openai_image_message_refs(
+                form_data,
+                user_id=user.id,
+                is_admin=user.role == "admin",
+            )
             # Using /ollama/api/chat endpoint
             form_data = convert_payload_openai_to_ollama(form_data)
             response = await generate_ollama_chat_completion(
@@ -259,20 +267,14 @@ async def generate_chat_completion(
                 )
             else:
                 return convert_response_ollama_to_openai(response)
-        if model.get("gemini") is not None or model.get("owned_by") in (
-            "google",
-            "gemini",
-        ):
+        if model.get("gemini") is not None or model.get("owned_by") in ("google", "gemini"):
             return await generate_gemini_chat_completion(
                 request=request,
                 form_data=form_data,
                 user=user,
                 bypass_filter=bypass_filter,
             )
-        if model.get("anthropic") is not None or model.get("owned_by") in (
-            "anthropic",
-            "claude",
-        ):
+        if model.get("anthropic") is not None or model.get("owned_by") in ("anthropic", "claude"):
             return await generate_anthropic_chat_completion(
                 request=request,
                 form_data=form_data,
@@ -280,6 +282,11 @@ async def generate_chat_completion(
                 bypass_filter=bypass_filter,
             )
         else:
+            form_data = materialize_openai_image_message_refs(
+                form_data,
+                user_id=user.id,
+                is_admin=user.role == "admin",
+            )
             return await generate_openai_chat_completion(
                 request=request,
                 form_data=form_data,
@@ -301,10 +308,10 @@ async def chat_completed(request: Request, form_data: dict, user: Any):
 
     data = form_data
     model_id = data["model"]
-    if model_id not in models:
+    ambiguous_model_aliases = getattr(request.state, "MODELS_AMBIGUOUS", set()) or set()
+    model = resolve_model_from_lookup(models, ambiguous_model_aliases, model_id)
+    if not model:
         raise Exception("Model not found")
-
-    model = models[model_id]
 
     metadata = {
         "chat_id": data["chat_id"],
@@ -366,9 +373,10 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
     data = form_data
     model_id = data["model"]
 
-    if model_id not in models:
+    ambiguous_model_aliases = getattr(request.state, "MODELS_AMBIGUOUS", set()) or set()
+    model = resolve_model_from_lookup(models, ambiguous_model_aliases, model_id)
+    if not model:
         raise Exception("Model not found")
-    model = models[model_id]
 
     __event_emitter__ = get_event_emitter(
         {

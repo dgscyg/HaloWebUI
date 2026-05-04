@@ -37,7 +37,6 @@ from open_webui.socket.main import (
 from open_webui.routers.tasks import (
     generate_queries,
     generate_title,
-    generate_image_prompt,
     generate_chat_tags,
     generate_follow_ups,
 )
@@ -70,6 +69,11 @@ from open_webui.routers.gemini import (
 )
 
 from open_webui.utils.webhook import post_webhook
+from open_webui.utils.chat_image_refs import extract_chat_image_file_id
+from open_webui.utils.image_generation_options import (
+    CHAT_IMAGE_GENERATION_OPTION_KEYS,
+    sanitize_chat_image_generation_options,
+)
 
 
 from open_webui.models.users import UserModel
@@ -91,15 +95,23 @@ from open_webui.retrieval.document_processing import (
 from open_webui.storage.provider import Storage
 
 
+from open_webui.utils.access_control import has_permission
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.native_web_search import (
     build_native_web_search_support,
     resolve_effective_native_web_search_support,
     strip_model_prefix,
 )
+from open_webui.utils.model_identity import get_model_ref_from_model, resolve_model_from_lookup
 from open_webui.utils.payload import merge_additive_payload_fields
+from open_webui.utils.skill_runtime import (
+    build_skill_system_prompt,
+    build_skill_tool_context,
+    get_selected_skill_context,
+)
 from open_webui.utils.task import (
     get_task_model_id,
+    is_dedicated_image_generation_model,
     prompt_template,
     rag_template,
     tools_function_calling_generation_template,
@@ -120,7 +132,6 @@ from open_webui.utils.tools import (
     validate_tool_ids_access,
 )
 from open_webui.utils.mcp import (
-    build_mcp_app_resource_proxy_path,
     extract_selected_mcp_indices,
     get_mcp_servers_cached_data,
     get_mcp_servers_data,
@@ -140,6 +151,9 @@ from open_webui.utils.filter import (
     get_sorted_filters,
     process_filter_functions,
 )
+from open_webui.utils.shared_tool_runtime import (
+    ensure_selected_shared_tool_runtime_loaded,
+)
 from open_webui.utils.code_interpreter import execute_code_jupyter
 
 from open_webui.tasks import create_task, set_current_task_blocks_completion
@@ -156,6 +170,7 @@ from open_webui.env import (
     ENABLE_REALTIME_CHAT_SAVE,
 )
 from open_webui.constants import TASKS
+
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -194,9 +209,7 @@ def _summarize_form_data_for_debug(form_data: Any) -> dict[str, Any]:
 
 def _truncate_text(value: Any, max_chars: int) -> str:
     try:
-        text = (
-            value if isinstance(value, str) else ("" if value is None else str(value))
-        )
+        text = value if isinstance(value, str) else ("" if value is None else str(value))
     except Exception:
         text = ""
     if max_chars > 0 and len(text) > max_chars:
@@ -211,94 +224,6 @@ def _safe_json_loads(value: Any) -> Any:
         return json.loads(value)
     except Exception:
         return value
-
-
-def _is_previewable_mcp_app_result(value: Any) -> bool:
-    parsed = _safe_json_loads(value)
-    if not isinstance(parsed, dict):
-        return False
-
-    render_url = str(parsed.get("render_url") or parsed.get("renderUrl") or "").strip()
-    inline_content = ""
-    for key in ("content", "html", "srcdoc"):
-        candidate = parsed.get(key)
-        if isinstance(candidate, str) and candidate.strip():
-            inline_content = candidate.strip()
-            break
-
-    return bool(render_url or inline_content)
-
-
-def _build_mcp_app_display_result(
-    tool: dict, tool_call_id: str, raw_tool_result: Any
-) -> Optional[str]:
-    if _is_previewable_mcp_app_result(raw_tool_result):
-        return None
-
-    mcp_meta = (tool.get("metadata") or {}).get("mcp") or {}
-    if not isinstance(mcp_meta, dict):
-        return None
-
-    if not bool(mcp_meta.get("apps_enabled")):
-        return None
-
-    resource_uri = str(mcp_meta.get("ui_resource_uri") or "").strip()
-    if not resource_uri:
-        return None
-
-    try:
-        server_idx = int(mcp_meta.get("server_idx"))
-    except Exception:
-        return None
-
-    render_url = build_mcp_app_resource_proxy_path(server_idx, resource_uri)
-    if not render_url:
-        return None
-
-    preview_payload: dict[str, Any] = {
-        "app_id": resource_uri,
-        "resource_id": resource_uri,
-        "render_url": render_url,
-        "metadata": {
-            "tool_call_id": tool_call_id,
-            "resource_uri": resource_uri,
-        },
-    }
-
-    title = str(mcp_meta.get("title") or mcp_meta.get("tool_name") or "").strip()
-    if title:
-        preview_payload["title"] = title
-
-    parsed_tool_result = _safe_json_loads(raw_tool_result)
-    if isinstance(parsed_tool_result, dict):
-        structured_content = parsed_tool_result.get("structuredContent")
-        if structured_content is not None:
-            preview_payload["structuredContent"] = structured_content
-
-    return json.dumps(preview_payload, ensure_ascii=False, indent=2)
-
-
-def _build_mcp_app_invocation(tool: dict) -> Optional[dict[str, Any]]:
-    mcp_meta = (tool.get("metadata") or {}).get("mcp") or {}
-    if not isinstance(mcp_meta, dict):
-        return None
-
-    if not bool(mcp_meta.get("apps_enabled")):
-        return None
-
-    resource_uri = str(mcp_meta.get("ui_resource_uri") or "").strip()
-    if not resource_uri:
-        return None
-
-    try:
-        server_idx = int(mcp_meta.get("server_idx"))
-    except Exception:
-        return None
-
-    return {
-        "serverId": str(server_idx),
-        "resourceUri": resource_uri,
-    }
 
 
 _DATA_IMAGE_MARKDOWN_RE = re.compile(
@@ -326,9 +251,7 @@ def _normalize_message_files(files: Any) -> list[dict]:
             if raw_value.startswith("data:image/"):
                 item = {"type": "image", "url": raw_value}
         elif isinstance(file_item, dict):
-            candidate = json.loads(
-                json.dumps(file_item, ensure_ascii=False, default=str)
-            )
+            candidate = json.loads(json.dumps(file_item, ensure_ascii=False, default=str))
             file_type = str(candidate.get("type") or "").strip().lower()
             file_url = str(candidate.get("url") or "").strip()
             if file_url or file_type or candidate.get("name") or candidate.get("id"):
@@ -420,13 +343,73 @@ def _extract_image_files_from_text(text: Any) -> tuple[str, list[dict]]:
     return cleaned.strip(), _merge_message_files(None, files)
 
 
-def _extract_stream_content_and_files(value: Any) -> tuple[str, list[dict]]:
+def _filter_response_image_files(
+    files: Any, *, allow_base64_image_url_conversion: bool = True
+) -> list[dict]:
+    normalized = _normalize_message_files(files)
+    if allow_base64_image_url_conversion:
+        return normalized
+
+    filtered: list[dict] = []
+    for file_item in normalized:
+        if not isinstance(file_item, dict):
+            continue
+
+        url = str(file_item.get("url") or "").strip()
+        if url.startswith("data:image/"):
+            continue
+        filtered.append(file_item)
+
+    return filtered
+
+
+def _extract_top_level_response_image_files(
+    value: Any, *, allow_base64_image_url_conversion: bool = True
+) -> list[dict]:
+    if not isinstance(value, dict):
+        return []
+
+    image_payloads: list[Any] = []
+
+    if "image_url" in value:
+        image_payloads.append({"type": "image_url", "image_url": value.get("image_url")})
+
+    raw_images = value.get("images")
+    if isinstance(raw_images, dict):
+        raw_images = [raw_images]
+    if isinstance(raw_images, list):
+        for image_item in raw_images:
+            if isinstance(image_item, dict):
+                image_type = str(image_item.get("type") or "").strip().lower()
+                if image_type in {"image", "image_url", "input_image", "output_image"}:
+                    image_payloads.append(image_item)
+                elif "image_url" in image_item:
+                    image_payloads.append(
+                        {"type": "image_url", "image_url": image_item.get("image_url")}
+                    )
+                elif image_item.get("url"):
+                    image_payloads.append({"type": "image", "url": image_item.get("url")})
+            elif isinstance(image_item, str):
+                image_payloads.append({"type": "image", "url": image_item})
+
+    return _filter_response_image_files(
+        image_payloads,
+        allow_base64_image_url_conversion=allow_base64_image_url_conversion,
+    )
+
+
+def _extract_stream_content_and_files(
+    value: Any, *, allow_base64_image_url_conversion: bool = True
+) -> tuple[str, list[dict]]:
     if isinstance(value, list):
         parts: list[str] = []
         files: list[dict] = []
 
         for item in value:
-            text_part, file_part = _extract_stream_content_and_files(item)
+            text_part, file_part = _extract_stream_content_and_files(
+                item,
+                allow_base64_image_url_conversion=allow_base64_image_url_conversion,
+            )
             if text_part:
                 parts.append(text_part)
             if file_part:
@@ -437,17 +420,36 @@ def _extract_stream_content_and_files(value: Any) -> tuple[str, list[dict]]:
     if isinstance(value, dict):
         item_type = str(value.get("type") or "").strip().lower()
         if item_type in {"image", "image_url", "input_image", "output_image"}:
-            files = _normalize_message_files(value)
+            files = _filter_response_image_files(
+                value,
+                allow_base64_image_url_conversion=allow_base64_image_url_conversion,
+            )
             return "", files
+
+        top_level_files = _extract_top_level_response_image_files(
+            value,
+            allow_base64_image_url_conversion=allow_base64_image_url_conversion,
+        )
 
         nested_content = value.get("content")
         if isinstance(nested_content, (list, dict)):
-            return _extract_stream_content_and_files(nested_content)
+            text_part, nested_files = _extract_stream_content_and_files(
+                nested_content,
+                allow_base64_image_url_conversion=allow_base64_image_url_conversion,
+            )
+            return text_part, _merge_message_files(top_level_files, nested_files)
 
         text_value = (
-            value.get("text") or value.get("content") or value.get("value") or ""
+            value.get("text")
+            or value.get("content")
+            or value.get("value")
+            or ""
         )
-        return _extract_stream_content_and_files(text_value)
+        text_part, nested_files = _extract_stream_content_and_files(
+            text_value,
+            allow_base64_image_url_conversion=allow_base64_image_url_conversion,
+        )
+        return text_part, _merge_message_files(top_level_files, nested_files)
 
     if isinstance(value, str):
         return _extract_image_files_from_text(value)
@@ -455,106 +457,91 @@ def _extract_stream_content_and_files(value: Any) -> tuple[str, list[dict]]:
     return "", []
 
 
-def _serialize_persisted_content_blocks(content_blocks):
-    content = ""
+def _normalize_stream_reasoning_duration(seconds: Any) -> Optional[float]:
+    if not isinstance(seconds, (int, float)):
+        return None
 
-    def split_content_and_whitespace(content):
-        stripped = content.rstrip()
-        trailing_whitespace = content[len(stripped) :]
-        return stripped, trailing_whitespace
+    duration_seconds = float(seconds)
+    if duration_seconds <= 0:
+        return None
 
-    def is_opening_code_block(content):
-        lines = content.split("\n")
-        if not lines:
-            return False
-        last_line = lines[-1].strip()
-        return last_line.startswith("```") and last_line.count("```") == 1
+    rounded_duration = round(duration_seconds, 1)
+    return rounded_duration if rounded_duration > 0 else 0.1
+
+
+def _finalize_reasoning_block_duration(
+    block: Any, *, ended_at: Optional[float] = None
+) -> Optional[float]:
+    if not isinstance(block, dict):
+        return None
+
+    finished_at = (
+        float(ended_at) if isinstance(ended_at, (int, float)) else time.time()
+    )
+    started_at = block.get("started_at")
+    fallback_started_at = block.get("fallback_started_at")
+
+    duration = None
+    if isinstance(started_at, (int, float)):
+        duration = _normalize_stream_reasoning_duration(
+            finished_at - float(started_at)
+        )
+
+    if duration is None and isinstance(fallback_started_at, (int, float)):
+        duration = _normalize_stream_reasoning_duration(
+            finished_at - float(fallback_started_at)
+        )
+
+    if duration is None and (
+        isinstance(started_at, (int, float))
+        or isinstance(fallback_started_at, (int, float))
+    ):
+        duration = 0.1
+
+    if duration is None:
+        return None
+
+    block["ended_at"] = finished_at
+    block["duration"] = duration
+    return duration
+
+
+def _has_nonempty_text_content(content_blocks: Any) -> bool:
+    if not isinstance(content_blocks, list):
+        return False
 
     for block in content_blocks:
-        if block["type"] == "text":
-            content += block["content"]
-        elif block["type"] == "html":
-            content += block["content"]
-        elif block["type"] == "citation":
-            content += "\n{{CITATION-" + str(block["id"]) + "}}\n"
-        elif block["type"] == "reasoning":
-            attributes = block.get("attributes", {})
-            reasoning_display_content = attributes.get(
-                "reasoning_display_content", block["content"]
-            )
-            reasoning_duration = attributes.get("duration", None)
-            if reasoning_duration is not None:
-                content = f'{content}\n<details type="reasoning" done="true" duration="{reasoning_duration}">\n<summary>Thought for {reasoning_duration} seconds</summary>\n{reasoning_display_content}\n</details>\n'
-            else:
-                content = f'{content}\n<details type="reasoning" done="false">\n<summary>Thinking…</summary>\n{reasoning_display_content}\n</details>\n'
-        elif block["type"] == "code_interpreter":
-            attributes = block.get("attributes", {})
-            output = block.get("output", None)
-            lang = attributes.get("lang", "")
-
-            content_stripped, original_whitespace = split_content_and_whitespace(
-                content
-            )
-            if is_opening_code_block(content_stripped):
-                content = content_stripped.rstrip("`").rstrip() + original_whitespace
-            else:
-                content = content_stripped + original_whitespace
-
-            if output:
-                output = html.escape(json.dumps(output))
-                content = f'{content}\n<details type="code_interpreter" done="true" output="{output}">\n<summary>Analyzed</summary>\n```{lang}\n{block["content"]}\n```\n</details>\n'
-            else:
-                content = f'{content}\n<details type="code_interpreter" done="false">\n<summary>Analyzing...</summary>\n```{lang}\n{block["content"]}\n```\n</details>\n'
-        else:
-            block_content = str(block["content"]).strip()
-            content = f"{content}{block['type']}: {block_content}\n"
-
-    return content.strip()
-
-
-def convert_content_blocks_to_messages(content_blocks):
-    messages = []
-    temp_blocks = []
-
-    for block in content_blocks if isinstance(content_blocks, list) else []:
         if not isinstance(block, dict):
             continue
 
-        if block.get("type") == "tool_calls":
-            serialized = _serialize_persisted_content_blocks(temp_blocks)
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": serialized if serialized else None,
-                    "tool_calls": block.get("content"),
-                }
-            )
+        block_type = str(block.get("type") or "").strip().lower()
+        if block_type in {"text", "reasoning"} and str(block.get("content") or "").strip():
+            return True
 
-            for result in block.get("results", []) or []:
-                if not isinstance(result, dict):
-                    continue
+    return False
 
-                tool_message = {
-                    "role": "tool",
-                    "tool_call_id": result["tool_call_id"],
-                    "content": result["content"],
-                }
-                result_files = result.get("files")
-                if result_files:
-                    tool_message["files"] = result_files
 
-                messages.append(tool_message)
+def _has_visible_message_files(message_files: Any) -> bool:
+    if not isinstance(message_files, list):
+        return False
 
-            temp_blocks = []
-        else:
-            temp_blocks.append(block)
+    for file_item in message_files:
+        if not isinstance(file_item, dict):
+            continue
 
-    if temp_blocks:
-        content = _serialize_persisted_content_blocks(temp_blocks)
-        if content:
-            messages.append({"role": "assistant", "content": content})
+        if str(file_item.get("type") or "").strip().lower() != "image":
+            continue
 
-    return messages
+        if any(str(file_item.get(key) or "").strip() for key in ("url", "id", "name")):
+            return True
+
+    return False
+
+
+def _has_visible_assistant_output(content_blocks: Any, message_files: Any) -> bool:
+    return _has_nonempty_text_content(content_blocks) or _has_visible_message_files(
+        message_files
+    )
 
 
 def _consume_stream_image_delta(
@@ -1066,7 +1053,9 @@ def _get_generation_response_content(response: Any) -> Optional[str]:
     return None
 
 
-def _normalize_web_search_mode(value: Any, fallback: str = WEB_SEARCH_MODE_OFF) -> str:
+def _normalize_web_search_mode(
+    value: Any, fallback: str = WEB_SEARCH_MODE_OFF
+) -> str:
     if value is True or value == "always":
         return WEB_SEARCH_MODE_HALO
 
@@ -1104,7 +1093,12 @@ def _resolve_native_web_search_support(
             }
 
         _idx, url, _key, api_config = _resolve_openai_connection_by_model_id(
-            model_id, base_urls, keys, cfgs
+            model_id,
+            base_urls,
+            keys,
+            cfgs,
+            model_ref=get_model_ref_from_model(model),
+            request_models=getattr(getattr(request, "state", None), "MODELS", None),
         )
         if not url:
             return {
@@ -1125,8 +1119,9 @@ def _resolve_native_web_search_support(
         support = resolve_effective_native_web_search_support(
             connection_support,
             provider="openai",
-            model_id=model.get("original_id")
-            or strip_model_prefix(model_id, api_config.get("_resolved_prefix_id")),
+            model_id=model.get("original_id") or strip_model_prefix(
+                model_id, api_config.get("_resolved_prefix_id")
+            ),
             model_name=model.get("name") or "",
         )
         support["url"] = url
@@ -1146,7 +1141,12 @@ def _resolve_native_web_search_support(
             }
 
         _idx, url, _key, api_config = _resolve_gemini_connection_by_model_id(
-            model_id, base_urls, keys, cfgs
+            model_id,
+            base_urls,
+            keys,
+            cfgs,
+            model_ref=get_model_ref_from_model(model),
+            request_models=getattr(getattr(request, "state", None), "MODELS", None),
         )
         if not url:
             return {
@@ -1167,8 +1167,9 @@ def _resolve_native_web_search_support(
         support = resolve_effective_native_web_search_support(
             connection_support,
             provider="gemini",
-            model_id=model.get("original_id")
-            or strip_model_prefix(model_id, api_config.get("_resolved_prefix_id")),
+            model_id=model.get("original_id") or strip_model_prefix(
+                model_id, api_config.get("_resolved_prefix_id")
+            ),
             model_name=model.get("name") or "",
         )
         support["url"] = url
@@ -1335,44 +1336,59 @@ def _extract_files_from_messages(messages: list[dict]) -> list[dict]:
                 file_obj = Files.get_file_by_id(file_id)
                 if file_obj:
                     meta = file_obj.meta or {}
-                    result.append(
-                        {
-                            "id": file_id,
-                            "filename": file_obj.filename,
-                            "content_type": meta.get("content_type", ""),
-                            "size": meta.get("size", 0),
-                            "processing_mode": f.get("processing_mode")
-                            or meta.get("processing_mode"),
-                            "context": f.get("context"),
-                        }
-                    )
+                    result.append({
+                        "id": file_id,
+                        "filename": file_obj.filename,
+                        "content_type": meta.get("content_type", ""),
+                        "size": meta.get("size", 0),
+                        "processing_mode": f.get("processing_mode") or meta.get("processing_mode"),
+                        "context": f.get("context"),
+                    })
                 else:
                     # File not in DB -- use whatever info we have from the message
-                    result.append(
-                        {
-                            "id": file_id,
-                            "filename": f.get("name") or f.get("filename") or "",
-                            "content_type": f.get("content_type")
-                            or f.get("type")
-                            or "",
-                            "size": f.get("size") or 0,
-                            "processing_mode": f.get("processing_mode"),
-                            "context": f.get("context"),
-                        }
-                    )
-            except Exception:
-                result.append(
-                    {
+                    result.append({
                         "id": file_id,
                         "filename": f.get("name") or f.get("filename") or "",
                         "content_type": f.get("content_type") or f.get("type") or "",
                         "size": f.get("size") or 0,
                         "processing_mode": f.get("processing_mode"),
                         "context": f.get("context"),
-                    }
-                )
+                    })
+            except Exception:
+                result.append({
+                    "id": file_id,
+                    "filename": f.get("name") or f.get("filename") or "",
+                    "content_type": f.get("content_type") or f.get("type") or "",
+                    "size": f.get("size") or 0,
+                    "processing_mode": f.get("processing_mode"),
+                    "context": f.get("context"),
+                })
 
     return result
+
+
+def _find_latest_image_url_from_messages(messages: Any) -> Optional[str]:
+    if not isinstance(messages, list):
+        return None
+
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
+
+        normalized_files = _normalize_message_files(
+            [message.get("files"), message.get("content")]
+        )
+        for file_item in normalized_files:
+            if not isinstance(file_item, dict):
+                continue
+            if str(file_item.get("type") or "").strip().lower() != "image":
+                continue
+
+            url = str(file_item.get("url") or "").strip()
+            if url:
+                return url
+
+    return None
 
 
 def _get_attachment_file_id(file_item: Any) -> str:
@@ -1536,9 +1552,7 @@ def _build_native_file_input_fallback_message(
 
     provider_name = _native_file_provider_display_name(str(fallback_provider or ""))
     if provider_name == "local document parsing":
-        return (
-            f"{base_message} Falling back to local document parsing for this request."
-        )
+        return f"{base_message} Falling back to local document parsing for this request."
 
     return (
         f"{base_message} Local document parsing failed, so this request used "
@@ -1585,9 +1599,9 @@ def _classify_native_file_input_retry_error(error: Any) -> dict[str, Any]:
     message = str(error or "").strip()
     lowered = message.lower()
 
-    if "/responses" in lowered and any(
-        token in lowered
-        for token in ("not found", "unknown", "unsupported", "405", "404")
+    if (
+        "/responses" in lowered
+        and any(token in lowered for token in ("not found", "unknown", "unsupported", "405", "404"))
     ):
         return _build_native_file_input_diagnostic(
             NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
@@ -1603,7 +1617,9 @@ def _classify_native_file_input_retry_error(error: Any) -> dict[str, Any]:
     return _build_native_file_input_diagnostic(
         NATIVE_FILE_INPUT_STATUS_UPSTREAM_REJECTED,
         reason="upstream_rejected",
-        message=("The upstream rejected native file inputs for this request."),
+        message=(
+            "The upstream rejected native file inputs for this request."
+        ),
         detail=message,
         source="responses_request",
     )
@@ -1689,10 +1705,7 @@ def _file_supports_anthropic_native_mode(file_obj: Any) -> bool:
     if not file_obj or not getattr(file_obj, "meta", None):
         return False
     content_type = str((file_obj.meta or {}).get("content_type") or "").lower()
-    return (
-        content_type in _ANTHROPIC_NATIVE_DOCUMENT_MIME_TYPES
-        or content_type in _ANTHROPIC_NATIVE_IMAGE_MIME_TYPES
-    )
+    return content_type in _ANTHROPIC_NATIVE_DOCUMENT_MIME_TYPES or content_type in _ANTHROPIC_NATIVE_IMAGE_MIME_TYPES
 
 
 def _extend_native_file_inputs_for_anthropic(metadata: dict, model: dict) -> None:
@@ -1705,10 +1718,7 @@ def _extend_native_file_inputs_for_anthropic(metadata: dict, model: dict) -> Non
         if str(file_id).strip()
     }
     for file_item in metadata.get("files") or []:
-        if (
-            _get_file_item_processing_mode(file_item)
-            != FILE_PROCESSING_MODE_NATIVE_FILE
-        ):
+        if _get_file_item_processing_mode(file_item) != FILE_PROCESSING_MODE_NATIVE_FILE:
             continue
         file_id = _get_attachment_file_id(file_item)
         if not file_id:
@@ -1769,7 +1779,9 @@ async def _ensure_requested_chat_file_modes(
                 ) or _build_native_file_input_diagnostic(
                     NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
                     reason="native_file_not_prepared",
-                    message=("Native file inputs were not prepared for this request."),
+                    message=(
+                        "Native file inputs were not prepared for this request."
+                    ),
                     source="chat_preparation",
                 )
                 desired_mode = FILE_PROCESSING_MODE_FULL_CONTEXT
@@ -1800,13 +1812,11 @@ async def _ensure_requested_chat_file_modes(
 
         if needs_processing:
             if native_fallback_diagnostic is not None:
-                _result, fallback_provider = (
-                    await _process_file_with_native_fallback_chain(
-                        request,
-                        user,
-                        file_id=file_id,
-                        diagnostic=native_fallback_diagnostic,
-                    )
+                _result, fallback_provider = await _process_file_with_native_fallback_chain(
+                    request,
+                    user,
+                    file_id=file_id,
+                    diagnostic=native_fallback_diagnostic,
                 )
                 fallback_messages.append(
                     _build_native_file_input_fallback_message(
@@ -1856,8 +1866,7 @@ async def _prepare_openai_native_file_inputs(
     if metadata.get("disable_native_file_inputs"):
         return
     if not (
-        (model or {}).get("owned_by") == "openai"
-        or isinstance((model or {}).get("openai"), dict)
+        (model or {}).get("owned_by") == "openai" or isinstance((model or {}).get("openai"), dict)
     ):
         return
 
@@ -1867,23 +1876,24 @@ async def _prepare_openai_native_file_inputs(
 
     all_regular_files = metadata.get("files") or []
     candidate_files = [
-        file_item
-        for file_item in all_regular_files
-        if _is_native_file_input_candidate(file_item)
+        file_item for file_item in all_regular_files if _is_native_file_input_candidate(file_item)
     ]
     if not candidate_files:
         return
 
-    connection_user = (
-        getattr(getattr(request, "state", None), "connection_user", None) or user
-    )
+    connection_user = getattr(getattr(request, "state", None), "connection_user", None) or user
     base_urls, keys, cfgs = _get_openai_user_config(connection_user)
     if not base_urls:
         return
 
     model_id = form_data.get("model") or (model or {}).get("id") or ""
     url_idx, url, key, api_config = _resolve_openai_connection_by_model_id(
-        model_id, base_urls, keys, cfgs
+        model_id,
+        base_urls,
+        keys,
+        cfgs,
+        model_ref=get_model_ref_from_model(model),
+        request_models=getattr(getattr(request, "state", None), "MODELS", None),
     )
     if not url:
         return
@@ -1936,9 +1946,7 @@ async def _prepare_openai_native_file_inputs(
         "model_id": model_id,
         "connection_name": connection_name,
         "url": url,
-        "prefix_id": api_config.get("_resolved_prefix_id")
-        or api_config.get("prefix_id")
-        or "",
+        "prefix_id": api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or "",
         "responses_configured": capability.get("responses_configured"),
         "native_file_inputs_enabled": api_config.get("native_file_inputs_enabled"),
         "official_openai": capability.get("official"),
@@ -1964,10 +1972,7 @@ async def _prepare_openai_native_file_inputs(
                 file_id=file_id,
                 file_name=(file_obj.filename if file_obj else file_id),
                 diagnostic=_build_native_file_input_diagnostic(
-                    str(
-                        capability.get("status")
-                        or NATIVE_FILE_INPUT_STATUS_DISABLED_BY_CONFIG
-                    ),
+                    str(capability.get("status") or NATIVE_FILE_INPUT_STATUS_DISABLED_BY_CONFIG),
                     reason=str(capability.get("reason") or "connection_not_supported"),
                     message=str(
                         capability.get("message")
@@ -2007,9 +2012,7 @@ async def _prepare_openai_native_file_inputs(
                     file_name=(file_obj.filename if file_obj else file_id),
                     diagnostic=_build_native_file_input_diagnostic(
                         NATIVE_FILE_INPUT_STATUS_PROTOCOL_NOT_ATTEMPTED,
-                        reason=str(
-                            probe.get("reason") or "responses_endpoint_unsupported"
-                        ),
+                        reason=str(probe.get("reason") or "responses_endpoint_unsupported"),
                         message=str(
                             probe.get("message")
                             or "The current connection does not support the Responses endpoint required for native file inputs."
@@ -2041,9 +2044,7 @@ async def _prepare_openai_native_file_inputs(
             )
             continue
 
-        content_type = (file_obj.meta or {}).get(
-            "content_type"
-        ) or "application/octet-stream"
+        content_type = (file_obj.meta or {}).get("content_type") or "application/octet-stream"
         if str(content_type).startswith("image/"):
             _set_native_file_input_diagnostic(
                 metadata,
@@ -2137,7 +2138,9 @@ async def _prepare_openai_native_file_inputs(
     )
 
 
-def _apply_prepared_openai_native_file_inputs(form_data: dict, metadata: dict) -> None:
+def _apply_prepared_openai_native_file_inputs(
+    form_data: dict, metadata: dict
+) -> None:
     messages = form_data.get("messages")
     if not isinstance(messages, list) or not messages:
         return
@@ -2229,9 +2232,7 @@ def get_citation_sources_from_tool_result(
                         "type": "url" if link else "tool",
                         **({"url": link} if link else {}),
                     },
-                    "document": [
-                        _truncate_text(f"{title}\n{snippet}".strip(), max_doc_chars)
-                    ],
+                    "document": [_truncate_text(f"{title}\n{snippet}".strip(), max_doc_chars)],
                     "metadata": [md],
                 }
             )
@@ -2330,13 +2331,10 @@ def get_citation_sources_from_tool_result(
             meta = metas0[i] if i < len(metas0) and isinstance(metas0[i], dict) else {}
             dist = dists0[i] if i < len(dists0) else None
 
-            source_key = str(
-                meta.get("source")
-                or meta.get("url")
-                or meta.get("file_id")
-                or meta.get("name")
-                or ""
-            ).strip()
+            source_key = (
+                str(meta.get("source") or meta.get("url") or meta.get("file_id") or meta.get("name") or "")
+                .strip()
+            )
             if not source_key:
                 source_key = f"kb:{i+1}"
 
@@ -2358,9 +2356,7 @@ def get_citation_sources_from_tool_result(
             groups[source_key]["document"].append(_truncate_text(doc, max_doc_chars))
             md = dict(meta) if isinstance(meta, dict) else {}
             md.setdefault("source", source_key)
-            md.setdefault(
-                "name", groups[source_key]["source"].get("name") or source_key
-            )
+            md.setdefault("name", groups[source_key]["source"].get("name") or source_key)
             groups[source_key]["metadata"].append(md)
             if dist is not None:
                 groups[source_key]["distances"].append(dist)
@@ -2423,6 +2419,7 @@ async def chat_completion_tools_handler(
         request.app.state.config.TASK_MODEL,
         request.app.state.config.TASK_MODEL_EXTERNAL,
         models,
+        getattr(request.state, "MODELS_AMBIGUOUS", set()) or set(),
     )
 
     skip_files = False
@@ -2445,9 +2442,7 @@ async def chat_completion_tools_handler(
                 if not key:
                     src = s.get("source") or {}
                     if isinstance(src, dict):
-                        key = str(
-                            src.get("id") or src.get("url") or src.get("name") or ""
-                        )
+                        key = str(src.get("id") or src.get("url") or src.get("name") or "")
             except Exception:
                 key = ""
             if key and key in ui_sources_seen:
@@ -2521,9 +2516,7 @@ async def chat_completion_tools_handler(
                         if k in allowed_params
                     }
 
-                    log.info(
-                        f"[TOOL CALL] {tool_function_name} params={json.dumps(tool_function_params, ensure_ascii=False)}"
-                    )
+                    log.info(f"[TOOL CALL] {tool_function_name} params={json.dumps(tool_function_params, ensure_ascii=False)}")
 
                     if tool.get("direct", False):
                         tool_result = await event_caller(
@@ -2542,9 +2535,7 @@ async def chat_completion_tools_handler(
                         tool_function = tool["callable"]
                         tool_result = await tool_function(**tool_function_params)
 
-                    log.info(
-                        f"[TOOL RESULT] {tool_function_name} result={str(tool_result)[:500]}"
-                    )
+                    log.info(f"[TOOL RESULT] {tool_function_name} result={str(tool_result)[:500]}")
 
                 except Exception as e:
                     log.error(f"[TOOL ERROR] {tool_function_name} error={e}")
@@ -2556,11 +2547,7 @@ async def chat_completion_tools_handler(
                     _add_ui_sources(
                         get_citation_sources_from_tool_result(
                             tool_function_name,
-                            (
-                                tool_function_params
-                                if isinstance(tool_function_params, dict)
-                                else {}
-                            ),
+                            tool_function_params if isinstance(tool_function_params, dict) else {},
                             tool_result,
                             tool_id=tool_id,
                         )
@@ -2645,6 +2632,48 @@ async def chat_completion_tools_handler(
 async def chat_web_search_handler(
     request: Request, form_data: dict, extra_params: dict, user
 ):
+    def build_tavily_loader_fallback_notification(notice: dict) -> tuple[str, str] | None:
+        if not isinstance(notice, dict):
+            return None
+        if notice.get("type") != "tavily_loader_auth_fallback":
+            return None
+
+        is_admin = str(getattr(user, "role", "") or "").strip().lower() == "admin"
+        fallback_succeeded = bool(notice.get("fallback_succeeded"))
+        used_direct_docs = bool(notice.get("used_direct_docs"))
+
+        if fallback_succeeded:
+            if is_admin:
+                return (
+                    "warning",
+                    "Tavily 网页加载器鉴权失败，已临时切换备用方式。请到管理后台的联网搜索设置检查 Tavily API Key 和 Extract Base URL。",
+                )
+            return (
+                "warning",
+                "联网资料抓取服务暂时不可用，已自动切换备用方式继续回答，结果可能较少。",
+            )
+
+        if used_direct_docs:
+            if is_admin:
+                return (
+                    "warning",
+                    "Tavily 网页加载器鉴权失败，已尝试备用方式但仍无法抓取网页正文。本次将改用搜索摘要继续回答，请检查 Tavily API Key 和 Extract Base URL。",
+                )
+            return (
+                "warning",
+                "网页内容抓取失败，已尝试备用方式仍未成功。本次将改用搜索摘要继续回答，结果可能较少。",
+            )
+
+        if is_admin:
+            return (
+                "error",
+                "Tavily 网页加载器鉴权失败，已尝试备用方式仍未成功，本次无法获取网页正文。请到管理后台的联网搜索设置检查 Tavily API Key 和 Extract Base URL。",
+            )
+        return (
+            "error",
+            "网页内容抓取失败，已尝试备用方式仍未成功。",
+        )
+
     event_emitter = extra_params["__event_emitter__"]
     await event_emitter(
         {
@@ -2707,6 +2736,7 @@ async def chat_web_search_handler(
         return form_data
 
     all_results = []
+    emitted_loader_runtime_notices = set()
 
     for searchQuery in queries:
         await event_emitter(
@@ -2733,6 +2763,23 @@ async def chat_web_search_handler(
             )
 
             if results:
+                runtime_notice = results.get("loader_runtime_notice")
+                notification = build_tavily_loader_fallback_notification(runtime_notice)
+                if notification is not None:
+                    notice_key = json.dumps(runtime_notice, sort_keys=True, ensure_ascii=False)
+                    if notice_key not in emitted_loader_runtime_notices:
+                        emitted_loader_runtime_notices.add(notice_key)
+                        level, content = notification
+                        await event_emitter(
+                            {
+                                "type": "notification",
+                                "data": {
+                                    "type": level,
+                                    "content": content,
+                                },
+                            }
+                        )
+
                 all_results.append(results)
                 files = form_data.get("files", [])
 
@@ -2844,6 +2891,7 @@ async def chat_image_generation_handler(
     request: Request, form_data: dict, extra_params: dict, user
 ):
     __event_emitter__ = extra_params["__event_emitter__"]
+    __metadata__ = extra_params["__metadata__"]
     await __event_emitter__(
         {
             "type": "status",
@@ -2853,46 +2901,39 @@ async def chat_image_generation_handler(
 
     messages = form_data["messages"]
     user_message = get_last_user_message(messages)
+    source_image_url = _find_latest_image_url_from_messages(messages)
+    try:
+        source_file_id = extract_chat_image_file_id(source_image_url)
+        source_file = Files.get_file_by_id(source_file_id) if source_file_id else None
+        source_file_meta = (
+            source_file.meta
+            if source_file and isinstance(getattr(source_file, "meta", None), dict)
+            else {}
+        )
+        log.info(
+            "chat_image_generation_source user_id=%s source_image_url=%s source_file_id=%s source_file_name=%s source_file_size=%s",
+            getattr(user, "id", None),
+            source_image_url or "",
+            source_file_id or "",
+            (
+                source_file_meta.get("name")
+                or getattr(source_file, "filename", None)
+                or ""
+            ),
+            source_file_meta.get("size") or "",
+        )
+    except Exception:
+        pass
 
     prompt = user_message
     negative_prompt = ""
-    image_generation_options = extra_params.get("__metadata__", {}).get(
-        "image_generation_options", {}
-    )
     image_generation_options = (
-        image_generation_options if isinstance(image_generation_options, dict) else {}
+        extra_params.get("__metadata__", {})
+        .get("image_generation_options", {})
     )
-
-    if request.app.state.config.ENABLE_IMAGE_PROMPT_GENERATION:
-        try:
-            res = await generate_image_prompt(
-                request,
-                {
-                    "model": form_data["model"],
-                    "messages": messages,
-                },
-                user,
-            )
-            response = _get_generation_response_content(res)
-            if not response:
-                raise ValueError("Image prompt generation returned no content")
-
-            try:
-                bracket_start = response.find("{")
-                bracket_end = response.rfind("}") + 1
-
-                if bracket_start == -1 or bracket_end == -1:
-                    raise Exception("No JSON object found in the response")
-
-                json_str = response[bracket_start:bracket_end]
-                parsed = json.loads(json_str)
-                prompt = parsed.get("prompt", [])
-            except Exception as e:
-                prompt = user_message
-
-        except Exception as e:
-            log.exception(e)
-            prompt = user_message
+    image_generation_options = sanitize_chat_image_generation_options(
+        image_generation_options
+    )
 
     system_message_content = ""
 
@@ -2904,20 +2945,15 @@ async def chat_image_generation_handler(
                     "prompt": prompt,
                     **{
                         key: image_generation_options.get(key)
-                        for key in (
-                            "model",
-                            "size",
-                            "image_size",
-                            "aspect_ratio",
-                            "n",
-                            "negative_prompt",
-                            "credential_source",
-                            "connection_index",
-                            "steps",
-                            "background",
-                        )
+                        for key in CHAT_IMAGE_GENERATION_OPTION_KEYS
                         if image_generation_options.get(key) is not None
                     },
+                    **(
+                        {"image_url": source_image_url}
+                        if source_image_url
+                        else {}
+                    ),
+                    "chat_generation": True,
                 }
             ),
             user=user,
@@ -2929,23 +2965,31 @@ async def chat_image_generation_handler(
                 "data": {"description": "Generated an image", "done": True},
             }
         )
-
-        await __event_emitter__(
-            {
-                "type": "files",
-                "data": {
-                    "files": [
-                        {
-                            "type": "image",
-                            "url": image["url"],
-                        }
-                        for image in images
-                    ]
-                },
-            }
+        image_usage = next(
+            (
+                image.get("usage")
+                for image in images
+                if isinstance(image, dict) and isinstance(image.get("usage"), dict)
+            ),
+            None,
         )
-
-        system_message_content = "<context>User is shown the generated image, tell the user that the image has been generated</context>"
+        __metadata__["local_response"] = {
+            **({"usage": image_usage} if image_usage else {}),
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "images": [
+                            {
+                                "type": "image",
+                                "url": image["url"],
+                            }
+                            for image in images
+                        ],
+                    }
+                }
+            ]
+        }
     except Exception as e:
         log.exception(e)
         await __event_emitter__(
@@ -2957,13 +3001,11 @@ async def chat_image_generation_handler(
                 },
             }
         )
-
-        system_message_content = "<context>Unable to generate an image, tell the user that an error occurred</context>"
-
-    if system_message_content:
-        form_data["messages"] = add_or_update_system_message(
-            system_message_content, form_data["messages"]
-        )
+        __metadata__["local_response"] = {
+            "error": {
+                "detail": str(e),
+            }
+        }
 
     return form_data
 
@@ -2977,20 +3019,14 @@ async def chat_completion_files_handler(
     _regular_files = body.get("metadata", {}).get("files", None) or []
     native_file_input_ids = {
         str(file_id).strip()
-        for file_id in (
-            body.get("metadata", {}).get("native_file_input_file_ids") or []
-        )
+        for file_id in (body.get("metadata", {}).get("native_file_input_file_ids") or [])
         if str(file_id).strip()
     }
     _regular_files = _filter_rag_files_for_native_file_inputs(
         _regular_files, native_file_input_ids
     )
     _knowledge_files = body.get("metadata", {}).get("knowledge_files", [])
-    files = (
-        _regular_files + _knowledge_files
-        if (_regular_files or _knowledge_files)
-        else None
-    )
+    files = _regular_files + _knowledge_files if (_regular_files or _knowledge_files) else None
 
     if files:
         queries = []
@@ -3041,11 +3077,9 @@ async def chat_completion_files_handler(
                             query, prefix=prefix, user=user
                         ),
                         k=request.app.state.config.TOP_K,
-                        reranking_function=(
-                            get_safe_reranking_runtime(request.app)
-                            if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH
-                            else None
-                        ),
+                        reranking_function=get_safe_reranking_runtime(request.app)
+                        if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH
+                        else None,
                         k_reranker=request.app.state.config.TOP_K_RERANKER,
                         r=request.app.state.config.RELEVANCE_THRESHOLD,
                         hybrid_search=request.app.state.config.ENABLE_RAG_HYBRID_SEARCH,
@@ -3158,6 +3192,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         request.app.state.config.TASK_MODEL,
         request.app.state.config.TASK_MODEL_EXTERNAL,
         models,
+        getattr(request.state, "MODELS_AMBIGUOUS", set()) or set(),
     )
 
     events = []
@@ -3225,6 +3260,100 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         raise Exception(f"Error: {e}")
 
     features = form_data.pop("features", None)
+    if features is not None and not isinstance(features, dict):
+        features = None
+    elif isinstance(features, dict):
+        features = dict(features)
+        if "image_generation_options" in features:
+            image_generation_options = sanitize_chat_image_generation_options(
+                features.get("image_generation_options")
+            )
+            if image_generation_options:
+                features["image_generation_options"] = image_generation_options
+            else:
+                features.pop("image_generation_options", None)
+
+    skip_text_enhancements = is_dedicated_image_generation_model(model)
+
+    if is_dedicated_image_generation_model(model):
+        image_generation_enabled = bool(
+            getattr(request.app.state.config, "ENABLE_IMAGE_GENERATION", False)
+        )
+        image_generation_allowed = user.role == "admin" or has_permission(
+            user.id, "features.image_generation", request.app.state.config.USER_PERMISSIONS
+        )
+
+        if image_generation_enabled and image_generation_allowed:
+            features = dict(features or {})
+            image_generation_options = sanitize_chat_image_generation_options(
+                features.get("image_generation_options")
+            )
+
+            selected_image_model = str(
+                model.get("model_id")
+                or model.get("original_id")
+                or model.get("id")
+                or form_data.get("model")
+                or ""
+            ).strip()
+            model_ref = {}
+            if isinstance(model, dict):
+                existing_model_ref = model.get("model_ref") if isinstance(model.get("model_ref"), dict) else {}
+                connection_index = existing_model_ref.get("connection_index", model.get("connection_index"))
+                api_config = model.get("api_config") if isinstance(model.get("api_config"), dict) else {}
+                connection_id = str(
+                    existing_model_ref.get("connection_id")
+                    or model.get("connection_id")
+                    or model.get("prefix_id")
+                    or (api_config or {}).get("prefix_id")
+                    or ""
+                ).strip()
+                provider = str(
+                    existing_model_ref.get("provider")
+                    or model.get("provider")
+                    or model.get("owned_by")
+                    or ""
+                ).strip()
+                source = str(
+                    existing_model_ref.get("source")
+                    or model.get("source")
+                    or model.get("effective_source")
+                    or "personal"
+                ).strip()
+
+                if provider:
+                    model_ref["provider"] = provider
+                if source:
+                    model_ref["source"] = source
+                if connection_index is not None:
+                    model_ref["connection_index"] = connection_index
+                if connection_id:
+                    model_ref["connection_id"] = connection_id
+
+            legacy_prefix_match = re.match(
+                r"^([0-9a-f]{8})\.(.+)$", selected_image_model, re.IGNORECASE
+            )
+            if legacy_prefix_match:
+                model_ref.setdefault("connection_id", legacy_prefix_match.group(1))
+                selected_image_model = legacy_prefix_match.group(2).strip()
+
+            if selected_image_model:
+                image_generation_options["model"] = selected_image_model
+            if model_ref:
+                image_generation_options["model_ref"] = model_ref
+
+            features["image_generation"] = True
+            if image_generation_options:
+                features["image_generation_options"] = image_generation_options
+            else:
+                features.pop("image_generation_options", None)
+
+    if isinstance(features, dict) and features.get("image_generation"):
+        skip_text_enhancements = True
+
+    if skip_text_enhancements:
+        metadata["skip_text_enhancements"] = True
+
     if features:
         if isinstance(features.get("image_generation_options"), dict):
             metadata["image_generation_options"] = features["image_generation_options"]
@@ -3262,7 +3391,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         if (
             "image_generation" in features
             and features["image_generation"]
-            and metadata.get("function_calling") != "native"
+            and (
+                metadata.get("function_calling") != "native"
+                or is_dedicated_image_generation_model(model)
+            )
         ):
             form_data = await chat_image_generation_handler(
                 request, form_data, extra_params, user
@@ -3278,6 +3410,26 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 form_data["messages"],
             )
 
+    skill_ids = form_data.pop("skill_ids", None)
+    skill_selection_touched = bool(form_data.pop("skill_selection_touched", False))
+    model_skill_ids = (
+        (model.get("info", {}) or {}).get("meta", {}) or {}
+    ).get("skillIds", [])
+    skill_context = get_selected_skill_context(
+        user,
+        skill_ids,
+        [] if skill_selection_touched else model_skill_ids,
+    )
+    skill_system_prompt = build_skill_system_prompt(
+        skill_context["prompt_skills"],
+        requested_skill_ids=skill_context["requested_ids"],
+    )
+    if skill_system_prompt:
+        form_data["messages"] = add_or_update_system_message(
+            skill_system_prompt,
+            form_data.get("messages", []),
+        )
+
     tool_ids = form_data.pop("tool_ids", None)
     files = form_data.pop("files", None)
 
@@ -3287,6 +3439,19 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     metadata = {
         **metadata,
+        "selected_skill_ids": skill_context["resolved_ids"],
+        "selected_prompt_skills": [
+            {
+                "id": skill.id,
+                "name": skill.name,
+            }
+            for skill in skill_context["prompt_skills"]
+        ],
+        "selected_runnable_skills": build_skill_tool_context(
+            skill_context["runnable_skills"]
+        ),
+        "skill_selection_touched": skill_selection_touched,
+        "skill_ids": skill_context["resolved_ids"],
         "tool_ids": tool_ids,
         "files": files,
     }
@@ -3343,7 +3508,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     tool_calling_disabled = metadata.get("tool_calling_mode") == "off"
 
     if tool_ids and not tool_calling_disabled:
-        validate_tool_ids_access(tool_ids, user)
+        validate_tool_ids_access(tool_ids, user, request)
 
         # Ensure server-side toolkits are loaded before resolving tool_ids into callable specs.
         # This keeps /api/chat/completions robust even if /api/tools hasn't been called yet.
@@ -3385,13 +3550,22 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     strict_selected=True,
                 )
 
+        await ensure_selected_shared_tool_runtime_loaded(request, user, tool_ids)
+        task_model = resolve_model_from_lookup(
+            models,
+            getattr(request.state, "MODELS_AMBIGUOUS", set()) or set(),
+            task_model_id,
+        )
+        if not task_model:
+            raise Exception("Model not found")
+
         tools_dict = get_tools(
             request,
             tool_ids,
             user,
             {
                 **extra_params,
-                "__model__": models[task_model_id],
+                "__model__": task_model,
                 "__messages__": form_data["messages"],
                 "__files__": metadata.get("files", []),
             },
@@ -3410,11 +3584,15 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # Built-in tools are exposed when tool calling is enabled (native or compatibility/default),
     # and are still gated by admin config + permissions.
-    if not tool_calling_disabled and (
-        metadata.get("function_calling") == "native"
-        or tool_ids
-        or tool_servers
-        or metadata.get("preview_tool_compat")
+    if (
+        not tool_calling_disabled
+        and (
+            metadata.get("function_calling") == "native"
+            or tool_ids
+            or tool_servers
+            or metadata.get("preview_tool_compat")
+            or (metadata.get("selected_runnable_skills") or {}).get("skill_ids")
+        )
     ):
         builtin_tools = get_builtin_tools(request, user, metadata)
         suppressed_web_tools = _get_builtin_web_tools_to_suppress(
@@ -3432,9 +3610,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             log.info(f"[BUILTIN TOOLS] Injecting: {list(builtin_tools.keys())}")
         for tool_name, tool in builtin_tools.items():
             if tool_name in tools_dict:
-                log.warning(
-                    f"Tool {tool_name} already exists; skipping builtin version"
-                )
+                log.warning(f"Tool {tool_name} already exists; skipping builtin version")
                 continue
             tools_dict[tool_name] = tool
 
@@ -3495,8 +3671,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     and isinstance(form_data["messages"], list)
                     and form_data["messages"][0].get("role") == "system"
                     and isinstance(form_data["messages"][0].get("content"), str)
-                    and 'native_tool_rules v="1"'
-                    in form_data["messages"][0].get("content")
+                    and 'native_tool_rules v="1"' in form_data["messages"][0].get("content")
                 )
                 if not existing_system:
                     form_data["messages"] = add_or_update_system_message(
@@ -3577,9 +3752,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # If there are citations, add them to the data_items
     sources = [source for source in sources if source.get("source", {}).get("name", "")]
-    ui_sources = [
-        source for source in ui_sources if source.get("source", {}).get("name", "")
-    ]
+    ui_sources = [source for source in ui_sources if source.get("source", {}).get("name", "")]
 
     sources_for_ui = []
     if sources or ui_sources:
@@ -3630,6 +3803,9 @@ async def process_chat_response(
         message = message_map.get(metadata["message_id"]) if message_map else None
 
         if message:
+            if metadata.get("skip_text_enhancements"):
+                return
+
             messages = get_message_list(message_map, message.get("id"))
 
             # Strip reasoning/thinking HTML blocks from message content to avoid
@@ -3654,14 +3830,10 @@ async def process_chat_response(
                         if res and isinstance(res, dict):
                             if len(res.get("choices", [])) == 1:
                                 title_string = (
-                                    (
-                                        res.get("choices", [])[0]
-                                        .get("message", {})
-                                        .get("content")
-                                    )
-                                    or message.get("content")
-                                    or "New Chat"
-                                )
+                                    res.get("choices", [])[0]
+                                    .get("message", {})
+                                    .get("content")
+                                ) or message.get("content") or "New Chat"
                             else:
                                 title_string = ""
 
@@ -3768,7 +3940,9 @@ async def process_chat_response(
                                 fu_string.find("{") : fu_string.rfind("}") + 1
                             ]
 
-                            follow_ups = json.loads(fu_string).get("follow_ups", [])
+                            follow_ups = json.loads(fu_string).get(
+                                "follow_ups", []
+                            )
 
                             if follow_ups and isinstance(follow_ups, list):
                                 await event_emitter(
@@ -3798,6 +3972,13 @@ async def process_chat_response(
     # Non-streaming response
     if not isinstance(response, StreamingResponse):
         if event_emitter:
+            allow_base64_image_url_conversion = bool(
+                getattr(
+                    request.app.state.config,
+                    "ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION",
+                    False,
+                )
+            )
             if "error" in response:
                 error = response["error"].get("detail", response["error"])
                 Chats.upsert_message_to_chat_by_id_and_message_id(
@@ -3809,9 +3990,14 @@ async def process_chat_response(
                 )
 
             choices = response.get("choices", [])
-            if choices and choices[0].get("message", {}).get("content"):
-                raw_content = response["choices"][0]["message"]["content"]
-                content, message_files = _extract_stream_content_and_files(raw_content)
+            response_usage = response.get("usage") if isinstance(response.get("usage"), dict) else None
+            if choices and isinstance(choices[0], dict):
+                message_payload = choices[0].get("message", {}) or {}
+                content, message_files = _extract_stream_content_and_files(
+                    message_payload,
+                    allow_base64_image_url_conversion=allow_base64_image_url_conversion,
+                )
+                response_message = response["choices"][0].setdefault("message", {})
 
                 if message_files:
                     await event_emitter(
@@ -3821,9 +4007,10 @@ async def process_chat_response(
                         }
                     )
 
-                    response["choices"][0]["message"]["files"] = message_files
+                    response_message["files"] = message_files
 
-                response["choices"][0]["message"]["content"] = content
+                if isinstance(response_message, dict):
+                    response_message["content"] = content
 
                 if content or message_files:
                     completed_at = int(time.time())
@@ -3846,6 +4033,7 @@ async def process_chat_response(
                                 "title": title,
                                 "completedAt": completed_at,
                                 **({"files": message_files} if message_files else {}),
+                                **({"usage": response_usage} if response_usage else {}),
                             },
                         }
                     )
@@ -3859,6 +4047,7 @@ async def process_chat_response(
                             "done": True,
                             "completedAt": completed_at,
                             **({"files": message_files} if message_files else {}),
+                            **({"usage": response_usage} if response_usage else {}),
                         },
                     )
 
@@ -3962,32 +4151,15 @@ async def process_chat_response(
                                 )
 
                                 tool_result = None
-                                tool_result_display = None
                                 tool_result_files = None
-                                tool_mcp_app = None
                                 for result in results:
                                     if tool_call_id == result.get("tool_call_id", ""):
                                         tool_result = result.get("content", None)
-                                        tool_result_display = result.get(
-                                            "display_content",
-                                            tool_result,
-                                        )
                                         tool_result_files = result.get("files", None)
-                                        tool_mcp_app = result.get("mcp_app")
                                         break
 
-                                if tool_result is not None:
-                                    serialized_result = (
-                                        tool_result
-                                        if tool_mcp_app
-                                        else tool_result_display
-                                    )
-                                    mcp_app_attr = (
-                                        f' mcp_app="{html.escape(json.dumps(tool_mcp_app, ensure_ascii=False))}"'
-                                        if tool_mcp_app
-                                        else ""
-                                    )
-                                    tool_calls_display_content = f'{tool_calls_display_content}\n<details type="tool_calls" done="true" id="{tool_call_id}" name="{tool_name}" arguments="{html.escape(json.dumps(tool_arguments))}" result="{html.escape(json.dumps(serialized_result))}" files="{html.escape(json.dumps(tool_result_files)) if tool_result_files else ""}"{mcp_app_attr}>\n<summary>Tool Executed</summary>\n</details>\n'
+                                if tool_result:
+                                    tool_calls_display_content = f'{tool_calls_display_content}\n<details type="tool_calls" done="true" id="{tool_call_id}" name="{tool_name}" arguments="{html.escape(json.dumps(tool_arguments))}" result="{html.escape(json.dumps(tool_result))}" files="{html.escape(json.dumps(tool_result_files)) if tool_result_files else ""}">\n<summary>Tool Executed</summary>\n</details>\n'
                                 else:
                                     tool_calls_display_content = f'{tool_calls_display_content}\n<details type="tool_calls" done="false" id="{tool_call_id}" name="{tool_name}" arguments="{html.escape(json.dumps(tool_arguments))}">\n<summary>Executing...</summary>\n</details>'
 
@@ -4066,6 +4238,47 @@ async def process_chat_response(
 
                 return content.strip()
 
+            def convert_content_blocks_to_messages(content_blocks):
+                messages = []
+
+                temp_blocks = []
+                for idx, block in enumerate(content_blocks):
+                    if block["type"] == "tool_calls":
+                        serialized = serialize_content_blocks(temp_blocks)
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": serialized if serialized else None,
+                                "tool_calls": block.get("content"),
+                            }
+                        )
+
+                        results = block.get("results", [])
+
+                        for result in results:
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": result["tool_call_id"],
+                                    "content": result["content"],
+                                }
+                            )
+                        temp_blocks = []
+                    else:
+                        temp_blocks.append(block)
+
+                if temp_blocks:
+                    content = serialize_content_blocks(temp_blocks)
+                    if content:
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": content,
+                            }
+                        )
+
+                return messages
+
             def trim_content_blocks_for_finalize(blocks, max_result_chars: int = 500):
                 trimmed_blocks = []
                 for block in blocks if isinstance(blocks, list) else []:
@@ -4112,9 +4325,7 @@ async def process_chat_response(
                     for tc in reversed(calls):
                         if not isinstance(tc, dict):
                             continue
-                        tool_name = str(
-                            ((tc.get("function") or {}).get("name") or "")
-                        ).strip()
+                        tool_name = str(((tc.get("function") or {}).get("name") or "")).strip()
                         if not tool_name or tool_name in seen:
                             continue
                         seen.add(tool_name)
@@ -4123,17 +4334,7 @@ async def process_chat_response(
                             return names
                 return names
 
-            def has_nonempty_text_content(content_blocks):
-                for block in content_blocks:
-                    btype = block.get("type")
-                    if btype in ("text", "reasoning"):
-                        if str(block.get("content") or "").strip():
-                            return True
-                return False
-
-            async def emit_tool_orchestration_status(
-                stage: str, done: bool = False, **extra
-            ):
+            async def emit_tool_orchestration_status(stage: str, done: bool = False, **extra):
                 data = {
                     "action": "tool_orchestration",
                     "stage": stage,
@@ -4163,13 +4364,9 @@ async def process_chat_response(
                                 "input_text",
                                 "assistant_text",
                             ):
-                                parts.append(
-                                    item.get("text") or item.get("content") or ""
-                                )
+                                parts.append(item.get("text") or item.get("content") or "")
                             elif item_type in (None, ""):
-                                parts.append(
-                                    item.get("text") or item.get("content") or ""
-                                )
+                                parts.append(item.get("text") or item.get("content") or "")
                         elif isinstance(item, str):
                             parts.append(item)
                     return "".join(parts)
@@ -4247,6 +4444,15 @@ async def process_chat_response(
                             if not content_blocks[-1]["content"]:
                                 content_blocks.pop()
 
+                            fallback_started_at = None
+                            if (
+                                content_type == "reasoning"
+                                and not _has_visible_assistant_output(
+                                    content_blocks, message_files
+                                )
+                            ):
+                                fallback_started_at = stream_started_at
+
                             # Append the new block
                             content_blocks.append(
                                 {
@@ -4256,6 +4462,13 @@ async def process_chat_response(
                                     "attributes": attributes,
                                     "content": "",
                                     "started_at": time.time(),
+                                    **(
+                                        {
+                                            "fallback_started_at": fallback_started_at
+                                        }
+                                        if fallback_started_at is not None
+                                        else {}
+                                    ),
                                 }
                             )
 
@@ -4295,12 +4508,7 @@ async def process_chat_response(
 
                         if block_content:
                             content_blocks[-1]["content"] = block_content
-                            content_blocks[-1]["ended_at"] = time.time()
-                            content_blocks[-1]["duration"] = round(
-                                content_blocks[-1]["ended_at"]
-                                - content_blocks[-1]["started_at"],
-                                1,
-                            )
+                            _finalize_reasoning_block_duration(content_blocks[-1])
 
                             # Reset the content_blocks by appending a new text block
                             if content_type != "code_interpreter":
@@ -4490,6 +4698,7 @@ async def process_chat_response(
                 _stream_api_error = None
                 _stream_response_status = None
                 _stream_non_sse_error_lines: list[str] = []
+                stream_started_at = time.time()
 
                 async def stream_body_handler(response):
                     nonlocal content
@@ -4533,13 +4742,19 @@ async def process_chat_response(
                             }
                         )
 
+                    allow_base64_image_url_conversion = bool(
+                        getattr(
+                            request.app.state.config,
+                            "ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION",
+                            False,
+                        )
+                    )
+
                     _stream_line_count = 0
                     _stream_data_count = 0
                     _stream_skip_count = 0
                     _stream_finish_reason = None
-                    _stream_exit_reason = (
-                        "normal"  # normal | break_code_interpreter | exception
-                    )
+                    _stream_exit_reason = "normal"  # normal | break_code_interpreter | exception
                     try:
                         _stream_response_status = int(
                             getattr(response, "status_code", None) or 0
@@ -4576,10 +4791,7 @@ async def process_chat_response(
                                     if candidate_error.get("message"):
                                         _stream_api_error = candidate_error
                             if _stream_skip_count <= 3:
-                                log.info(
-                                    "[STREAM] skipped non-data line: %s",
-                                    data.strip()[:200],
-                                )
+                                log.info("[STREAM] skipped non-data line: %s", data.strip()[:200])
                             continue
 
                         _stream_data_count += 1
@@ -4603,11 +4815,7 @@ async def process_chat_response(
                                     await event_emitter(data.get("event", {}))
 
                                 # Capture usage before any data reassignment.
-                                _raw_usage = (
-                                    data.get("usage")
-                                    if isinstance(data, dict)
-                                    else None
-                                )
+                                _raw_usage = data.get("usage") if isinstance(data, dict) else None
                                 if isinstance(_raw_usage, dict) and _raw_usage:
                                     _merge_usage(_raw_usage)
 
@@ -4619,40 +4827,20 @@ async def process_chat_response(
                                     _evt_finish_reason = choices[0].get("finish_reason")
                                     if _evt_finish_reason is not None:
                                         _stream_finish_reason = _evt_finish_reason
-                                _evt_delta = (
-                                    (choices[0].get("delta", {}) or {})
-                                    if choices and isinstance(choices[0], dict)
-                                    else {}
-                                )
+                                _evt_delta = (choices[0].get("delta", {}) or {}) if choices and isinstance(choices[0], dict) else {}
                                 _evt_has_content = bool(_evt_delta.get("content"))
-                                _evt_has_reasoning = (
-                                    bool(extract_reasoning_content(_evt_delta))
-                                    if _evt_delta
-                                    else False
-                                )
+                                _evt_has_reasoning = bool(extract_reasoning_content(_evt_delta)) if _evt_delta else False
                                 _evt_has_tool_calls = bool(_evt_delta.get("tool_calls"))
-                                _evt_content_snippet = (
-                                    str(_evt_delta.get("content", ""))[:80]
-                                    if _evt_has_content
-                                    else ""
-                                )
+                                _evt_content_snippet = str(_evt_delta.get("content", ""))[:80] if _evt_has_content else ""
 
-                                if (
-                                    _stream_data_count <= 5
-                                    or _stream_data_count % 20 == 0
-                                    or _evt_finish_reason
-                                ):
+                                if _stream_data_count <= 5 or _stream_data_count % 20 == 0 or _evt_finish_reason:
                                     log.info(
                                         "[STREAM EVT #%d] finish_reason=%s has_content=%s has_reasoning=%s "
                                         "has_tools=%s has_usage=%s accumulated_len=%d snippet=%s",
-                                        _stream_data_count,
-                                        _evt_finish_reason,
-                                        _evt_has_content,
-                                        _evt_has_reasoning,
-                                        _evt_has_tool_calls,
-                                        bool(_raw_usage),
-                                        len(content),
-                                        repr(_evt_content_snippet),
+                                        _stream_data_count, _evt_finish_reason,
+                                        _evt_has_content, _evt_has_reasoning,
+                                        _evt_has_tool_calls, bool(_raw_usage),
+                                        len(content), repr(_evt_content_snippet),
                                     )
 
                                 if not choices:
@@ -4678,19 +4866,16 @@ async def process_chat_response(
                                         )
                                     continue
 
-                                choice = (
-                                    choices[0] if isinstance(choices[0], dict) else {}
-                                )
+                                choice = choices[0] if isinstance(choices[0], dict) else {}
                                 delta = choice.get("delta", {})
 
                                 message = choice.get("message")
                                 if (
-                                    not delta or (isinstance(delta, dict) and not delta)
-                                ) and isinstance(message, dict):
+                                    (not delta or (isinstance(delta, dict) and not delta))
+                                    and isinstance(message, dict)
+                                ):
                                     message_content = message.get("content")
-                                    message_reasoning = extract_reasoning_content(
-                                        message
-                                    )
+                                    message_reasoning = extract_reasoning_content(message)
                                     message_tool_calls = message.get("tool_calls")
 
                                     delta = {}
@@ -4709,22 +4894,15 @@ async def process_chat_response(
                                     for annotation in annotations:
                                         if not isinstance(annotation, dict):
                                             continue
-                                        if annotation.get(
-                                            "type"
-                                        ) == "url_citation" and isinstance(
-                                            annotation.get("url_citation"), dict
+                                        if (
+                                            annotation.get("type") == "url_citation"
+                                            and isinstance(annotation.get("url_citation"), dict)
                                         ):
-                                            url_citation = (
-                                                annotation.get("url_citation") or {}
-                                            )
-                                            url = str(
-                                                url_citation.get("url") or ""
-                                            ).strip()
+                                            url_citation = annotation.get("url_citation") or {}
+                                            url = str(url_citation.get("url") or "").strip()
                                             if not url:
                                                 continue
-                                            title = str(
-                                                url_citation.get("title") or url
-                                            ).strip()
+                                            title = str(url_citation.get("title") or url).strip()
                                             dedupe_key = url
                                             if dedupe_key in emitted_url_citations:
                                                 continue
@@ -4745,9 +4923,7 @@ async def process_chat_response(
                                                     }
                                                 ],
                                             }
-                                            await event_emitter(
-                                                {"type": "source", "data": source}
-                                            )
+                                            await event_emitter({"type": "source", "data": source})
 
                                 if delta_tool_calls:
                                     for pos, delta_tool_call in enumerate(
@@ -4765,9 +4941,7 @@ async def process_chat_response(
                                                 ("index", str(incoming_index))
                                             )
                                         if incoming_id:
-                                            key_candidates.append(
-                                                ("id", str(incoming_id))
-                                            )
+                                            key_candidates.append(("id", str(incoming_id)))
                                         if not key_candidates:
                                             key_candidates.append(("pos", str(pos)))
 
@@ -4780,8 +4954,7 @@ async def process_chat_response(
                                         if resolved_idx is None:
                                             new_tool_call = dict(delta_tool_call)
                                             new_tool_call["function"] = dict(
-                                                delta_tool_call.get("function", {})
-                                                or {}
+                                                delta_tool_call.get("function", {}) or {}
                                             )
                                             new_tool_call["function"].setdefault(
                                                 "name", ""
@@ -4810,7 +4983,8 @@ async def process_chat_response(
                                                         {
                                                             "action": "recover_missing_index",
                                                             "from": {
-                                                                "id": incoming_id or "",
+                                                                "id": incoming_id
+                                                                or "",
                                                                 "index": "(missing)",
                                                             },
                                                             "to": {
@@ -4837,15 +5011,12 @@ async def process_chat_response(
                                                 "function"
                                             ].setdefault("arguments", "")
 
-                                            if (
-                                                incoming_id
-                                                and not current_response_tool_call.get(
-                                                    "id"
-                                                )
+                                            if incoming_id and not current_response_tool_call.get(
+                                                "id"
                                             ):
-                                                current_response_tool_call["id"] = (
-                                                    incoming_id
-                                                )
+                                                current_response_tool_call[
+                                                    "id"
+                                                ] = incoming_id
 
                                             if (
                                                 incoming_index is not None
@@ -4854,9 +5025,9 @@ async def process_chat_response(
                                                 )
                                                 is None
                                             ):
-                                                current_response_tool_call["index"] = (
-                                                    incoming_index
-                                                )
+                                                current_response_tool_call[
+                                                    "index"
+                                                ] = incoming_index
 
                                             delta_name = (
                                                 delta_tool_call.get("function", {})
@@ -4873,18 +5044,18 @@ async def process_chat_response(
                                                 # for the same tool call that repeat
                                                 # the name should be ignored to avoid
                                                 # concatenation (e.g. "search_websearch_web").
-                                                existing_name = (
-                                                    current_response_tool_call[
-                                                        "function"
-                                                    ].get("name", "")
-                                                )
+                                                existing_name = current_response_tool_call[
+                                                    "function"
+                                                ].get("name", "")
                                                 if not existing_name:
                                                     current_response_tool_call[
                                                         "function"
                                                     ]["name"] = delta_name
 
                                             if delta_arguments:
-                                                current_response_tool_call["function"][
+                                                current_response_tool_call[
+                                                    "function"
+                                                ][
                                                     "arguments"
                                                 ] = _merge_stream_tool_field(
                                                     current_response_tool_call[
@@ -4919,10 +5090,9 @@ async def process_chat_response(
                                         for key in key_candidates:
                                             tool_call_lookup[key] = resolved_idx
 
-                                value, streamed_files = (
-                                    _extract_stream_content_and_files(
-                                        delta.get("content")
-                                    )
+                                value, streamed_files = _extract_stream_content_and_files(
+                                    delta,
+                                    allow_base64_image_url_conversion=allow_base64_image_url_conversion,
                                 )
                                 streamed_image = _consume_stream_image_delta(
                                     pending_stream_images,
@@ -4937,14 +5107,18 @@ async def process_chat_response(
 
                                 reasoning_content = extract_reasoning_content(delta)
                                 if not reasoning_content and isinstance(choice, dict):
-                                    reasoning_content = extract_reasoning_content(
-                                        choice
-                                    )
+                                    reasoning_content = extract_reasoning_content(choice)
                                 if reasoning_content:
                                     if (
                                         not content_blocks
                                         or content_blocks[-1]["type"] != "reasoning"
                                     ):
+                                        fallback_started_at = None
+                                        if not _has_visible_assistant_output(
+                                            content_blocks, message_files
+                                        ):
+                                            fallback_started_at = stream_started_at
+
                                         reasoning_block = {
                                             "type": "reasoning",
                                             "start_tag": "think",
@@ -4952,6 +5126,13 @@ async def process_chat_response(
                                             "attributes": {"type": "reasoning_content"},
                                             "content": "",
                                             "started_at": time.time(),
+                                            **(
+                                                {
+                                                    "fallback_started_at": fallback_started_at
+                                                }
+                                                if fallback_started_at is not None
+                                                else {}
+                                            ),
                                         }
                                         content_blocks.append(reasoning_block)
                                     else:
@@ -4960,9 +5141,7 @@ async def process_chat_response(
                                     reasoning_block["content"] += reasoning_content
 
                                     data = {
-                                        "content": serialize_content_blocks(
-                                            content_blocks
-                                        ),
+                                        "content": serialize_content_blocks(content_blocks),
                                         **(
                                             {"files": message_files}
                                             if message_files
@@ -4981,106 +5160,101 @@ async def process_chat_response(
                                     continue
 
                                 if value:
-                                    if (
-                                        content_blocks
-                                        and content_blocks[-1]["type"] == "reasoning"
-                                        and content_blocks[-1]
-                                        .get("attributes", {})
-                                        .get("type")
-                                        == "reasoning_content"
-                                    ):
-                                        reasoning_block = content_blocks[-1]
-                                        reasoning_block["ended_at"] = time.time()
-                                        reasoning_block["duration"] = round(
-                                            reasoning_block["ended_at"]
-                                            - reasoning_block["started_at"],
-                                            1,
-                                        )
-
-                                        content_blocks.append(
-                                            {
-                                                "type": "text",
-                                                "content": "",
-                                            }
-                                        )
-
-                                    content = f"{content}{value}"
-                                    if not content_blocks:
-                                        content_blocks.append(
-                                            {
-                                                "type": "text",
-                                                "content": "",
-                                            }
-                                        )
-
-                                    content_blocks[-1]["content"] = (
-                                        content_blocks[-1]["content"] + value
-                                    )
-
-                                    if DETECT_REASONING:
-                                        content, content_blocks, _ = (
-                                            tag_content_handler(
-                                                "reasoning",
-                                                reasoning_tags,
-                                                content,
-                                                content_blocks,
+                                        if (
+                                            content_blocks
+                                            and content_blocks[-1]["type"]
+                                            == "reasoning"
+                                            and content_blocks[-1]
+                                            .get("attributes", {})
+                                            .get("type")
+                                            == "reasoning_content"
+                                        ):
+                                            reasoning_block = content_blocks[-1]
+                                            _finalize_reasoning_block_duration(
+                                                reasoning_block
                                             )
+
+                                            content_blocks.append(
+                                                {
+                                                    "type": "text",
+                                                    "content": "",
+                                                }
+                                            )
+
+                                        content = f"{content}{value}"
+                                        if not content_blocks:
+                                            content_blocks.append(
+                                                {
+                                                    "type": "text",
+                                                    "content": "",
+                                                }
+                                            )
+
+                                        content_blocks[-1]["content"] = (
+                                            content_blocks[-1]["content"] + value
                                         )
 
-                                    if DETECT_CODE_INTERPRETER:
-                                        content, content_blocks, end = (
-                                            tag_content_handler(
-                                                "code_interpreter",
-                                                code_interpreter_tags,
-                                                content,
-                                                content_blocks,
+                                        if DETECT_REASONING:
+                                            content, content_blocks, _ = (
+                                                tag_content_handler(
+                                                    "reasoning",
+                                                    reasoning_tags,
+                                                    content,
+                                                    content_blocks,
+                                                )
                                             )
-                                        )
 
-                                        if end:
-                                            _stream_exit_reason = (
-                                                "break_code_interpreter"
+                                        if DETECT_CODE_INTERPRETER:
+                                            content, content_blocks, end = (
+                                                tag_content_handler(
+                                                    "code_interpreter",
+                                                    code_interpreter_tags,
+                                                    content,
+                                                    content_blocks,
+                                                )
                                             )
-                                            log.warning(
-                                                "[STREAM BREAK] code_interpreter tag detected at data_event #%d, "
-                                                "breaking stream loop. content_len=%d",
-                                                _stream_data_count,
-                                                len(content),
-                                            )
-                                            break
 
-                                    if DETECT_SOLUTION:
-                                        content, content_blocks, _ = (
-                                            tag_content_handler(
-                                                "solution",
-                                                solution_tags,
-                                                content,
-                                                content_blocks,
-                                            )
-                                        )
+                                            if end:
+                                                _stream_exit_reason = "break_code_interpreter"
+                                                log.warning(
+                                                    "[STREAM BREAK] code_interpreter tag detected at data_event #%d, "
+                                                    "breaking stream loop. content_len=%d",
+                                                    _stream_data_count, len(content),
+                                                )
+                                                break
 
-                                    if ENABLE_REALTIME_CHAT_SAVE:
-                                        # Save message in the database
-                                        Chats.upsert_message_to_chat_by_id_and_message_id(
-                                            metadata["chat_id"],
-                                            metadata["message_id"],
-                                            {
+                                        if DETECT_SOLUTION:
+                                            content, content_blocks, _ = (
+                                                tag_content_handler(
+                                                    "solution",
+                                                    solution_tags,
+                                                    content,
+                                                    content_blocks,
+                                                )
+                                            )
+
+                                        if ENABLE_REALTIME_CHAT_SAVE:
+                                            # Save message in the database
+                                            Chats.upsert_message_to_chat_by_id_and_message_id(
+                                                metadata["chat_id"],
+                                                metadata["message_id"],
+                                                {
+                                                    "content": serialize_content_blocks(
+                                                        content_blocks
+                                                    ),
+                                                },
+                                            )
+                                        else:
+                                            data = {
                                                 "content": serialize_content_blocks(
                                                     content_blocks
                                                 ),
-                                            },
-                                        )
-                                    else:
-                                        data = {
-                                            "content": serialize_content_blocks(
-                                                content_blocks
-                                            ),
-                                            **(
-                                                {"files": message_files}
-                                                if message_files
-                                                else {}
-                                            ),
-                                        }
+                                                **(
+                                                    {"files": message_files}
+                                                    if message_files
+                                                    else {}
+                                                ),
+                                            }
 
                                 await event_emitter(
                                     {
@@ -5093,9 +5267,7 @@ async def process_chat_response(
                             if done:
                                 log.info(
                                     "[STREAM] [DONE] marker at line #%d, data_events=%d content_len=%d",
-                                    _stream_line_count,
-                                    _stream_data_count,
-                                    len(content),
+                                    _stream_line_count, _stream_data_count, len(content),
                                 )
                             else:
                                 if (
@@ -5114,14 +5286,8 @@ async def process_chat_response(
                                             _stream_api_error = candidate_error
                                 log.warning(
                                     "[STREAM PARSE ERROR] line #%d data_event #%d | error=%s | line=%s",
-                                    _stream_line_count,
-                                    _stream_data_count,
-                                    str(e)[:200],
-                                    (
-                                        line[:300]
-                                        if isinstance(line, str)
-                                        else str(line)[:300]
-                                    ),
+                                    _stream_line_count, _stream_data_count,
+                                    str(e)[:200], line[:300] if isinstance(line, str) else str(line)[:300],
                                 )
                                 continue
 
@@ -5162,16 +5328,11 @@ async def process_chat_response(
                         _tail = content[-100:] if len(content) > 100 else content
                         log.info("[STREAM CONTENT TAIL] ...%s", repr(_tail))
 
-                    if _stream_finish_reason and _stream_finish_reason not in (
-                        "stop",
-                        "tool_calls",
-                    ):
+                    if _stream_finish_reason and _stream_finish_reason not in ("stop", "tool_calls"):
                         log.warning(
                             "[STREAM ABNORMAL FINISH] finish_reason=%s — "
                             "response likely truncated! content_len=%d exit_reason=%s",
-                            _stream_finish_reason,
-                            len(content),
-                            _stream_exit_reason,
+                            _stream_finish_reason, len(content), _stream_exit_reason,
                         )
 
                     if _stream_data_count == 0:
@@ -5188,10 +5349,7 @@ async def process_chat_response(
                                 and block.get("duration") is None
                                 and "started_at" in block
                             ):
-                                block["ended_at"] = time.time()
-                                block["duration"] = round(
-                                    block["ended_at"] - block["started_at"], 1
-                                )
+                                _finalize_reasoning_block_duration(block)
 
                         # Clean up the last text block
                         if content_blocks[-1]["type"] == "text":
@@ -5269,11 +5427,7 @@ async def process_chat_response(
                     if not isinstance(query, str):
                         return set()
                     normalized = re.sub(r"[^\w\u4e00-\u9fff]+", " ", query.lower())
-                    parts = [
-                        p.strip()
-                        for p in normalized.split()
-                        if p and len(p.strip()) >= 2
-                    ]
+                    parts = [p.strip() for p in normalized.split() if p and len(p.strip()) >= 2]
                     return set(parts)
 
                 def _search_query_is_semantically_redundant(query: str) -> bool:
@@ -5295,12 +5449,8 @@ async def process_chat_response(
                     seen_search_query_fingerprints.append(token_set)
                     return False
 
-                def _is_effectively_empty_tool_result(
-                    tool_name: str, raw_result: Any
-                ) -> bool:
-                    if isinstance(raw_result, str) and raw_result.startswith(
-                        "skipped:"
-                    ):
+                def _is_effectively_empty_tool_result(tool_name: str, raw_result: Any) -> bool:
+                    if isinstance(raw_result, str) and raw_result.startswith("skipped:"):
                         return True
 
                     result = raw_result
@@ -5312,12 +5462,7 @@ async def process_chat_response(
                     if tool_name == "list_knowledge_bases":
                         return isinstance(result, list) and len(result) == 0
 
-                    if tool_name in {
-                        "search_notes",
-                        "search_knowledge_bases",
-                        "search_knowledge_files",
-                        "query_knowledge_bases",
-                    }:
+                    if tool_name in {"search_notes", "search_knowledge_bases", "search_knowledge_files", "query_knowledge_bases"}:
                         if isinstance(result, list):
                             return len(result) == 0
                         if isinstance(result, dict):
@@ -5337,10 +5482,7 @@ async def process_chat_response(
                         if isinstance(result, dict):
                             status = str(result.get("status") or "").lower()
                             content_len = int(result.get("content_length") or 0)
-                            return (
-                                status in {"blocked", "thin", "error"}
-                                or content_len < 120
-                            )
+                            return status in {"blocked", "thin", "error"} or content_len < 120
                         return False
 
                     return False
@@ -5361,11 +5503,7 @@ async def process_chat_response(
                     rules = {}
                     for name, tool in (tools or {}).items():
                         spec = (tool or {}).get("spec", {}) or {}
-                        params = (
-                            (spec.get("parameters") or {})
-                            if isinstance(spec, dict)
-                            else {}
-                        )
+                        params = (spec.get("parameters") or {}) if isinstance(spec, dict) else {}
                         props = params.get("properties") or {}
                         required = params.get("required") or []
                         if not isinstance(props, dict):
@@ -5374,17 +5512,12 @@ async def process_chat_response(
                             required = []
                         rules[name] = {
                             "allowed": set(props.keys()),
-                            "required": set(
-                                [str(x) for x in required if x is not None]
-                            ),
+                            "required": set([str(x) for x in required if x is not None]),
                         }
                     return rules
 
                 def _segment_tool_name(
-                    name: str,
-                    known_names_sorted: list[str],
-                    known_set: set[str],
-                    max_parts: int = 3,
+                    name: str, known_names_sorted: list[str], known_set: set[str], max_parts: int = 3
                 ) -> list[str] | None:
                     if not name:
                         return None
@@ -5396,10 +5529,7 @@ async def process_chat_response(
                         if name.startswith(prefix):
                             rest = name[len(prefix) :]
                             seg = _segment_tool_name(
-                                rest,
-                                known_names_sorted,
-                                known_set,
-                                max_parts=max_parts - 1,
+                                rest, known_names_sorted, known_set, max_parts=max_parts - 1
                             )
                             if seg:
                                 return [prefix, *seg]
@@ -5462,9 +5592,7 @@ async def process_chat_response(
                                 except Exception as e2:
                                     log.debug(
                                         "[TOOL ARGS] escape-fix json.loads still failed: %s | raw_len=%d fixed_diff=%d",
-                                        str(e2)[:200],
-                                        len(args),
-                                        len(fixed) - len(args),
+                                        str(e2)[:200], len(args), len(fixed) - len(args),
                                     )
                         except Exception:
                             pass
@@ -5492,9 +5620,7 @@ async def process_chat_response(
                         return [], [], []
 
                     tool_rules = _get_tool_param_rules(tools)
-                    known_names_sorted = sorted(
-                        list(tool_rules.keys()), key=len, reverse=True
-                    )
+                    known_names_sorted = sorted(list(tool_rules.keys()), key=len, reverse=True)
                     known_set = set(tool_rules.keys())
 
                     normalized: list[dict] = []
@@ -5545,21 +5671,9 @@ async def process_chat_response(
                                     recovered[key] = json.loads(fixed_val)
                                 except Exception:
                                     # Last resort: strip quotes and manually unescape.
-                                    inner = (
-                                        value_raw[1:-1]
-                                        if len(value_raw) >= 2
-                                        and value_raw[0] == '"'
-                                        and value_raw[-1] == '"'
-                                        else value_raw
-                                    )
+                                    inner = value_raw[1:-1] if len(value_raw) >= 2 and value_raw[0] == '"' and value_raw[-1] == '"' else value_raw
                                     # Unescape common JSON escapes manually.
-                                    inner = (
-                                        inner.replace('\\"', '"')
-                                        .replace("\\\\", "\\")
-                                        .replace("\\n", "\n")
-                                        .replace("\\t", "\t")
-                                        .replace("\\r", "\r")
-                                    )
+                                    inner = inner.replace('\\"', '"').replace('\\\\', '\\').replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
                                     recovered[key] = inner
 
                         return recovered
@@ -5689,9 +5803,7 @@ async def process_chat_response(
                                 continue
 
                             # Fuzzy match: catch typos like "powershel_script" → "powershell_script"
-                            fuzzy = get_close_matches(
-                                key, list(allowed), n=1, cutoff=0.85
-                            )
+                            fuzzy = get_close_matches(key, list(allowed), n=1, cutoff=0.85)
                             if fuzzy:
                                 mapped[fuzzy[0]] = value
                                 repairs.append(
@@ -5789,9 +5901,7 @@ async def process_chat_response(
                         inferred_tc = dict(tc)
                         inferred_fn = dict(tc.get("function") or {})
                         inferred_fn["name"] = inferred_name
-                        inferred_fn["arguments"] = json.dumps(
-                            args_dict or {}, ensure_ascii=False
-                        )
+                        inferred_fn["arguments"] = json.dumps(args_dict or {}, ensure_ascii=False)
                         inferred_tc["function"] = inferred_fn
 
                         resolved_calls.append(inferred_tc)
@@ -5874,9 +5984,7 @@ async def process_chat_response(
                             continue
 
                         # Try to split concatenated tool names, e.g. `get_current_datesearch_web`
-                        seg = _segment_tool_name(
-                            name, known_names_sorted, known_set, max_parts=3
-                        )
+                        seg = _segment_tool_name(name, known_names_sorted, known_set, max_parts=3)
 
                         # Repeated same tool name, e.g. `search_websearch_web`.
                         if seg and len(seg) > 1 and len(set(seg)) == 1:
@@ -5923,25 +6031,16 @@ async def process_chat_response(
                         new_calls: list[dict] = []
                         ok = True
                         for i, part_name in enumerate(seg):
-                            rules = tool_rules.get(part_name) or {
-                                "allowed": set(),
-                                "required": set(),
-                            }
+                            rules = tool_rules.get(part_name) or {"allowed": set(), "required": set()}
                             allowed = rules["allowed"]
                             required = rules["required"]
 
-                            part_args = {
-                                k: remaining[k]
-                                for k in list(remaining.keys())
-                                if k in allowed
-                            }
+                            part_args = {k: remaining[k] for k in list(remaining.keys()) if k in allowed}
                             for k in part_args.keys():
                                 remaining.pop(k, None)
 
                             # If the tool has required args, ensure they're present in this segment.
-                            if required and not required.issubset(
-                                set(part_args.keys())
-                            ):
+                            if required and not required.issubset(set(part_args.keys())):
                                 ok = False
                                 break
 
@@ -5949,9 +6048,7 @@ async def process_chat_response(
                             new_tc["id"] = tc.get("id") if i == 0 else str(uuid4())
                             new_fn = dict(fn)
                             new_fn["name"] = part_name
-                            new_fn["arguments"] = json.dumps(
-                                part_args or {}, ensure_ascii=False
-                            )
+                            new_fn["arguments"] = json.dumps(part_args or {}, ensure_ascii=False)
                             new_tc["function"] = new_fn
                             new_calls.append(new_tc)
 
@@ -5989,11 +6086,7 @@ async def process_chat_response(
                     log.info(
                         "[TOOL ORCH] round_start round=%s tool_calls_in_batch=%s remaining_batches=%s pressure=%s limits(total=%s,fetch=%s,per_tool=%s)",
                         tool_call_retries,
-                        (
-                            len(response_tool_calls)
-                            if isinstance(response_tool_calls, list)
-                            else 0
-                        ),
+                        len(response_tool_calls) if isinstance(response_tool_calls, list) else 0,
                         len(tool_calls),
                         adaptive_pressure_level,
                         current_total_limit,
@@ -6026,26 +6119,14 @@ async def process_chat_response(
                     # Debug: log raw tool calls before normalization for diagnosing fallback triggers
                     if response_tool_calls:
                         _debug_tcs = []
-                        for _tc in (
-                            response_tool_calls
-                            if isinstance(response_tool_calls, list)
-                            else []
-                        ):
-                            _fn = (
-                                _tc.get("function", {}) if isinstance(_tc, dict) else {}
-                            )
-                            _debug_tcs.append(
-                                {
-                                    "name": _fn.get("name", ""),
-                                    "args_len": len(str(_fn.get("arguments", ""))),
-                                    "args_preview": str(_fn.get("arguments", ""))[:200],
-                                    "id": (
-                                        str(_tc.get("id", ""))[:20]
-                                        if isinstance(_tc, dict)
-                                        else ""
-                                    ),
-                                }
-                            )
+                        for _tc in (response_tool_calls if isinstance(response_tool_calls, list) else []):
+                            _fn = _tc.get("function", {}) if isinstance(_tc, dict) else {}
+                            _debug_tcs.append({
+                                "name": _fn.get("name", ""),
+                                "args_len": len(str(_fn.get("arguments", ""))),
+                                "args_preview": str(_fn.get("arguments", ""))[:200],
+                                "id": str(_tc.get("id", ""))[:20] if isinstance(_tc, dict) else "",
+                            })
                         log.info(
                             "[TOOL ORCH] pre_normalize round=%s raw_tool_calls=%s known_tools=%s",
                             tool_call_retries,
@@ -6156,9 +6237,13 @@ async def process_chat_response(
 
                                 # Emit UI sources (citations) as dedicated events.
                                 for src in (fb_flags or {}).get("ui_sources", []) or []:
-                                    await event_emitter({"type": "source", "data": src})
+                                    await event_emitter(
+                                        {"type": "source", "data": src}
+                                    )
                                 for src in (fb_flags or {}).get("sources", []) or []:
-                                    await event_emitter({"type": "source", "data": src})
+                                    await event_emitter(
+                                        {"type": "source", "data": src}
+                                    )
 
                                 res = await generate_chat_completion(
                                     request, fallback_form_data, user
@@ -6170,8 +6255,7 @@ async def process_chat_response(
                                     res_data = res
                                     try:
                                         if hasattr(res, "body") and isinstance(
-                                            getattr(res, "body", None),
-                                            (bytes, bytearray),
+                                            getattr(res, "body", None), (bytes, bytearray)
                                         ):
                                             res_data = json.loads(
                                                 res.body.decode("utf-8", "replace")
@@ -6221,29 +6305,19 @@ async def process_chat_response(
                     # -- force_final_round: skip execution, inject fake results --
                     if force_final_round:
                         fake_results = []
-                        for tc in (
-                            response_tool_calls
-                            if isinstance(response_tool_calls, list)
-                            else []
-                        ):
-                            fake_results.append(
-                                {
-                                    "tool_call_id": tc.get(
-                                        "id", f"skip_{tool_call_retries}"
-                                    ),
-                                    "content": (
-                                        "Tool call limit reached. "
-                                        "Please provide your answer based on the tool results you already have. "
-                                        "Do not call any more tools."
-                                    ),
-                                }
-                            )
-                        content_blocks.append(
-                            {
-                                "type": "tool_calls",
-                                "content": response_tool_calls,
-                            }
-                        )
+                        for tc in (response_tool_calls if isinstance(response_tool_calls, list) else []):
+                            fake_results.append({
+                                "tool_call_id": tc.get("id", f"skip_{tool_call_retries}"),
+                                "content": (
+                                    "Tool call limit reached. "
+                                    "Please provide your answer based on the tool results you already have. "
+                                    "Do not call any more tools."
+                                ),
+                            })
+                        content_blocks.append({
+                            "type": "tool_calls",
+                            "content": response_tool_calls,
+                        })
                         content_blocks[-1]["results"] = fake_results
                         content_blocks.append({"type": "text", "content": ""})
                         log.warning(
@@ -6284,39 +6358,25 @@ async def process_chat_response(
                             else:
                                 res_data = res
                                 try:
-                                    from starlette.responses import (
-                                        JSONResponse as StarletteJSONResponse,
-                                    )
-
+                                    from starlette.responses import JSONResponse as StarletteJSONResponse
                                     if isinstance(res, StarletteJSONResponse):
-                                        res_data = json.loads(
-                                            res.body.decode("utf-8", "replace")
-                                        )
+                                        res_data = json.loads(res.body.decode("utf-8", "replace"))
                                 except Exception:
                                     res_data = res
                                 if isinstance(res_data, dict):
                                     msg = (
-                                        res_data.get("choices", [{}])[0].get(
-                                            "message", {}
-                                        )
+                                        res_data.get("choices", [{}])[0].get("message", {})
                                         if isinstance(res_data.get("choices"), list)
                                         else {}
                                     )
                                     msg_content = msg.get("content")
                                     if isinstance(msg_content, str) and msg_content:
-                                        if (
-                                            content_blocks
-                                            and content_blocks[-1].get("type") == "text"
-                                        ):
+                                        if content_blocks and content_blocks[-1].get("type") == "text":
                                             content_blocks[-1]["content"] += msg_content
                                         else:
-                                            content_blocks.append(
-                                                {"type": "text", "content": msg_content}
-                                            )
+                                            content_blocks.append({"type": "text", "content": msg_content})
                         except Exception as e:
-                            log.exception(
-                                "[TOOL ORCH] fake_results_followup_error: %s", e
-                            )
+                            log.exception("[TOOL ORCH] fake_results_followup_error: %s", e)
 
                         break  # Exit tool loop
 
@@ -6381,9 +6441,7 @@ async def process_chat_response(
                         tool_function_params = {}
                         # Ensure arguments is always a valid string; upstream
                         # may return null/None for parameterless tool calls.
-                        raw_arguments = (
-                            tool_call.get("function", {}).get("arguments") or "{}"
-                        )
+                        raw_arguments = tool_call.get("function", {}).get("arguments") or "{}"
                         if isinstance(raw_arguments, dict):
                             tool_function_params = raw_arguments
                         else:
@@ -6418,9 +6476,7 @@ async def process_chat_response(
                             spec.get("parameters", {}).get("properties", {}).keys()
                         )
                         tool_function_params = {
-                            k: v
-                            for k, v in tool_function_params.items()
-                            if k in allowed_params
+                            k: v for k, v in tool_function_params.items() if k in allowed_params
                         }
 
                         signature_src = json.dumps(
@@ -6433,26 +6489,15 @@ async def process_chat_response(
                         )
                         fetch_domain = ""
                         if tool_name in {"fetch_url", "fetch_url_rendered"}:
-                            fetch_url_value = str(
-                                tool_function_params.get("url") or ""
-                            ).strip()
+                            fetch_url_value = str(tool_function_params.get("url") or "").strip()
                             parsed_fetch = urlparse(fetch_url_value)
                             fetch_domain = parsed_fetch.netloc.lower()
 
-                        signature = hashlib.sha256(
-                            signature_src.encode("utf-8")
-                        ).hexdigest()
+                        signature = hashlib.sha256(signature_src.encode("utf-8")).hexdigest()
 
                         if tool_name == "search_web":
-                            search_query = str(
-                                tool_function_params.get("query") or ""
-                            ).strip()
-                            if (
-                                search_query
-                                and _search_query_is_semantically_redundant(
-                                    search_query
-                                )
-                            ):
+                            search_query = str(tool_function_params.get("query") or "").strip()
+                            if search_query and _search_query_is_semantically_redundant(search_query):
                                 return await build_skipped_tool_result(
                                     tool_call_id,
                                     tool_name,
@@ -6461,11 +6506,9 @@ async def process_chat_response(
                                     "duplicate_semantic_query",
                                 )
 
-                        (
-                            active_total_limit,
-                            active_fetch_limit,
-                            active_per_tool_limit,
-                        ) = _get_active_governor_limits()
+                        active_total_limit, active_fetch_limit, active_per_tool_limit = (
+                            _get_active_governor_limits()
+                        )
 
                         async with governor_lock:
                             if signature in seen_tool_signatures:
@@ -6509,11 +6552,7 @@ async def process_chat_response(
 
                                 # 域名封锁只对 fetch_url 生效；fetch_url_rendered 使用 Jina 渲染，
                                 # 可能成功抓取 fetch_url 失败的域名，不应被连带封锁。
-                                if (
-                                    tool_name == "fetch_url"
-                                    and fetch_domain
-                                    and fetch_domain in fetch_domain_failures
-                                ):
+                                if tool_name == "fetch_url" and fetch_domain and fetch_domain in fetch_domain_failures:
                                     return await build_skipped_tool_result(
                                         tool_call_id,
                                         tool_name,
@@ -6542,21 +6581,15 @@ async def process_chat_response(
                                             "name": tool_name,
                                             "params": tool_function_params,
                                             "server": tool.get("server", {}),
-                                            "session_id": metadata.get(
-                                                "session_id", None
-                                            ),
+                                            "session_id": metadata.get("session_id", None),
                                         },
                                     }
                                 )
                             else:
                                 tool_function = tool["callable"]
-                                tool_result = await tool_function(
-                                    **tool_function_params
-                                )
+                                tool_result = await tool_function(**tool_function_params)
 
-                            log.info(
-                                f"[TOOL RESULT] {tool_name} result={str(tool_result)[:500]}"
-                            )
+                            log.info(f"[TOOL RESULT] {tool_name} result={str(tool_result)[:500]}")
                         except Exception as e:
                             log.error(f"[TOOL ERROR] {tool_name} error={e}")
                             tool_result = str(e)
@@ -6565,18 +6598,12 @@ async def process_chat_response(
                             parsed_fetch_result = tool_result
                             if isinstance(parsed_fetch_result, str):
                                 try:
-                                    parsed_fetch_result = json.loads(
-                                        parsed_fetch_result
-                                    )
+                                    parsed_fetch_result = json.loads(parsed_fetch_result)
                                 except Exception:
                                     parsed_fetch_result = None
 
                             if isinstance(parsed_fetch_result, dict):
-                                status = (
-                                    str(parsed_fetch_result.get("status") or "")
-                                    .strip()
-                                    .lower()
-                                )
+                                status = str(parsed_fetch_result.get("status") or "").strip().lower()
                                 signals = parsed_fetch_result.get("signals") or []
                                 should_block_domain = status in {"blocked"} or (
                                     isinstance(signals, list)
@@ -6595,10 +6622,7 @@ async def process_chat_response(
 
                                 fetch_is_success_evidence = (
                                     status == "ok"
-                                    and float(
-                                        parsed_fetch_result.get("quality_score") or 0.0
-                                    )
-                                    >= 0.55
+                                    and float(parsed_fetch_result.get("quality_score") or 0.0) >= 0.55
                                     and not (
                                         isinstance(signals, list)
                                         and "anti_bot_or_challenge" in signals
@@ -6607,10 +6631,7 @@ async def process_chat_response(
                                 if fetch_is_success_evidence:
                                     async with governor_lock:
                                         tool_exec_fetch += 1
-                            elif (
-                                isinstance(tool_result, str)
-                                and len(tool_result.strip()) >= 240
-                            ):
+                            elif isinstance(tool_result, str) and len(tool_result.strip()) >= 240:
                                 async with governor_lock:
                                     tool_exec_fetch += 1
 
@@ -6633,28 +6654,17 @@ async def process_chat_response(
                                 rendered_result, indent=2, ensure_ascii=False
                             )
 
-                        display_result = (
-                            _build_mcp_app_display_result(
-                                tool, tool_call_id, tool_result
-                            )
-                            or rendered_result
-                        )
-
                         return {
                             "tool_call_id": tool_call_id,
                             "tool_name": tool_name,
                             "params": tool_function_params,
                             "raw_result": tool_result,
                             "result": rendered_result,
-                            "display_result": display_result,
-                            "mcp_app": _build_mcp_app_invocation(tool),
                             "files": tool_result_files,
                             "tool_id": tool.get("tool_id", "") or "",
                         }
 
-                    async def execute_tool_calls_with_governor(
-                        calls: list[dict],
-                    ) -> list[dict]:
+                    async def execute_tool_calls_with_governor(calls: list[dict]) -> list[dict]:
                         if not isinstance(calls, list) or not calls:
                             return []
 
@@ -6662,11 +6672,7 @@ async def process_chat_response(
                         indexed_serial_calls: list[tuple[int, dict]] = []
                         for idx, tc in enumerate(calls):
                             t_name = (tc.get("function") or {}).get("name")
-                            if t_name in {
-                                "search_web",
-                                "fetch_url",
-                                "fetch_url_rendered",
-                            }:
+                            if t_name in {"search_web", "fetch_url", "fetch_url_rendered"}:
                                 indexed_network_calls.append((idx, tc))
                             else:
                                 indexed_serial_calls.append((idx, tc))
@@ -6679,18 +6685,13 @@ async def process_chat_response(
                         if indexed_network_calls:
                             semaphore = asyncio.Semaphore(max(1, NETWORK_PARALLELISM))
 
-                            async def run_network(
-                                idx: int, tc: dict
-                            ) -> tuple[int, dict]:
+                            async def run_network(idx: int, tc: dict) -> tuple[int, dict]:
                                 async with semaphore:
                                     result = await run_single_tool_call(tc)
                                     return idx, result
 
                             network_results = await asyncio.gather(
-                                *[
-                                    run_network(idx, tc)
-                                    for idx, tc in indexed_network_calls
-                                ],
+                                *[run_network(idx, tc) for idx, tc in indexed_network_calls],
                                 return_exceptions=False,
                             )
                             for idx, result in network_results:
@@ -6702,9 +6703,7 @@ async def process_chat_response(
                                 executed.append(executed_by_index[idx])
                         return executed
 
-                    executed_results = await execute_tool_calls_with_governor(
-                        response_tool_calls
-                    )
+                    executed_results = await execute_tool_calls_with_governor(response_tool_calls)
                     round_pressure_bump = 0
 
                     round_message_files: list[dict] = []
@@ -6715,9 +6714,7 @@ async def process_chat_response(
                         raw_tool_result = exec_item.get("raw_result")
 
                         # Governor 跳过的调用（去重/预算超限等）视为负面信号
-                        if isinstance(
-                            raw_tool_result, str
-                        ) and raw_tool_result.startswith("skipped:"):
+                        if isinstance(raw_tool_result, str) and raw_tool_result.startswith("skipped:"):
                             round_pressure_bump = max(round_pressure_bump, 1)
 
                         if tool_name in {"fetch_url", "fetch_url_rendered"}:
@@ -6725,13 +6722,9 @@ async def process_chat_response(
                             if isinstance(fetch_obj, str):
                                 fetch_obj = _safe_json_loads(fetch_obj)
                             if isinstance(fetch_obj, dict):
-                                status = (
-                                    str(fetch_obj.get("status") or "").strip().lower()
-                                )
+                                status = str(fetch_obj.get("status") or "").strip().lower()
                                 signals = fetch_obj.get("signals") or []
-                                quality_score = float(
-                                    fetch_obj.get("quality_score") or 0.0
-                                )
+                                quality_score = float(fetch_obj.get("quality_score") or 0.0)
 
                                 has_anti_bot = (
                                     isinstance(signals, list)
@@ -6749,10 +6742,7 @@ async def process_chat_response(
 
                                 if has_anti_bot or (
                                     isinstance(signals, list)
-                                    and any(
-                                        s in signals
-                                        for s in ("jina_error", "fetch_error")
-                                    )
+                                    and any(s in signals for s in ("jina_error", "fetch_error"))
                                 ):
                                     round_pressure_bump = max(round_pressure_bump, 1)
 
@@ -6763,20 +6753,14 @@ async def process_chat_response(
                             "search_knowledge_files",
                             "query_knowledge_bases",
                             "list_knowledge_bases",
-                        } and _is_effectively_empty_tool_result(
-                            tool_name, raw_tool_result
-                        ):
+                        } and _is_effectively_empty_tool_result(tool_name, raw_tool_result):
                             round_pressure_bump = max(round_pressure_bump, 1)
 
                         try:
                             tool_id = exec_item.get("tool_id", "") or ""
                             citation_sources = get_citation_sources_from_tool_result(
                                 tool_name,
-                                (
-                                    tool_function_params
-                                    if isinstance(tool_function_params, dict)
-                                    else {}
-                                ),
+                                tool_function_params if isinstance(tool_function_params, dict) else {},
                                 raw_tool_result,
                                 tool_id=tool_id,
                             )
@@ -6785,25 +6769,12 @@ async def process_chat_response(
                                     continue
                                 key = ""
                                 meta = src.get("metadata") or []
-                                if (
-                                    isinstance(meta, list)
-                                    and meta
-                                    and isinstance(meta[0], dict)
-                                ):
-                                    key = str(
-                                        meta[0].get("source")
-                                        or meta[0].get("url")
-                                        or ""
-                                    )
+                                if isinstance(meta, list) and meta and isinstance(meta[0], dict):
+                                    key = str(meta[0].get("source") or meta[0].get("url") or "")
                                 if not key:
                                     ssrc = src.get("source") or {}
                                     if isinstance(ssrc, dict):
-                                        key = str(
-                                            ssrc.get("id")
-                                            or ssrc.get("url")
-                                            or ssrc.get("name")
-                                            or ""
-                                        )
+                                        key = str(ssrc.get("id") or ssrc.get("url") or ssrc.get("name") or "")
                                 if key and key in emitted_tool_sources_seen:
                                     continue
                                 if key:
@@ -6814,9 +6785,7 @@ async def process_chat_response(
                         except Exception:
                             pass
 
-                        exec_item_files = _normalize_message_files(
-                            exec_item.get("files")
-                        )
+                        exec_item_files = _normalize_message_files(exec_item.get("files"))
                         if exec_item_files:
                             round_message_files = _merge_message_files(
                                 round_message_files, exec_item_files
@@ -6827,18 +6796,6 @@ async def process_chat_response(
                                 "tool_call_id": exec_item.get("tool_call_id", ""),
                                 "content": exec_item.get("result", ""),
                                 **(
-                                    {"mcp_app": exec_item.get("mcp_app")}
-                                    if exec_item.get("mcp_app")
-                                    else {}
-                                ),
-                                **(
-                                    {"display_content": exec_item.get("display_result")}
-                                    if exec_item.get("display_result")
-                                    and exec_item.get("display_result")
-                                    != exec_item.get("result", "")
-                                    else {}
-                                ),
-                                **(
                                     {"files": exec_item_files}
                                     if exec_item_files
                                     else {}
@@ -6848,12 +6805,9 @@ async def process_chat_response(
 
                     if round_message_files:
                         try:
-                            existing_message = (
-                                Chats.get_message_by_id_and_message_id(
-                                    metadata["chat_id"], metadata["message_id"]
-                                )
-                                or {}
-                            )
+                            existing_message = Chats.get_message_by_id_and_message_id(
+                                metadata["chat_id"], metadata["message_id"]
+                            ) or {}
                             merged_message_files = _merge_message_files(
                                 existing_message.get("files"), round_message_files
                             )
@@ -6881,9 +6835,7 @@ async def process_chat_response(
                         round_pressure_bump = max(round_pressure_bump, 1)
 
                     if round_pressure_bump > 0:
-                        adaptive_pressure_level = min(
-                            3, adaptive_pressure_level + round_pressure_bump
-                        )
+                        adaptive_pressure_level = min(3, adaptive_pressure_level + round_pressure_bump)
 
                     log.info(
                         "[TOOL ORCH] adaptive_state round=%s pressure=%s low_gain_rounds=%s",
@@ -6899,13 +6851,16 @@ async def process_chat_response(
                         low_gain_rounds=low_gain_rounds,
                     )
 
-                    if has_nonempty_text_content(content_blocks):
+                    if _has_nonempty_text_content(content_blocks):
                         consecutive_no_text_rounds = 0
                     else:
                         consecutive_no_text_rounds += 1
 
                     if (
-                        (adaptive_pressure_level >= 3 and low_gain_rounds >= 2)
+                        (
+                            adaptive_pressure_level >= 3
+                            and low_gain_rounds >= 2
+                        )
                         or consecutive_no_text_rounds >= 5
                     ) and (not force_final_round):
                         force_final_round = True
@@ -6973,9 +6928,7 @@ async def process_chat_response(
                             # Provider may ignore stream flag and return JSON once tool_calls are handled.
                             res_data = res
                             try:
-                                from starlette.responses import (
-                                    JSONResponse as StarletteJSONResponse,
-                                )
+                                from starlette.responses import JSONResponse as StarletteJSONResponse
 
                                 if isinstance(res, StarletteJSONResponse):
                                     res_data = json.loads(
@@ -7002,11 +6955,7 @@ async def process_chat_response(
                                     log.warning(
                                         "[TOOL ORCH] followup_empty_message round=%s message_keys=%s",
                                         tool_call_retries,
-                                        (
-                                            list(msg.keys())
-                                            if isinstance(msg, dict)
-                                            else []
-                                        ),
+                                        list(msg.keys()) if isinstance(msg, dict) else [],
                                     )
 
                                 if isinstance(msg_tool_calls, list) and msg_tool_calls:
@@ -7052,20 +7001,23 @@ async def process_chat_response(
                                     pass
 
                                 # Continue only if we received another tool round.
-                                if isinstance(msg_tool_calls, list) and msg_tool_calls:
+                                if (
+                                    isinstance(msg_tool_calls, list)
+                                    and msg_tool_calls
+                                ):
                                     continue
 
                             log.info(
                                 "[TOOL ORCH] round_stop round=%s has_text=%s pending_batches=%s",
                                 tool_call_retries,
-                                has_nonempty_text_content(content_blocks),
+                                _has_nonempty_text_content(content_blocks),
                                 len(tool_calls),
                             )
                             await emit_tool_orchestration_status(
                                 "round_stop",
                                 done=True,
                                 round=tool_call_retries,
-                                has_text=has_nonempty_text_content(content_blocks),
+                                has_text=_has_nonempty_text_content(content_blocks),
                                 pending_batches=len(tool_calls),
                             )
 
@@ -7077,9 +7029,7 @@ async def process_chat_response(
                         def _format_model_error(err: Exception) -> str:
                             # Prefer structured info for common HTTP client errors.
                             try:
-                                from fastapi import (
-                                    HTTPException as FastAPIHTTPException,
-                                )
+                                from fastapi import HTTPException as FastAPIHTTPException
 
                                 if isinstance(err, FastAPIHTTPException):
                                     detail = getattr(err, "detail", "") or ""
@@ -7141,13 +7091,9 @@ async def process_chat_response(
                         classification = "上游模型服务/代理请求失败"
                         if http_status is not None:
                             if 500 <= int(http_status) <= 599:
-                                classification = (
-                                    "上游模型服务/代理返回 5xx（服务端错误）"
-                                )
+                                classification = "上游模型服务/代理返回 5xx（服务端错误）"
                             elif 400 <= int(http_status) <= 499:
-                                classification = (
-                                    "上游模型服务/代理返回 4xx（请求/鉴权/配额类错误）"
-                                )
+                                classification = "上游模型服务/代理返回 4xx（请求/鉴权/配额类错误）"
 
                         likely_causes = [
                             "上游服务短时故障/过载（常见于 500/502/503/504）",
@@ -7160,14 +7106,14 @@ async def process_chat_response(
                         summary = "工具已执行完成，但生成回复失败"
                         if http_status is not None:
                             if http_message:
-                                summary = f"工具已执行完成，但上游模型请求失败（HTTP {http_status} {http_message}）"
+                                summary = (
+                                    f"工具已执行完成，但上游模型请求失败（HTTP {http_status} {http_message}）"
+                                )
                             else:
                                 summary = f"工具已执行完成，但上游模型请求失败（HTTP {http_status}）"
 
                         safe_model_id = str(model_id).replace('"', "")
-                        safe_http_message = (
-                            str(http_message).replace('"', "") if http_message else ""
-                        )
+                        safe_http_message = str(http_message).replace('"', "") if http_message else ""
 
                         details_attrs = [
                             'type="error"',
@@ -7190,11 +7136,7 @@ async def process_chat_response(
                             f"**分类**：{classification}\n\n"
                             f"**情况**：工具调用已成功执行完成，但在生成最终回复时，请求上游模型服务失败，因此无法输出最终回答。\n\n"
                             f"**模型**：`{model_id}`\n\n"
-                            + (
-                                f"**上游地址**：`{upstream_url}`\n\n"
-                                if upstream_url
-                                else ""
-                            )
+                            + (f"**上游地址**：`{upstream_url}`\n\n" if upstream_url else "")
                             + (
                                 f"**HTTP**：`{http_status}` message=`{http_message}`\n\n"
                                 if http_status is not None
@@ -7210,10 +7152,7 @@ async def process_chat_response(
                             + "".join([f"- {c}\n" for c in likely_causes])
                             + "\n### 原始英文报错（Raw error）\n"
                             + "```text\n"
-                            + (
-                                raw_english[:2000]
-                                + ("..." if len(raw_english) > 2000 else "")
-                            )
+                            + (raw_english[:2000] + ("..." if len(raw_english) > 2000 else ""))
                             + "\n```"
                         )
 
@@ -7259,25 +7198,23 @@ async def process_chat_response(
 
                 finalize_error_payload = None
 
-                if tool_call_retries > 0 and not has_nonempty_text_content(
-                    content_blocks
+                if tool_call_retries > 0 and not _has_visible_assistant_output(
+                    content_blocks, message_files
                 ):
                     log.warning(
-                        "[TOOL ORCH] finalize_trigger reason=empty_text_after_tools tool_rounds=%s pending_batches=%s",
+                        "[TOOL ORCH] finalize_trigger reason=empty_output_after_tools tool_rounds=%s pending_batches=%s",
                         tool_call_retries,
                         len(tool_calls),
                     )
                     await emit_tool_orchestration_status(
                         "finalize_start",
                         done=False,
-                        reason="empty_text_after_tools",
+                        reason="empty_output_after_tools",
                         tool_rounds=tool_call_retries,
                         pending_batches=len(tool_calls),
                     )
                     try:
-                        finalize_blocks = trim_content_blocks_for_finalize(
-                            content_blocks
-                        )
+                        finalize_blocks = trim_content_blocks_for_finalize(content_blocks)
                         fallback_payload = {
                             "model": model_id,
                             "stream": True,
@@ -7289,22 +7226,20 @@ async def process_chat_response(
                         if form_data.get("tools"):
                             fallback_payload["tools"] = form_data["tools"]
 
-                        res = await generate_chat_completion(
-                            request, fallback_payload, user
-                        )
+                        res = await generate_chat_completion(request, fallback_payload, user)
 
                         if isinstance(res, StreamingResponse):
                             await stream_body_handler(res)
                             log.info(
-                                "[TOOL ORCH] finalize_stream_done has_text=%s",
-                                has_nonempty_text_content(content_blocks),
+                                "[TOOL ORCH] finalize_stream_done has_visible_output=%s",
+                                _has_visible_assistant_output(
+                                    content_blocks, message_files
+                                ),
                             )
                         else:
                             res_data = res
                             try:
-                                from starlette.responses import (
-                                    JSONResponse as StarletteJSONResponse,
-                                )
+                                from starlette.responses import JSONResponse as StarletteJSONResponse
 
                                 if isinstance(res, StarletteJSONResponse):
                                     res_data = json.loads(
@@ -7344,9 +7279,7 @@ async def process_chat_response(
                                     {
                                         "type": "chat:completion",
                                         "data": {
-                                            "content": serialize_content_blocks(
-                                                content_blocks
-                                            ),
+                                            "content": serialize_content_blocks(content_blocks),
                                         },
                                     }
                                 )
@@ -7356,9 +7289,7 @@ async def process_chat_response(
                                         metadata["chat_id"],
                                         metadata["message_id"],
                                         {
-                                            "content": serialize_content_blocks(
-                                                content_blocks
-                                            ),
+                                            "content": serialize_content_blocks(content_blocks),
                                         },
                                     )
                                 except Exception:
@@ -7366,8 +7297,10 @@ async def process_chat_response(
                     except Exception as e:
                         log.warning(f"[TOOL CALL] Final synthesis retry failed: {e}")
 
-                    final_has_text = has_nonempty_text_content(content_blocks)
-                    if not final_has_text:
+                    final_has_visible_output = _has_visible_assistant_output(
+                        content_blocks, message_files
+                    )
+                    if not final_has_visible_output:
                         recent_tool_names = collect_recent_tool_names(content_blocks)
                         tool_names_text = (
                             "、".join(recent_tool_names)
@@ -7627,8 +7560,8 @@ async def process_chat_response(
 
                 # Detect empty response (model returned 200 but no content).
                 # Common with reverse proxies / relay services that swallow errors.
-                if not finalize_error_payload and not has_nonempty_text_content(
-                    content_blocks
+                if not finalize_error_payload and not _has_visible_assistant_output(
+                    content_blocks, message_files
                 ):
                     model_id_display = form_data.get("model", "unknown")
                     if _stream_api_error:

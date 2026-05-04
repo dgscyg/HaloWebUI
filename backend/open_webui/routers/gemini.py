@@ -7,6 +7,7 @@ and converts responses into OpenAI-compatible format for the Open WebUI frontend
 """
 
 import asyncio
+import base64
 import copy
 import codecs
 import json
@@ -29,7 +30,6 @@ from open_webui.models.models import Models
 from open_webui.models.users import UserModel
 from open_webui.utils.user_connections import (
     get_user_connections,
-    set_user_connection_provider_config,
 )
 
 from open_webui.env import (
@@ -45,11 +45,21 @@ from open_webui.utils.payload import (
     apply_model_system_prompt_to_body,
     merge_additive_payload_fields,
 )
+from open_webui.utils.chat_image_refs import resolve_chat_image_url_to_bytes
 from open_webui.utils.error_handling import build_error_detail
 from open_webui.utils.native_web_search import (
     build_native_web_search_support,
     resolve_effective_native_web_search_support,
 )
+from open_webui.utils.model_identity import (
+    decorate_provider_model_identity,
+    derive_connection_id,
+    get_base_model_ref_from_model_info,
+    get_model_ref_from_model,
+    resolve_model_from_lookup,
+    resolve_provider_connection_by_model_id,
+)
+
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["OPENAI"])
@@ -96,9 +106,7 @@ def _connection_supports_native_web_search(url: str, api_config: dict) -> bool:
     return support.get("supported") is True
 
 
-def _get_gemini_user_config(
-    connection_user: Optional[UserModel],
-) -> tuple[list[str], list[str], dict]:
+def _get_gemini_user_config(connection_user: Optional[UserModel]) -> tuple[list[str], list[str], dict]:
     """
     Resolve Gemini connection config for a given user.
 
@@ -128,34 +136,23 @@ def _get_gemini_user_config(
 
 
 def _resolve_gemini_connection_by_model_id(
-    model_id: str, base_urls: list[str], keys: list[str], cfgs: dict
+    model_id: str,
+    base_urls: list[str],
+    keys: list[str],
+    cfgs: dict,
+    *,
+    model_ref: Optional[dict] = None,
+    request_models=None,
 ) -> tuple[int, str, str, dict]:
-    chosen_idx = 0
-    chosen_cfg = (cfgs.get("0") or {}) if isinstance(cfgs, dict) else {}
-    chosen_prefix = (chosen_cfg.get("prefix_id") or "").strip() or None
-
-    if (
-        isinstance(model_id, str)
-        and "." in model_id
-        and len(base_urls) > 1
-        and isinstance(cfgs, dict)
-    ):
-        maybe_prefix, _rest = model_id.split(".", 1)
-        for idx, _url in enumerate(base_urls):
-            c = cfgs.get(str(idx), {}) or {}
-            p = (c.get("prefix_id") or "").strip() or None
-            if p and p == maybe_prefix:
-                chosen_idx = idx
-                chosen_cfg = c
-                chosen_prefix = p
-                break
-
-    url = (base_urls[chosen_idx] if chosen_idx < len(base_urls) else "").rstrip("/")
-    key = keys[chosen_idx] if chosen_idx < len(keys) else ""
-    api_config = chosen_cfg or {}
-    api_config = {**api_config, "_resolved_prefix_id": chosen_prefix or ""}
-
-    return chosen_idx, url, key, api_config
+    return resolve_provider_connection_by_model_id(
+        provider="gemini",
+        model_id=model_id,
+        base_urls=base_urls,
+        keys=keys,
+        cfgs=cfgs,
+        model_ref=model_ref,
+        request_models=request_models,
+    )
 
 
 async def _is_user_visible_model(
@@ -163,7 +160,10 @@ async def _is_user_visible_model(
 ) -> bool:
     state = getattr(request, "state", None)
     models_map = getattr(state, "MODELS", None) if state is not None else None
-    if isinstance(models_map, dict) and model_id in models_map:
+    ambiguous_aliases = getattr(state, "MODELS_AMBIGUOUS", set()) if state is not None else set()
+    if isinstance(models_map, dict) and resolve_model_from_lookup(
+        models_map, ambiguous_aliases or set(), model_id
+    ):
         return True
 
     try:
@@ -182,8 +182,10 @@ async def _is_user_visible_model(
 
     state = getattr(request, "state", None)
     models_map = getattr(state, "MODELS", None) if state is not None else None
-    return isinstance(models_map, dict) and model_id in models_map
-
+    ambiguous_aliases = getattr(state, "MODELS_AMBIGUOUS", set()) if state is not None else set()
+    return isinstance(models_map, dict) and bool(
+        resolve_model_from_lookup(models_map, ambiguous_aliases or set(), model_id)
+    )
 
 ##########################################
 #
@@ -227,9 +229,7 @@ def _has_auth_headers(headers: dict) -> bool:
     )
 
 
-def _auth_attempts(
-    url: str, key: str, config: Optional[dict]
-) -> list[tuple[str, dict]]:
+def _auth_attempts(url: str, key: str, config: Optional[dict]) -> list[tuple[str, dict]]:
     cfg = config or {}
     headers = _normalize_headers(cfg.get("headers"))
 
@@ -457,7 +457,9 @@ def _parse_gemini_json_objects(
 
         if not isinstance(gemini_obj, dict):
             preview = str(gemini_obj)[:120]
-            message = f"Skipping non-dict Gemini stream payload ({type(gemini_obj).__name__}): {preview}"
+            message = (
+                f"Skipping non-dict Gemini stream payload ({type(gemini_obj).__name__}): {preview}"
+            )
             if warning_limiter:
                 warning_limiter.warn(f"non_dict_{phase}", message)
             else:
@@ -548,15 +550,11 @@ def _yield_content_chunks(content: str, stream_id: str, model_id: str):
         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
     else:
         # Large content, split into multiple chunks
-        log.info(
-            f"[GEMINI STREAM] Splitting large content ({len(content)} bytes) into chunks"
-        )
+        log.info(f"[GEMINI STREAM] Splitting large content ({len(content)} bytes) into chunks")
         offset = 0
         while offset < len(content):
-            chunk_content = content[offset : offset + MAX_STREAM_CHUNK_SIZE]
-            chunk = _openai_chunk(
-                stream_id, model_id, {"content": chunk_content}, None, 0
-            )
+            chunk_content = content[offset:offset + MAX_STREAM_CHUNK_SIZE]
+            chunk = _openai_chunk(stream_id, model_id, {"content": chunk_content}, None, 0)
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             offset += MAX_STREAM_CHUNK_SIZE
 
@@ -573,11 +571,7 @@ def _wants_web_search(fd: dict) -> bool:
         return True
     tools = fd.get("tools") or []
     for t in tools:
-        if isinstance(t, dict) and t.get("type") in (
-            "web_search",
-            "web_search_preview",
-            "browser_search",
-        ):
+        if isinstance(t, dict) and t.get("type") in ("web_search", "web_search_preview", "browser_search"):
             return True
     return False
 
@@ -592,16 +586,7 @@ def _clean_schema_for_gemini(schema: dict) -> dict:
         return schema
 
     # Fields supported by Gemini API
-    supported_fields = {
-        "type",
-        "description",
-        "properties",
-        "required",
-        "items",
-        "enum",
-        "format",
-        "nullable",
-    }
+    supported_fields = {"type", "description", "properties", "required", "items", "enum", "format", "nullable"}
 
     cleaned = {}
     for key, value in schema.items():
@@ -635,9 +620,7 @@ def _clean_schema_for_gemini(schema: dict) -> dict:
 
     # Filter required list to only include properties that exist after cleaning
     if "required" in cleaned and "properties" in cleaned:
-        cleaned["required"] = [
-            r for r in cleaned["required"] if r in cleaned["properties"]
-        ]
+        cleaned["required"] = [r for r in cleaned["required"] if r in cleaned["properties"]]
         if not cleaned["required"]:
             del cleaned["required"]
 
@@ -751,24 +734,18 @@ def _extract_content_segments(
     thinking_parts = []
     images = []
     tool_calls = []
-    tool_call_index = (
-        starting_tool_index  # CRITICAL: Use starting index for parallel tool calls
-    )
+    tool_call_index = starting_tool_index  # CRITICAL: Use starting index for parallel tool calls
 
     for part in parts:
         # DEBUG: Log each part to see what Gemini returns
         if part.get("thought") is True or "thought" in part:
-            log.info(
-                f"[GEMINI THINKING DEBUG] Found thought part: thought={part.get('thought')}, keys={list(part.keys())}"
-            )
+            log.info(f"[GEMINI THINKING DEBUG] Found thought part: thought={part.get('thought')}, keys={list(part.keys())}")
 
         if "text" in part and part["text"]:
             # Check if this is a thinking part (Gemini 3 thinking mode)
             if part.get("thought") is True:
                 thinking_parts.append(part["text"])
-                log.info(
-                    f"[GEMINI THINKING] Extracted thinking content: {part['text'][:200]}..."
-                )
+                log.info(f"[GEMINI THINKING] Extracted thinking content: {part['text'][:200]}...")
             else:
                 text_parts.append(part["text"])
         elif "inlineData" in part:
@@ -784,9 +761,7 @@ def _extract_content_segments(
             # Extract Gemini function call and convert to OpenAI format
             function_call = part.get("functionCall", {})
             # DEBUG: Log the raw functionCall to see if thought_signature is present
-            log.info(
-                f"[GEMINI DEBUG] Raw functionCall from Gemini: {json.dumps(function_call, ensure_ascii=False, default=str)[:500]}"
-            )
+            log.info(f"[GEMINI DEBUG] Raw functionCall from Gemini: {json.dumps(function_call, ensure_ascii=False, default=str)[:500]}")
             if isinstance(function_call, dict):
                 function_name = function_call.get("name", "")
                 function_args = function_call.get("args", {})
@@ -804,14 +779,15 @@ def _extract_content_segments(
                         "index": tool_call_index,  # CRITICAL FIX: Add index field for middleware
                         "id": f"call_{uuid.uuid4().hex}",
                         "type": "function",
-                        "function": {"name": function_name, "arguments": args_json},
+                        "function": {
+                            "name": function_name,
+                            "arguments": args_json
+                        }
                     }
                     # Store thought_signature in a custom field for Gemini 3 compatibility
                     if thought_signature:
                         tool_call_data["thought_signature"] = thought_signature
-                        log.info(
-                            f"[GEMINI 3] Captured thought_signature for function {function_name}"
-                        )
+                        log.info(f"[GEMINI 3] Captured thought_signature for function {function_name}")
 
                     tool_calls.append(tool_call_data)
                     tool_call_index += 1  # Increment for next tool call
@@ -834,26 +810,13 @@ def _extract_content_segments(
                     web_sources.append(f"[{title}]({uri})")
 
         if web_sources:
-            grounding_md = (
-                "\n\n**Sources:**\n"
-                + "\n".join([f"{i+1}. {s}" for i, s in enumerate(web_sources)])
-                + "\n"
-            )
+            grounding_md = "\n\n**Sources:**\n" + "\n".join([f"{i+1}. {s}" for i, s in enumerate(web_sources)]) + "\n"
 
     thinking_content = "".join(thinking_parts)
-    return (
-        "".join(text_parts),
-        images,
-        grounding_md,
-        thinking_content,
-        tool_calls,
-        tool_call_index,
-    )
+    return "".join(text_parts), images, grounding_md, thinking_content, tool_calls, tool_call_index
 
 
-def _extract_content(
-    candidate: dict, starting_tool_index: int = 0
-) -> tuple[str, str, str, str, list, int]:
+def _extract_content(candidate: dict, starting_tool_index: int = 0) -> tuple[str, str, str, str, list, int]:
     """
     Extract text + inline image markdown + grounding metadata + thinking content + tool calls from a Gemini candidate.
     Returns: (text, image_markdown, grounding_markdown, thinking_content, tool_calls, next_tool_index)
@@ -862,9 +825,7 @@ def _extract_content(
         _extract_content_segments(candidate, starting_tool_index)
     )
     image_md = "".join(
-        _build_markdown_image(
-            image.get("mime_type", "image/png"), image.get("data", "")
-        )
+        _build_markdown_image(image.get("mime_type", "image/png"), image.get("data", ""))
         for image in images
         if image.get("data")
     )
@@ -901,9 +862,7 @@ def _build_stream_chunks_from_gemini_obj(
 
     if tool_calls:
         for tool_call in tool_calls:
-            tool_chunk = _openai_chunk(
-                stream_id, model_id, {"tool_calls": [tool_call]}, None, 0
-            )
+            tool_chunk = _openai_chunk(stream_id, model_id, {"tool_calls": [tool_call]}, None, 0)
             chunks.append(f"data: {json.dumps(tool_chunk, ensure_ascii=False)}\n\n")
 
     if text:
@@ -939,9 +898,7 @@ async def _open_gemini_response(
     last_status: Optional[int] = None
 
     for attempt_idx, (attempt_url, attempt_headers) in enumerate(attempts):
-        response = await session.post(
-            attempt_url, json=gemini_payload, headers=attempt_headers
-        )
+        response = await session.post(attempt_url, json=gemini_payload, headers=attempt_headers)
         last_status = response.status
         log.info(f"{log_prefix} Status: {response.status}")
 
@@ -1028,9 +985,7 @@ async def update_config(
     """Update Gemini API configuration."""
     # Preserve existing per-URL prefix_id to avoid breaking chats when admins edit connections.
     # prefix_id is an internal stable identifier used for uniqueness/routing and should not be user-editable.
-    prev_urls = list(
-        getattr(request.app.state.config, "GEMINI_API_BASE_URLS", []) or []
-    )
+    prev_urls = list(getattr(request.app.state.config, "GEMINI_API_BASE_URLS", []) or [])
     prev_cfgs = getattr(request.app.state.config, "GEMINI_API_CONFIGS", {}) or {}
     prev_prefix_by_url: dict[str, str] = {}
     prev_empty_urls: set[str] = set()
@@ -1041,11 +996,7 @@ async def update_config(
             continue
         cfg = prev_cfgs.get(str(idx), prev_cfgs.get(prev_url, {})) or {}
         raw = cfg.get("prefix_id", None)
-        prefix = (
-            (raw or "").strip()
-            if isinstance(raw, str)
-            else (str(raw).strip() if raw is not None else "")
-        )
+        prefix = (raw or "").strip() if isinstance(raw, str) else (str(raw).strip() if raw is not None else "")
         if prefix:
             prev_prefix_by_url.setdefault(url_key, prefix)
         else:
@@ -1156,7 +1107,7 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
     num_urls = len(base_urls)
     cfgs = cfgs or {}
 
-    # Normalize prefix_id for multi-connection setups and persist if needed.
+    # Normalize prefix_id for multi-connection setups in memory only.
     cfgs_changed = False
     if num_urls > 1:
         cfgs = dict(cfgs)
@@ -1183,8 +1134,12 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
                 if preserved_empty_idx == idx:
                     prefix_id = ""
                 else:
-                    prefix_id = secrets.token_hex(4)
-                    cfgs_changed = True
+                    prefix_id = derive_connection_id(
+                        provider="gemini",
+                        source="personal",
+                        url=base_urls[idx],
+                        api_key=keys[idx] if idx < len(keys) else "",
+                    )
 
             if prefix_id:
                 if prefix_id in used:
@@ -1212,20 +1167,6 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
             if cfgs.get(key) != next_cfg:
                 cfgs_changed = True
             cfgs[key] = next_cfg
-
-    if cfgs_changed and user:
-        try:
-            set_user_connection_provider_config(
-                user.id,
-                "gemini",
-                {
-                    "GEMINI_API_BASE_URLS": base_urls,
-                    "GEMINI_API_KEYS": keys,
-                    "GEMINI_API_CONFIGS": cfgs,
-                },
-            )
-        except Exception:
-            pass
 
     request_tasks = []
     for idx, _url in enumerate(base_urls):
@@ -1281,7 +1222,12 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
         for model in model_list:
             model["urlIdx"] = idx
             model_name = model.get("name", "").replace("models/", "")
+            model["original_id"] = model_name
             model["id"] = f"{prefix_id}.{model_name}" if prefix_id else model_name
+            model["source"] = "personal"
+            model["connection_index"] = idx
+            if prefix_id:
+                model["connection_id"] = prefix_id
 
             if connection_name:
                 model["connection_name"] = connection_name
@@ -1300,6 +1246,15 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
                 model_support.get("supported") is True
             )
             model["native_web_search_support"] = dict(model_support)
+            decorate_provider_model_identity(
+                model,
+                provider="gemini",
+                model_id=model_name,
+                source="personal",
+                connection_index=idx,
+                connection_id=prefix_id,
+                legacy_ids=[model.get("id"), model_name],
+            )
 
     return responses
 
@@ -1331,15 +1286,22 @@ async def get_all_models(request: Request, user: UserModel) -> dict:
     for idx, response in enumerate(responses):
         if response and "models" in response:
             for model in response["models"]:
-                model_id = model.get("id", model.get("name", "").replace("models/", ""))
+                model_id = (
+                    model.get("model_id")
+                    or model.get("original_id")
+                    or model.get("id")
+                    or model.get("name", "").replace("models/", "")
+                )
 
                 supported_methods = model.get("supportedGenerationMethods", [])
                 if "generateContent" not in supported_methods:
                     continue
 
-                if model_id and model_id not in models:
-                    models[model_id] = {
-                        "id": model_id,
+                selection_id = model.get("selection_id") or model.get("id")
+                if model_id and selection_id and selection_id not in models:
+                    models[selection_id] = {
+                        **model,
+                        "id": model.get("id") or model_id,
                         "name": model.get("displayName", model_id),
                         "owned_by": "google",
                         "gemini": model,
@@ -1362,16 +1324,8 @@ async def get_all_models(request: Request, user: UserModel) -> dict:
                             if "native_web_search_support" in model
                             else {}
                         ),
-                        **(
-                            {"connection_name": model["connection_name"]}
-                            if "connection_name" in model
-                            else {}
-                        ),
-                        **(
-                            {"connection_icon": model["connection_icon"]}
-                            if "connection_icon" in model
-                            else {}
-                        ),
+                        **({"connection_name": model["connection_name"]} if "connection_name" in model else {}),
+                        **({"connection_icon": model["connection_icon"]} if "connection_icon" in model else {}),
                         **({"tags": model["tags"]} if "tags" in model else {}),
                     }
 
@@ -1451,11 +1405,7 @@ def _strip_gemini_model_prefix(model_id: str, api_config: Optional[dict]) -> str
         or (api_config or {}).get("prefix_id")
         or ""
     ).strip()
-    if (
-        resolved_prefix
-        and isinstance(model_id, str)
-        and model_id.startswith(f"{resolved_prefix}.")
-    ):
+    if resolved_prefix and isinstance(model_id, str) and model_id.startswith(f"{resolved_prefix}."):
         return model_id[len(resolved_prefix) + 1 :]
     return model_id
 
@@ -1508,9 +1458,7 @@ async def verify_connection(
                     model_id=model.get("name", "").replace("models/", ""),
                     model_name=model.get("displayName", ""),
                 )
-                model["native_web_search_supported"] = (
-                    model_support.get("supported") is True
-                )
+                model["native_web_search_supported"] = model_support.get("supported") is True
                 model["native_web_search_support"] = dict(model_support)
         return response
     except HTTPException:
@@ -1581,9 +1529,7 @@ async def health_check_connection(
     try:
         async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
             for full_url, headers in _auth_attempts(request_url, key or "", config):
-                async with session.post(
-                    full_url, headers=headers, json=payload
-                ) as response:
+                async with session.post(full_url, headers=headers, json=payload) as response:
                     body = await _read_gemini_upstream_body(response)
                     if response.status < 400 and isinstance(body, dict):
                         return {
@@ -1638,14 +1584,33 @@ async def generate_chat_completion(
     custom_params = payload.pop("custom_params", None)
     metadata = payload.pop("metadata", None)
 
-    model_id = payload.get("model", "")
-    model_info_db = Models.get_model_by_id(model_id)
+    request_models = getattr(request.state, "MODELS", None) or getattr(
+        request.app.state, "MODELS", {}
+    )
+    requested_model_id = payload.get("model", "")
+    request_model_entry = (
+        request_models.get(requested_model_id)
+        if isinstance(request_models, dict)
+        else None
+    )
+
+    model_id = requested_model_id
+    model_record_id = (
+        request_model_entry.get("id")
+        if isinstance(request_model_entry, dict)
+        else model_id
+    )
+    model_info_db = Models.get_model_by_id(model_id) or Models.get_model_by_id(
+        model_record_id
+    )
+    model_ref = get_model_ref_from_model(request_model_entry)
 
     # Apply model overrides/params/system prompt (OpenAI-format) before converting to Gemini.
     if model_info_db:
         if model_info_db.base_model_id:
             payload["model"] = model_info_db.base_model_id
             model_id = model_info_db.base_model_id
+            model_ref = get_base_model_ref_from_model_info(model_info_db) or model_ref
 
         params = model_info_db.params.model_dump()
         payload = apply_model_params_to_body_openai(params, payload)
@@ -1671,48 +1636,53 @@ async def generate_chat_completion(
     stream = form_data.get("stream", False)
 
     # Resolve connection config from the *connection owner* (defaults to the requester).
-    connection_user = (
-        getattr(getattr(request, "state", None), "connection_user", None) or user
-    )
+    connection_user = getattr(getattr(request, "state", None), "connection_user", None) or user
     base_urls, keys, cfgs = _get_gemini_user_config(connection_user)
     if not base_urls:
         raise HTTPException(status_code=404, detail="No connections configured")
 
+    if not model_ref and isinstance(request_models, dict):
+        model_ref = get_model_ref_from_model(request_models.get(model_id))
+
     idx, url, key, api_config = _resolve_gemini_connection_by_model_id(
-        model_id, base_urls, keys, cfgs
+        model_id,
+        base_urls,
+        keys,
+        cfgs,
+        model_ref=model_ref,
+        request_models=request_models,
     )
     if not url:
         raise HTTPException(status_code=404, detail="Connection not found")
+
+    if api_config.get("_resolved_model_id"):
+        form_data["model"] = api_config["_resolved_model_id"]
+        model_id = form_data["model"]
 
     # Convert OpenAI format to Gemini format
     messages = form_data.get("messages", [])
 
     # Detect if this is an image editing model
     image_edit_keywords = ["image-preview", "image-edit", "imagen"]
-    is_image_edit_model = any(
-        keyword in model_id.lower() for keyword in image_edit_keywords
-    )
-
+    is_image_edit_model = any(keyword in model_id.lower() for keyword in image_edit_keywords)
+    
     # For image editing models, only use the last user message to save tokens
     # Image editing is a single-shot operation that doesn't need conversation history
     if is_image_edit_model:
         original_count = len(messages)
-
+        
         # Extract system message if present
         system_msg = None
         for msg in messages:
             if msg.get("role") == "system":
                 system_msg = msg
                 break
-
+        
         # Helper function to check if a message contains an image
         # Supports both OpenAI format {"type": "image_url"} and Markdown format ![...](data:image/...)
         import re
-
-        markdown_image_pattern = re.compile(
-            r"!\[.*?\]\((data:image/[^;]+;base64,[A-Za-z0-9+/=]+)\)"
-        )
-
+        markdown_image_pattern = re.compile(r'!\[.*?\]\((data:image/[^;]+;base64,[A-Za-z0-9+/=]+)\)')
+        
         def has_image(msg):
             content = msg.get("content", "")
             # Ensure content is string, not bytes
@@ -1732,7 +1702,7 @@ async def generate_chat_completion(
                 if markdown_image_pattern.search(content):
                     return True
             return False
-
+            
         # Helper function to extract images from a message
         # Converts Markdown images to OpenAI format for consistency
         def extract_images(msg):
@@ -1747,18 +1717,18 @@ async def generate_chat_completion(
             # Extract from OpenAI multimodal format
             if isinstance(content, list):
                 for item in content:
-                    if isinstance(item, dict) and item.get("type") in [
-                        "image_url",
-                        "image",
-                    ]:
+                    if isinstance(item, dict) and item.get("type") in ["image_url", "image"]:
                         images.append(item)
             # Extract from Markdown format and convert to OpenAI format
             if isinstance(content, str):
                 matches = markdown_image_pattern.findall(content)
                 for data_url in matches:
-                    images.append({"type": "image_url", "image_url": {"url": data_url}})
+                    images.append({
+                        "type": "image_url",
+                        "image_url": {"url": data_url}
+                    })
             return images
-
+        
         # Helper function to extract text from a message
         def extract_text(msg):
             content = msg.get("content", "")
@@ -1770,7 +1740,7 @@ async def generate_chat_completion(
                     content = ""
             if isinstance(content, str):
                 # Remove Markdown image syntax from text
-                text = markdown_image_pattern.sub("", content).strip()
+                text = markdown_image_pattern.sub('', content).strip()
                 return text if text else content
             if isinstance(content, list):
                 texts = []
@@ -1783,32 +1753,23 @@ async def generate_chat_completion(
             return ""
 
         # DEBUG LOGGING: Print structure of last few messages to understand why image is not found
-        log.info(
-            f"DEBUG: Scanning {len(messages)} messages for images. Dumping structure:"
-        )
+        log.info(f"DEBUG: Scanning {len(messages)} messages for images. Dumping structure:")
         for i, msg in enumerate(reversed(messages)):
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
             content_type = type(content).__name__
             content_preview = "..."
             if isinstance(content, list):
-                content_preview = str(
-                    [
-                        (
-                            {k: v for k, v in item.items() if k != "image_url"}
-                            if isinstance(item, dict)
-                            else str(item)[:50]
-                        )
-                        for item in content
-                    ]
-                )
+                content_preview = str([
+                    {k: v for k, v in item.items() if k != 'image_url'} 
+                    if isinstance(item, dict) else str(item)[:50] 
+                    for item in content
+                ])
             elif isinstance(content, str):
                 content_preview = content[:100]
-
-            log.info(
-                f"DEBUG Msg {len(messages)-1-i} [{role}]: type={content_type}, content={content_preview}"
-            )
-            if i >= 4:  # Only check last 5 messages to avoid log spam
+            
+            log.info(f"DEBUG Msg {len(messages)-1-i} [{role}]: type={content_type}, content={content_preview}")
+            if i >= 4: # Only check last 5 messages to avoid log spam
                 break
 
         # Find the last message with an image (from ANY role: user or assistant)
@@ -1818,18 +1779,16 @@ async def generate_chat_completion(
             if has_image(msg):
                 last_image_msg = msg
                 last_image_index = len(messages) - 1 - i
-                log.info(
-                    f"Found image in message {last_image_index} (Role: {msg.get('role')})"
-                )
+                log.info(f"Found image in message {last_image_index} (Role: {msg.get('role')})")
                 break
-
+        
         # Find the last user message (the edit instruction)
         last_user_msg = None
         for msg in reversed(messages):
             if msg.get("role") == "user":
                 last_user_msg = msg
                 break
-
+        
         # CRITICAL FIX: Only modify messages if we actually found what we need
         if last_image_msg and last_user_msg:
             # Build the combined message
@@ -1837,54 +1796,40 @@ async def generate_chat_completion(
                 # Image and instruction are in different messages - merge them
                 images = extract_images(last_image_msg)
                 instruction_text = extract_text(last_user_msg)
-
+                
                 # Create combined content: images + instruction text
                 combined_content = images + [{"type": "text", "text": instruction_text}]
                 combined_msg = {"role": "user", "content": combined_content}
-
+                
                 messages = [combined_msg]
-                log.info(
-                    f"Image edit mode: Merged image from msg {last_image_index} with instruction from last user msg"
-                )
+                log.info(f"Image edit mode: Merged image from msg {last_image_index} with instruction from last user msg")
             else:
                 # Last message already contains the image, use it directly
                 messages = [last_user_msg]
-                log.info(
-                    "Image edit mode: Last user message already contains the image"
-                )
-
+                log.info("Image edit mode: Last user message already contains the image")
+            
             if system_msg:
                 messages.insert(0, system_msg)
-            log.info(
-                f"Image edit mode: Trimmed messages from {original_count} to {len(messages)} to save tokens"
-            )
+            log.info(f"Image edit mode: Trimmed messages from {original_count} to {len(messages)} to save tokens")
         else:
-            log.warning(
-                f"Image edit mode: Aborted optimization. Found Image: {bool(last_image_msg)}, Found User Msg: {bool(last_user_msg)}. Sending original messages."
-            )
+            log.warning(f"Image edit mode: Aborted optimization. Found Image: {bool(last_image_msg)}, Found User Msg: {bool(last_user_msg)}. Sending original messages.")
 
     # Build Gemini contents
     contents = []
     system_instruction = None
 
     # DEBUG: Log the raw messages before conversion
-    log.info(
-        f"[GEMINI MESSAGES DEBUG] Received {len(messages)} messages from middleware"
-    )
+    log.info(f"[GEMINI MESSAGES DEBUG] Received {len(messages)} messages from middleware")
     for i, msg in enumerate(messages):
         msg_role = msg.get("role", "unknown")
         msg_content_preview = str(msg.get("content", ""))[:100]
         has_tool_calls = bool(msg.get("tool_calls"))
         tool_call_id = msg.get("tool_call_id", "")
-        log.info(
-            f"[GEMINI MESSAGES DEBUG] Message {i}: role={msg_role}, has_tool_calls={has_tool_calls}, tool_call_id={tool_call_id}, content_preview={msg_content_preview}"
-        )
+        log.info(f"[GEMINI MESSAGES DEBUG] Message {i}: role={msg_role}, has_tool_calls={has_tool_calls}, tool_call_id={tool_call_id}, content_preview={msg_content_preview}")
 
         # DEBUG: Log full structure of assistant and tool messages
         if msg_role in ("assistant", "tool", "function"):
-            log.info(
-                f"[GEMINI MESSAGES DEBUG] Message {i} FULL: {json.dumps(msg, ensure_ascii=False, default=str)[:1000]}"
-            )
+            log.info(f"[GEMINI MESSAGES DEBUG] Message {i} FULL: {json.dumps(msg, ensure_ascii=False, default=str)[:1000]}")
 
     for msg in messages:
         role = msg.get("role", "user")
@@ -1904,18 +1849,12 @@ async def generate_chat_completion(
             # we need to find it by matching tool_call_id with previous assistant message's tool_calls
             if not tool_name and tool_call_id:
                 # Search backwards through messages to find the assistant message with matching tool_call_id
-                for prev_msg in reversed(messages[: messages.index(msg)]):
-                    if prev_msg.get("role") == "assistant" and prev_msg.get(
-                        "tool_calls"
-                    ):
+                for prev_msg in reversed(messages[:messages.index(msg)]):
+                    if prev_msg.get("role") == "assistant" and prev_msg.get("tool_calls"):
                         for tool_call in prev_msg.get("tool_calls", []):
                             if tool_call.get("id") == tool_call_id:
-                                tool_name = tool_call.get("function", {}).get(
-                                    "name", ""
-                                )
-                                log.info(
-                                    f"[TOOL RESPONSE DEBUG] Found tool_name={tool_name} by matching tool_call_id={tool_call_id}"
-                                )
+                                tool_name = tool_call.get("function", {}).get("name", "")
+                                log.info(f"[TOOL RESPONSE DEBUG] Found tool_name={tool_name} by matching tool_call_id={tool_call_id}")
                                 break
                     if tool_name:
                         break
@@ -1930,9 +1869,7 @@ async def generate_chat_completion(
                 response_data = {"result": content}
 
             # DEBUG: Log the response data structure
-            log.info(
-                f"[TOOL RESPONSE DEBUG] tool_call_id={tool_call_id}, tool_name={tool_name}, response_data type={type(response_data).__name__}, value={json.dumps(response_data, ensure_ascii=False, default=str)[:500]}"
-            )
+            log.info(f"[TOOL RESPONSE DEBUG] tool_call_id={tool_call_id}, tool_name={tool_name}, response_data type={type(response_data).__name__}, value={json.dumps(response_data, ensure_ascii=False, default=str)[:500]}")
 
             # Gemini API expects functionResponse with 'response' field containing a dict
             # CRITICAL FIX: If response_data is a list (e.g., search results), wrap it in a dict with 'results' key
@@ -1943,22 +1880,16 @@ async def generate_chat_completion(
                 response_data = {"result": str(response_data)}
 
             # Gemini API要求functionResponse使用role="user"而不是"function"
-            contents.append(
-                {
-                    "role": "user",
-                    "parts": [
-                        {
-                            "functionResponse": {
-                                "name": tool_name,
-                                "response": response_data,
-                            }
-                        }
-                    ],
-                }
-            )
-            log.info(
-                f"[TOOL RESPONSE DEBUG] Added functionResponse to contents: {json.dumps(contents[-1], ensure_ascii=False, default=str)[:500]}"
-            )
+            contents.append({
+                "role": "user",
+                "parts": [{
+                    "functionResponse": {
+                        "name": tool_name,
+                        "response": response_data
+                    }
+                }]
+            })
+            log.info(f"[TOOL RESPONSE DEBUG] Added functionResponse to contents: {json.dumps(contents[-1], ensure_ascii=False, default=str)[:500]}")
             continue
 
         gemini_role = "user" if role == "user" else "model"
@@ -1982,27 +1913,22 @@ async def generate_chat_completion(
 
                 # Parse arguments from JSON string to dict
                 try:
-                    function_args = (
-                        json.loads(function_args_str)
-                        if isinstance(function_args_str, str)
-                        else function_args_str
-                    )
+                    function_args = json.loads(function_args_str) if isinstance(function_args_str, str) else function_args_str
                 except json.JSONDecodeError:
                     function_args = {}
 
                 if function_name:
                     function_call_part = {
-                        "functionCall": {"name": function_name, "args": function_args}
+                        "functionCall": {
+                            "name": function_name,
+                            "args": function_args
+                        }
                     }
                     # Restore thought_signature for Gemini 3 compatibility
                     thought_signature = tool_call.get("thought_signature", "")
                     if thought_signature:
-                        function_call_part["functionCall"][
-                            "thought_signature"
-                        ] = thought_signature
-                        log.info(
-                            f"[GEMINI 3] Restored thought_signature for function {function_name}"
-                        )
+                        function_call_part["functionCall"]["thought_signature"] = thought_signature
+                        log.info(f"[GEMINI 3] Restored thought_signature for function {function_name}")
 
                     parts.append(function_call_part)
 
@@ -2018,14 +1944,18 @@ async def generate_chat_completion(
                     parts.append({"text": item.get("text", "")})
                 elif item.get("type") == "image_url":
                     image_url = item.get("image_url", {}).get("url", "")
-                    if image_url.startswith("data:"):
-                        header, data = image_url.split(",", 1)
-                        mime_type = header.split(":")[1].split(";")[0]
+                    resolved = resolve_chat_image_url_to_bytes(
+                        image_url,
+                        user_id=user.id,
+                        is_admin=user.role == "admin",
+                    )
+                    if resolved:
+                        mime_type, raw_data = resolved
                         parts.append(
                             {
                                 "inline_data": {
                                     "mime_type": mime_type,
-                                    "data": data,
+                                    "data": base64.b64encode(raw_data).decode("utf-8"),
                                 }
                             }
                         )
@@ -2037,14 +1967,8 @@ async def generate_chat_completion(
 
     # Clean model ID for Gemini API
     gemini_model = model_id
-    resolved_prefix = (
-        api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or ""
-    ).strip()
-    if (
-        resolved_prefix
-        and isinstance(model_id, str)
-        and model_id.startswith(f"{resolved_prefix}.")
-    ):
+    resolved_prefix = (api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or "").strip()
+    if resolved_prefix and isinstance(model_id, str) and model_id.startswith(f"{resolved_prefix}."):
         gemini_model = model_id[len(resolved_prefix) + 1 :]
 
     # Build Gemini request
@@ -2068,9 +1992,7 @@ async def generate_chat_completion(
         gemini_payload["generationConfig"]["topP"] = form_data["top_p"]
     if "stop" in form_data:
         gemini_payload["generationConfig"]["stopSequences"] = (
-            form_data["stop"]
-            if isinstance(form_data["stop"], list)
-            else [form_data["stop"]]
+            form_data["stop"] if isinstance(form_data["stop"], list) else [form_data["stop"]]
         )
 
     # Handle reasoning_effort -> thinkingConfig
@@ -2099,11 +2021,9 @@ async def generate_chat_completion(
         if budget > 0:
             gemini_payload["generationConfig"]["thinkingConfig"] = {
                 "thinkingBudget": budget,
-                "includeThoughts": True,  # Required to get thinking content in response
+                "includeThoughts": True  # Required to get thinking content in response
             }
-            log.info(
-                f"[GEMINI] Enabled thinkingConfig with budget {budget} for model {gemini_model}"
-            )
+            log.info(f"[GEMINI] Enabled thinkingConfig with budget {budget} for model {gemini_model}")
 
     # Handle tools: Convert OpenAI format to Gemini format
     # Priority: Google Search > Native Tools
@@ -2116,15 +2036,11 @@ async def generate_chat_completion(
         gemini_tools = _convert_openai_tools_to_gemini(form_data["tools"])
         if gemini_tools:
             gemini_payload["tools"] = gemini_tools
-            log.info(
-                f"Converted {len(form_data['tools'])} OpenAI tools to Gemini format for model: {gemini_model}"
-            )
+            log.info(f"Converted {len(form_data['tools'])} OpenAI tools to Gemini format for model: {gemini_model}")
             # Log first tool for debugging schema cleaning
             if gemini_tools and gemini_tools[0].get("functionDeclarations"):
                 first_func = gemini_tools[0]["functionDeclarations"][0]
-                log.info(
-                    f"[GEMINI TOOLS DEBUG] First function after cleaning: {json.dumps(first_func, ensure_ascii=False, default=str)[:500]}"
-                )
+                log.info(f"[GEMINI TOOLS DEBUG] First function after cleaning: {json.dumps(first_func, ensure_ascii=False, default=str)[:500]}")
 
     # CRITICAL FIX: Gemini tool calling的消息序列规则
     # 当最后一条消息包含functionResponse时,说明我们在tool calling的第二轮
@@ -2135,14 +2051,10 @@ async def generate_chat_completion(
     last_has_function_response = False
     if contents:
         last_parts = contents[-1].get("parts", [])
-        last_has_function_response = any(
-            "functionResponse" in part for part in last_parts
-        )
+        last_has_function_response = any("functionResponse" in part for part in last_parts)
 
     if last_has_function_response:
-        log.info(
-            "[GEMINI TOOL FIX] Detected tool calling scenario (last message contains functionResponse)"
-        )
+        log.info("[GEMINI TOOL FIX] Detected tool calling scenario (last message contains functionResponse)")
 
         # 从后往前找到包含tool call的model消息
         tool_call_index = -1
@@ -2168,9 +2080,7 @@ async def generate_chat_completion(
         # 对于Gemini 3: 如果functionCall缺少thought_signature，使用替代方案
         is_gemini_3 = "gemini-3" in gemini_model.lower()
         if is_gemini_3 and not has_thought_signature and tool_call_index >= 0:
-            log.info(
-                "[GEMINI 3 WORKAROUND] functionCall missing thought_signature, converting to text format"
-            )
+            log.info("[GEMINI 3 WORKAROUND] functionCall missing thought_signature, converting to text format")
 
             # 找到user消息
             user_msg_index = -1
@@ -2178,9 +2088,7 @@ async def generate_chat_completion(
                 if contents[i].get("role") == "user":
                     parts = contents[i].get("parts", [])
                     has_text = any("text" in part for part in parts)
-                    has_func_response = any(
-                        "functionResponse" in part for part in parts
-                    )
+                    has_func_response = any("functionResponse" in part for part in parts)
                     if has_text and not has_func_response:
                         user_msg_index = i
                         break
@@ -2205,16 +2113,12 @@ async def generate_chat_completion(
                         break
 
                 # 创建新的contents: 只有user消息，包含原始问题+工具结果
-                combined_text = (
-                    user_text
-                    + func_response_text
-                    + "\n\nPlease answer based on the tool results above."
-                )
-                new_contents = [{"role": "user", "parts": [{"text": combined_text}]}]
+                combined_text = user_text + func_response_text + "\n\nPlease answer based on the tool results above."
+                new_contents = [
+                    {"role": "user", "parts": [{"text": combined_text}]}
+                ]
                 gemini_payload["contents"] = new_contents
-                log.info(
-                    f"[GEMINI 3 WORKAROUND] Converted to single user message with tool results embedded"
-                )
+                log.info(f"[GEMINI 3 WORKAROUND] Converted to single user message with tool results embedded")
 
         else:
             # 正常的tool calling流程 (非Gemini 3，或有thought_signature)
@@ -2226,14 +2130,10 @@ async def generate_chat_completion(
                         # 确保这是包含text的user消息,不是functionResponse
                         parts = contents[i].get("parts", [])
                         has_text = any("text" in part for part in parts)
-                        has_func_response = any(
-                            "functionResponse" in part for part in parts
-                        )
+                        has_func_response = any("functionResponse" in part for part in parts)
                         if has_text and not has_func_response:
                             user_msg_index = i
-                            log.info(
-                                f"[GEMINI TOOL FIX] Found corresponding user message at index {i}"
-                            )
+                            log.info(f"[GEMINI TOOL FIX] Found corresponding user message at index {i}")
                             break
 
                 # 只保留user->model(tool_call)->functionResponse这三条消息
@@ -2241,24 +2141,14 @@ async def generate_chat_completion(
                     original_count = len(contents)
                     trimmed_contents = contents[user_msg_index:]
                     gemini_payload["contents"] = trimmed_contents
-                    log.info(
-                        f"[GEMINI TOOL FIX] Trimmed contents from {original_count} to {len(trimmed_contents)} messages"
-                    )
-                    log.info(
-                        f"[GEMINI TOOL FIX] Kept messages from index {user_msg_index} to end"
-                    )
+                    log.info(f"[GEMINI TOOL FIX] Trimmed contents from {original_count} to {len(trimmed_contents)} messages")
+                    log.info(f"[GEMINI TOOL FIX] Kept messages from index {user_msg_index} to end")
 
     # DEBUG: Log the complete contents array before making the request
-    log.info(
-        f"[GEMINI PAYLOAD DEBUG] Complete contents count: {len(gemini_payload.get('contents', []))}"
-    )
+    log.info(f"[GEMINI PAYLOAD DEBUG] Complete contents count: {len(gemini_payload.get('contents', []))}")
     for i, item in enumerate(gemini_payload.get("contents", [])):
-        log.info(
-            f"[GEMINI PAYLOAD DEBUG] Content {i}: role={item.get('role')}, parts_count={len(item.get('parts', []))}, parts_types={[list(p.keys()) for p in item.get('parts', [])]}"
-        )
-    log.info(
-        f"[GEMINI PAYLOAD DEBUG] Complete contents array: {json.dumps(gemini_payload.get('contents', []), ensure_ascii=False, default=str)[:2000]}"
-    )
+        log.info(f"[GEMINI PAYLOAD DEBUG] Content {i}: role={item.get('role')}, parts_count={len(item.get('parts', []))}, parts_types={[list(p.keys()) for p in item.get('parts', [])]}")
+    log.info(f"[GEMINI PAYLOAD DEBUG] Complete contents array: {json.dumps(gemini_payload.get('contents', []), ensure_ascii=False, default=str)[:2000]}")
 
     gemini_payload = merge_additive_payload_fields(
         gemini_payload,
@@ -2271,9 +2161,7 @@ async def generate_chat_completion(
         del gemini_payload["generationConfig"]
 
     # Log full payload for debugging 400 errors
-    log.info(
-        f"[GEMINI PAYLOAD DEBUG] Full payload: {json.dumps(gemini_payload, ensure_ascii=False, default=str)[:5000]}"
-    )
+    log.info(f"[GEMINI PAYLOAD DEBUG] Full payload: {json.dumps(gemini_payload, ensure_ascii=False, default=str)[:5000]}")
 
     # Make request to Gemini API
     non_stream_url = f"{url}/models/{gemini_model}:generateContent"
@@ -2299,17 +2187,13 @@ async def generate_chat_completion(
             warning_limiter = _StreamWarningLimiter(stream_id)
 
             try:
-                async with aiohttp.ClientSession(
-                    timeout=timeout, trust_env=True
-                ) as session:
-                    response, _used_payload, last_status, last_err_text = (
-                        await _open_gemini_response(
-                            session,
-                            attempts,
-                            gemini_payload,
-                            log_prefix="Gemini Stream Response",
-                            allow_drop_response_modalities=not is_image_model,
-                        )
+                async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
+                    response, _used_payload, last_status, last_err_text = await _open_gemini_response(
+                        session,
+                        attempts,
+                        gemini_payload,
+                        log_prefix="Gemini Stream Response",
+                        allow_drop_response_modalities=not is_image_model,
                     )
 
                     if response is None and is_image_model:
@@ -2330,9 +2214,7 @@ async def generate_chat_completion(
                         )
                         if fallback_response is not None:
                             try:
-                                gemini_response = await fallback_response.json(
-                                    content_type=None
-                                )
+                                gemini_response = await fallback_response.json(content_type=None)
                             finally:
                                 await fallback_response.release()
 
@@ -2352,18 +2234,12 @@ async def generate_chat_completion(
                             yield "data: [DONE]\n\n"
                             return
 
-                        last_status = (
-                            fallback_status
-                            if fallback_status is not None
-                            else last_status
-                        )
+                        last_status = fallback_status if fallback_status is not None else last_status
                         last_err_text = fallback_err_text or last_err_text
 
                     if response is None:
                         msg = _format_gemini_upstream_error(
-                            request_url=(
-                                non_stream_url if is_image_model else request_url
-                            ),
+                            request_url=non_stream_url if is_image_model else request_url,
                             status=last_status or 500,
                             body=last_err_text,
                         )
@@ -2468,7 +2344,7 @@ async def generate_chat_completion(
                     "error": {
                         "message": str(e),
                         "type": "stream_error",
-                        "code": "internal_error",
+                        "code": "internal_error"
                     }
                 }
                 yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
@@ -2480,14 +2356,12 @@ async def generate_chat_completion(
     try:
         timeout = aiohttp.ClientTimeout(total=300)
         async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-            response, _used_payload, last_status, last_err_text = (
-                await _open_gemini_response(
-                    session,
-                    attempts,
-                    gemini_payload,
-                    log_prefix="Gemini Chat Response",
-                    allow_drop_response_modalities=not is_image_model,
-                )
+            response, _used_payload, last_status, last_err_text = await _open_gemini_response(
+                session,
+                attempts,
+                gemini_payload,
+                log_prefix="Gemini Chat Response",
+                allow_drop_response_modalities=not is_image_model,
             )
             if response is None:
                 raise HTTPException(
@@ -2523,9 +2397,7 @@ def convert_gemini_to_openai(gemini_response: dict, model_id: str) -> dict:
         # SAFEGUARD: Skip if candidate is None
         if candidate is None or not isinstance(candidate, dict):
             continue
-        text, image_md, grounding_md, thinking_content, tool_calls, tool_call_index = (
-            _extract_content(candidate, tool_call_index)
-        )
+        text, image_md, grounding_md, thinking_content, tool_calls, tool_call_index = _extract_content(candidate, tool_call_index)
         combined = (text or "") + (image_md or "") + (grounding_md or "")
 
         message = {"role": "assistant", "content": combined}
@@ -2539,12 +2411,7 @@ def convert_gemini_to_openai(gemini_response: dict, model_id: str) -> dict:
             message["tool_calls"] = tool_calls
 
         # Determine finish_reason based on whether there are tool calls
-        finish_reason = (
-            _map_finish_reason(
-                candidate.get("finishReason") if isinstance(candidate, dict) else None
-            )
-            or "stop"
-        )
+        finish_reason = _map_finish_reason(candidate.get("finishReason") if isinstance(candidate, dict) else None) or "stop"
         if tool_calls and finish_reason == "stop":
             finish_reason = "tool_calls"
 
@@ -2583,9 +2450,7 @@ def convert_gemini_to_openai_stream(gemini_chunk: dict, model_id: str) -> dict:
     tool_call_index = 0  # Track tool call index
 
     for i, candidate in enumerate(candidates):
-        text, image_md, grounding_md, thinking_content, tool_calls, tool_call_index = (
-            _extract_content(candidate, tool_call_index)
-        )
+        text, image_md, grounding_md, thinking_content, tool_calls, tool_call_index = _extract_content(candidate, tool_call_index)
         combined = (text or "") + (image_md or "") + (grounding_md or "")
         delta = {"content": combined} if combined else {}
 

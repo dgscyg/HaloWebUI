@@ -16,6 +16,7 @@ dependencies = [
     "passlib[bcrypt]==1.7.4",
 
     "requests==2.32.3",
+    "httpx==0.28.1",
     "aiohttp==3.11.11",
     "async-timeout",
     "aiocache",
@@ -69,6 +70,7 @@ dependencies = [
     "einops==0.8.1",
 
     "chardet==5.2.0",
+    "brotli==1.1.0",
     "ftfy==6.2.3",
     "pypdf==4.3.1",
     "fpdf2==2.8.2",

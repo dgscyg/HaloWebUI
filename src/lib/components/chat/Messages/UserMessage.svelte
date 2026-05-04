@@ -14,7 +14,7 @@
 	import Markdown from './Markdown.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import { ChevronLeft, ChevronRight, PencilLine, Copy, Trash2 } from 'lucide-svelte';
+	import { ChevronLeft, ChevronRight, PencilLine, Copy, Trash2, GitBranchPlus } from 'lucide-svelte';
 
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 
@@ -34,6 +34,9 @@
 
 	export let editMessage: Function;
 	export let deleteMessage: Function;
+	export let onBranchMessage: Function = () => {};
+	export let branchingMessageId: string | null = null;
+	export let branchSupported = false;
 
 	export let isFirstMessage: boolean;
 	export let readOnly: boolean;
@@ -46,9 +49,13 @@
 	let editedContent = '';
 	let messageEditTextAreaElement: HTMLTextAreaElement;
 	let messageEditScrollElement: HTMLDivElement;
+	let isBranching = false;
+	let branchTooltip = '';
 
 	let message = history.messages?.[messageId];
 	$: message = history.messages?.[messageId];
+	$: isBranching = branchingMessageId === message?.id;
+	$: branchTooltip = $i18n.t(isBranching ? 'Creating branch...' : 'Create branch');
 
 	const copyToClipboard = async (text) => {
 		const res = await _copyToClipboard(text);
@@ -170,7 +177,11 @@
 					{#each message.files as file}
 						<div class={($settings?.chatBubble ?? true) ? 'self-end' : ''}>
 							{#if file.type === 'image'}
-								<Image src={file.url} imageClassName=" max-h-96 rounded-lg" />
+								<Image
+									src={file.url}
+									className="w-fit max-w-full outline-hidden focus:outline-hidden"
+									imageClassName="rounded-lg chat-user-attachment-image"
+								/>
 							{:else}
 								<FileItem
 									item={file}
@@ -372,6 +383,24 @@
 									<Copy class="w-4 h-4" strokeWidth={2} />
 								</button>
 							</Tooltip>
+
+							{#if !readOnly && branchSupported}
+								<Tooltip content={branchTooltip} placement="bottom">
+									<button
+										class="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+										on:click={() => {
+											onBranchMessage(message.id);
+										}}
+										disabled={isBranching}
+										aria-busy={isBranching}
+									>
+										<GitBranchPlus
+											class={`w-4 h-4 ${isBranching ? 'animate-spin' : ''}`}
+											strokeWidth={2}
+										/>
+									</button>
+								</Tooltip>
+							{/if}
 
 							{#if !readOnly && (!isFirstMessage || siblings.length > 1)}
 								<Tooltip content={$i18n.t('Delete')} placement="bottom">

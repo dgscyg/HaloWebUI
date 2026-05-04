@@ -1,34 +1,9 @@
-<script context="module" lang="ts">
-	let openModalCount = 0;
-	let previousBodyOverflow = '';
-
-	const lockBodyScroll = () => {
-		if (typeof document === 'undefined') return;
-		if (openModalCount === 0) {
-			previousBodyOverflow = document.body.style.overflow;
-			document.body.style.overflow = 'hidden';
-		}
-		openModalCount += 1;
-	};
-
-	const unlockBodyScroll = () => {
-		if (typeof document === 'undefined') return;
-		if (openModalCount > 0) {
-			openModalCount -= 1;
-		}
-
-		if (openModalCount === 0) {
-			document.body.style.overflow = previousBodyOverflow;
-			previousBodyOverflow = '';
-		}
-	};
-</script>
-
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { fade } from 'svelte/transition';
 
 	import { flyAndScale } from '$lib/utils/transitions';
+	import { lockBodyScroll, unlockBodyScroll } from '$lib/utils/body-scroll-lock';
 	export let show = true;
 	export let size = 'md';
 	export let containerClassName = 'p-3';

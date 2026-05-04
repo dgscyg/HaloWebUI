@@ -7,7 +7,7 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, List, Literal, Optional, Sequence, Union
+from typing import Any, Iterator, List, Literal, Optional, Sequence, Union
 from urllib.parse import urlparse
 
 from fastapi import (
@@ -42,6 +42,10 @@ from open_webui.storage.provider import Storage
 from open_webui.retrieval.vector.connector import VECTOR_DB_CLIENT
 
 from open_webui.retrieval.loaders.youtube import YoutubeLoader
+from open_webui.retrieval.loaders.tavily import (
+    TavilyExtractAuthError,
+    TavilyLoader,
+)
 
 # Web search engines
 from open_webui.retrieval.web.main import SearchResult
@@ -143,6 +147,192 @@ def _normalize_tavily_config_url(
         ) from exc
 
 
+def _extract_http_status_from_exception(exc: Exception) -> Optional[int]:
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code
+
+    response = getattr(exc, "response", None)
+    response_status = getattr(response, "status_code", None)
+    if isinstance(response_status, int):
+        return response_status
+
+    return None
+
+
+def _extract_error_text_from_exception(exc: Exception) -> str:
+    response_text = str(getattr(exc, "response_text", "") or "").strip()
+    if response_text:
+        return response_text
+
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                candidate = (
+                    payload.get("detail") or payload.get("message") or payload.get("error")
+                )
+                if isinstance(candidate, dict):
+                    candidate = (
+                        candidate.get("message")
+                        or candidate.get("detail")
+                        or json.dumps(candidate, ensure_ascii=False)
+                    )
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+        except Exception:
+            pass
+
+        text = str(getattr(response, "text", "") or "").strip()
+        if text:
+            return text[:500]
+
+    message = str(exc).strip()
+    return message[:500] if message else "Unknown error"
+
+
+def _build_tavily_verify_item(
+    *,
+    enabled: bool,
+    ok: Optional[bool],
+    message: str,
+    http_status: Optional[int] = None,
+) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "enabled": enabled,
+        "ok": ok,
+        "message": message,
+    }
+    if http_status is not None:
+        item["http_status"] = http_status
+    return item
+
+
+def _build_tavily_loader_runtime_notice(
+    *,
+    fallback_succeeded: bool,
+    used_direct_docs: bool = False,
+    status_code: Optional[int] = None,
+) -> dict[str, Any]:
+    notice: dict[str, Any] = {
+        "type": "tavily_loader_auth_fallback",
+        "fallback_succeeded": fallback_succeeded,
+        "used_direct_docs": used_direct_docs,
+        "primary_loader_engine": "tavily",
+        "fallback_loader_engine": "safe_web",
+    }
+    if status_code is not None:
+        notice["status_code"] = status_code
+    return notice
+
+
+def _normalize_playwright_verify_timeout(timeout_ms: Optional[int]) -> int:
+    if isinstance(timeout_ms, int) and timeout_ms > 0:
+        return min(timeout_ms, 120000)
+    return 10000
+
+
+def _verify_playwright_loader(
+    *,
+    mode: Literal["local", "remote"],
+    playwright_ws_url: Optional[str] = None,
+    playwright_timeout: Optional[int] = None,
+) -> dict[str, Any]:
+    timeout_ms = _normalize_playwright_verify_timeout(playwright_timeout)
+    ws_url = str(playwright_ws_url or "").strip()
+
+    if mode == "remote" and not ws_url:
+        return {
+            "mode": "remote",
+            "ok": False,
+            "message": "外部浏览器服务模式需要填写 Playwright WebSocket 地址。",
+        }
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:
+        return {
+            "mode": mode,
+            "ok": False,
+            "message": (
+                "当前服务端未启用 Playwright 网页加载能力："
+                f"{_extract_error_text_from_exception(exc)}"
+            ),
+        }
+
+    browser = None
+    page = None
+    try:
+        with sync_playwright() as playwright:
+            if mode == "remote":
+                browser = playwright.chromium.connect(ws_url, timeout=timeout_ms)
+            else:
+                browser = playwright.chromium.launch(headless=True, timeout=timeout_ms)
+
+            page = browser.new_page()
+            page.set_content(
+                "<html><head><title>playwright verify</title></head><body>ok</body></html>",
+                timeout=timeout_ms,
+            )
+
+            return {
+                "mode": mode,
+                "ok": True,
+                "message": (
+                    "外部浏览器服务连接正常，可用于网页加载。"
+                    if mode == "remote"
+                    else "本地浏览器模式可用，可用于网页加载。"
+                ),
+            }
+    except Exception as exc:
+        if mode == "remote":
+            message = (
+                "外部浏览器服务连接失败，请检查 Playwright WebSocket 地址和浏览器服务状态："
+                f"{_extract_error_text_from_exception(exc)}"
+            )
+        else:
+            message = (
+                "本地浏览器模式不可用，请确认当前服务端已安装 Playwright 依赖与 Chromium 浏览器："
+                f"{_extract_error_text_from_exception(exc)}"
+            )
+
+        return {
+            "mode": mode,
+            "ok": False,
+            "message": message,
+        }
+    finally:
+        if page is not None:
+            try:
+                page.close()
+            except Exception:
+                pass
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
+
+
+async def _load_web_documents_with_loader(
+    request: Request,
+    urls: Sequence[str],
+    *,
+    loader_engine: Optional[str] = None,
+) -> list[Document]:
+    from open_webui.retrieval.web.utils import get_web_loader
+
+    loader = get_web_loader(
+        urls,
+        verify_ssl=request.app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION,
+        requests_per_second=request.app.state.config.WEB_SEARCH_CONCURRENT_REQUESTS,
+        trust_env=request.app.state.config.WEB_SEARCH_TRUST_ENV,
+        loader_engine=loader_engine,
+    )
+    return await loader.aload()
+
+
 def _log_text_content_summary(
     context: str,
     *,
@@ -183,6 +373,23 @@ class SearchForm(BaseModel):
     query: str
 
 
+class WebConfigVerifyForm(BaseModel):
+    WEB_SEARCH_ENGINE: Optional[str] = None
+    WEB_LOADER_ENGINE: Optional[str] = None
+    TAVILY_API_KEY: Optional[str] = None
+    TAVILY_SEARCH_API_BASE_URL: Optional[str] = None
+    TAVILY_SEARCH_API_FORCE_MODE: Optional[bool] = False
+    TAVILY_EXTRACT_API_BASE_URL: Optional[str] = None
+    TAVILY_EXTRACT_API_FORCE_MODE: Optional[bool] = False
+    TAVILY_EXTRACT_DEPTH: Optional[str] = None
+
+
+class PlaywrightConfigVerifyForm(BaseModel):
+    PLAYWRIGHT_MODE: Optional[Literal["local", "remote"]] = None
+    PLAYWRIGHT_WS_URL: Optional[str] = None
+    PLAYWRIGHT_TIMEOUT: Optional[int] = None
+
+
 @router.get("/")
 async def get_status(request: Request):
     return {
@@ -217,9 +424,7 @@ async def get_embedding_config(request: Request, user=Depends(get_admin_user)):
         "azure_openai_config": {
             "url": getattr(request.app.state.config, "RAG_AZURE_OPENAI_BASE_URL", ""),
             "key": getattr(request.app.state.config, "RAG_AZURE_OPENAI_API_KEY", ""),
-            "version": getattr(
-                request.app.state.config, "RAG_AZURE_OPENAI_API_VERSION", ""
-            ),
+            "version": getattr(request.app.state.config, "RAG_AZURE_OPENAI_API_VERSION", ""),
         },
         "ollama_config": {
             "url": request.app.state.config.RAG_OLLAMA_BASE_URL,
@@ -286,11 +491,7 @@ async def update_embedding_config(
         request.app.state.config.RAG_EMBEDDING_ENGINE = form_data.embedding_engine
         request.app.state.config.RAG_EMBEDDING_MODEL = form_data.embedding_model
 
-        if request.app.state.config.RAG_EMBEDDING_ENGINE in [
-            "ollama",
-            "openai",
-            "azure_openai",
-        ]:
+        if request.app.state.config.RAG_EMBEDDING_ENGINE in ["ollama", "openai", "azure_openai"]:
             if form_data.openai_config is not None:
                 request.app.state.config.RAG_OPENAI_API_BASE_URL = (
                     form_data.openai_config.url
@@ -346,15 +547,9 @@ async def update_embedding_config(
                 "key": request.app.state.config.RAG_OPENAI_API_KEY,
             },
             "azure_openai_config": {
-                "url": getattr(
-                    request.app.state.config, "RAG_AZURE_OPENAI_BASE_URL", ""
-                ),
-                "key": getattr(
-                    request.app.state.config, "RAG_AZURE_OPENAI_API_KEY", ""
-                ),
-                "version": getattr(
-                    request.app.state.config, "RAG_AZURE_OPENAI_API_VERSION", ""
-                ),
+                "url": getattr(request.app.state.config, "RAG_AZURE_OPENAI_BASE_URL", ""),
+                "key": getattr(request.app.state.config, "RAG_AZURE_OPENAI_API_KEY", ""),
+                "version": getattr(request.app.state.config, "RAG_AZURE_OPENAI_API_VERSION", ""),
             },
             "ollama_config": {
                 "url": request.app.state.config.RAG_OLLAMA_BASE_URL,
@@ -448,9 +643,7 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         "DOCUMENT_PROVIDER": request.app.state.config.DOCUMENT_PROVIDER,
         "DOCUMENT_PROVIDER_CONFIGS": request.app.state.config.DOCUMENT_PROVIDER_CONFIGS,
         "CONTENT_EXTRACTION_ENGINE": request.app.state.config.CONTENT_EXTRACTION_ENGINE,
-        "DATALAB_MARKER_API_KEY": getattr(
-            request.app.state.config, "DATALAB_MARKER_API_KEY", ""
-        ),
+        "DATALAB_MARKER_API_KEY": getattr(request.app.state.config, "DATALAB_MARKER_API_KEY", ""),
         "DATALAB_MARKER_API_BASE_URL": getattr(
             request.app.state.config, "DATALAB_MARKER_API_BASE_URL", ""
         ),
@@ -503,21 +696,13 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
             request.app.state.config, "DOCUMENT_INTELLIGENCE_MODEL", "prebuilt-layout"
         ),
         "MISTRAL_OCR_API_BASE_URL": getattr(
-            request.app.state.config,
-            "MISTRAL_OCR_API_BASE_URL",
-            "https://api.mistral.ai/v1",
+            request.app.state.config, "MISTRAL_OCR_API_BASE_URL", "https://api.mistral.ai/v1"
         ),
         "MISTRAL_OCR_API_KEY": request.app.state.config.MISTRAL_OCR_API_KEY,
-        "MINERU_API_MODE": getattr(
-            request.app.state.config, "MINERU_API_MODE", "local"
-        ),
-        "MINERU_API_URL": getattr(
-            request.app.state.config, "MINERU_API_URL", "http://localhost:8000"
-        ),
+        "MINERU_API_MODE": getattr(request.app.state.config, "MINERU_API_MODE", "local"),
+        "MINERU_API_URL": getattr(request.app.state.config, "MINERU_API_URL", "http://localhost:8000"),
         "MINERU_API_KEY": getattr(request.app.state.config, "MINERU_API_KEY", ""),
-        "MINERU_API_TIMEOUT": getattr(
-            request.app.state.config, "MINERU_API_TIMEOUT", "300"
-        ),
+        "MINERU_API_TIMEOUT": getattr(request.app.state.config, "MINERU_API_TIMEOUT", "300"),
         "MINERU_PARAMS": getattr(request.app.state.config, "MINERU_PARAMS", {}),
         # Chunking settings
         "TEXT_SPLITTER": request.app.state.config.TEXT_SPLITTER,
@@ -755,11 +940,9 @@ async def update_rag_config(
         else request.app.state.config.TOP_K
     )
     if form_data.FILE_PROCESSING_DEFAULT_MODE is not None:
-        request.app.state.config.FILE_PROCESSING_DEFAULT_MODE = (
-            normalize_file_processing_mode(
-                form_data.FILE_PROCESSING_DEFAULT_MODE,
-                request.app.state.config.FILE_PROCESSING_DEFAULT_MODE,
-            )
+        request.app.state.config.FILE_PROCESSING_DEFAULT_MODE = normalize_file_processing_mode(
+            form_data.FILE_PROCESSING_DEFAULT_MODE,
+            request.app.state.config.FILE_PROCESSING_DEFAULT_MODE,
         )
     elif form_data.BYPASS_EMBEDDING_AND_RETRIEVAL is not None:
         request.app.state.config.FILE_PROCESSING_DEFAULT_MODE = (
@@ -869,9 +1052,7 @@ async def update_rag_config(
     request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR = (
         form_data.DATALAB_MARKER_STRIP_EXISTING_OCR
         if form_data.DATALAB_MARKER_STRIP_EXISTING_OCR is not None
-        else getattr(
-            request.app.state.config, "DATALAB_MARKER_STRIP_EXISTING_OCR", False
-        )
+        else getattr(request.app.state.config, "DATALAB_MARKER_STRIP_EXISTING_OCR", False)
     )
     request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION = (
         form_data.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION
@@ -893,9 +1074,7 @@ async def update_rag_config(
     request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT = (
         form_data.DATALAB_MARKER_OUTPUT_FORMAT
         if form_data.DATALAB_MARKER_OUTPUT_FORMAT is not None
-        else getattr(
-            request.app.state.config, "DATALAB_MARKER_OUTPUT_FORMAT", "markdown"
-        )
+        else getattr(request.app.state.config, "DATALAB_MARKER_OUTPUT_FORMAT", "markdown")
     )
     request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL = (
         form_data.EXTERNAL_DOCUMENT_LOADER_URL
@@ -962,18 +1141,12 @@ async def update_rag_config(
     request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL = (
         form_data.DOCUMENT_INTELLIGENCE_MODEL
         if form_data.DOCUMENT_INTELLIGENCE_MODEL is not None
-        else getattr(
-            request.app.state.config, "DOCUMENT_INTELLIGENCE_MODEL", "prebuilt-layout"
-        )
+        else getattr(request.app.state.config, "DOCUMENT_INTELLIGENCE_MODEL", "prebuilt-layout")
     )
     request.app.state.config.MISTRAL_OCR_API_BASE_URL = (
         form_data.MISTRAL_OCR_API_BASE_URL
         if form_data.MISTRAL_OCR_API_BASE_URL is not None
-        else getattr(
-            request.app.state.config,
-            "MISTRAL_OCR_API_BASE_URL",
-            "https://api.mistral.ai/v1",
-        )
+        else getattr(request.app.state.config, "MISTRAL_OCR_API_BASE_URL", "https://api.mistral.ai/v1")
     )
     request.app.state.config.MISTRAL_OCR_API_KEY = (
         form_data.MISTRAL_OCR_API_KEY
@@ -988,9 +1161,7 @@ async def update_rag_config(
     request.app.state.config.MINERU_API_URL = (
         form_data.MINERU_API_URL
         if form_data.MINERU_API_URL is not None
-        else getattr(
-            request.app.state.config, "MINERU_API_URL", "http://localhost:8000"
-        )
+        else getattr(request.app.state.config, "MINERU_API_URL", "http://localhost:8000")
     )
     request.app.state.config.MINERU_API_KEY = (
         form_data.MINERU_API_KEY
@@ -1098,35 +1269,27 @@ async def update_rag_config(
     )
 
     if form_data.web is not None:
-        tavily_search_api_base_url, tavily_search_api_force_mode = (
-            _normalize_tavily_config_url(
-                (
-                    form_data.web.TAVILY_SEARCH_API_BASE_URL
-                    if form_data.web.TAVILY_SEARCH_API_BASE_URL is not None
-                    else request.app.state.config.TAVILY_SEARCH_API_BASE_URL
-                ),
-                "search",
-                force_mode=(
-                    form_data.web.TAVILY_SEARCH_API_FORCE_MODE
-                    if form_data.web.TAVILY_SEARCH_API_FORCE_MODE is not None
-                    else request.app.state.config.TAVILY_SEARCH_API_FORCE_MODE
-                ),
-            )
+        tavily_search_api_base_url, tavily_search_api_force_mode = _normalize_tavily_config_url(
+            form_data.web.TAVILY_SEARCH_API_BASE_URL
+            if form_data.web.TAVILY_SEARCH_API_BASE_URL is not None
+            else request.app.state.config.TAVILY_SEARCH_API_BASE_URL,
+            "search",
+            force_mode=(
+                form_data.web.TAVILY_SEARCH_API_FORCE_MODE
+                if form_data.web.TAVILY_SEARCH_API_FORCE_MODE is not None
+                else request.app.state.config.TAVILY_SEARCH_API_FORCE_MODE
+            ),
         )
-        tavily_extract_api_base_url, tavily_extract_api_force_mode = (
-            _normalize_tavily_config_url(
-                (
-                    form_data.web.TAVILY_EXTRACT_API_BASE_URL
-                    if form_data.web.TAVILY_EXTRACT_API_BASE_URL is not None
-                    else request.app.state.config.TAVILY_EXTRACT_API_BASE_URL
-                ),
-                "extract",
-                force_mode=(
-                    form_data.web.TAVILY_EXTRACT_API_FORCE_MODE
-                    if form_data.web.TAVILY_EXTRACT_API_FORCE_MODE is not None
-                    else request.app.state.config.TAVILY_EXTRACT_API_FORCE_MODE
-                ),
-            )
+        tavily_extract_api_base_url, tavily_extract_api_force_mode = _normalize_tavily_config_url(
+            form_data.web.TAVILY_EXTRACT_API_BASE_URL
+            if form_data.web.TAVILY_EXTRACT_API_BASE_URL is not None
+            else request.app.state.config.TAVILY_EXTRACT_API_BASE_URL,
+            "extract",
+            force_mode=(
+                form_data.web.TAVILY_EXTRACT_API_FORCE_MODE
+                if form_data.web.TAVILY_EXTRACT_API_FORCE_MODE is not None
+                else request.app.state.config.TAVILY_EXTRACT_API_FORCE_MODE
+            ),
         )
         tavily_api_key = str(
             (
@@ -1252,12 +1415,144 @@ async def update_rag_config(
         if form_data.web.DDGS_BACKEND is not None:
             request.app.state.config.DDGS_BACKEND = form_data.web.DDGS_BACKEND
         if form_data.web.JINA_API_BASE_URL is not None:
-            request.app.state.config.JINA_API_BASE_URL = form_data.web.JINA_API_BASE_URL
+            request.app.state.config.JINA_API_BASE_URL = (
+                form_data.web.JINA_API_BASE_URL
+            )
         if form_data.web.FIRECRAWL_TIMEOUT is not None:
-            request.app.state.config.FIRECRAWL_TIMEOUT = form_data.web.FIRECRAWL_TIMEOUT
+            request.app.state.config.FIRECRAWL_TIMEOUT = (
+                form_data.web.FIRECRAWL_TIMEOUT
+            )
 
     return await get_rag_config(request, user)
 
+
+@router.post("/config/web/verify")
+async def verify_web_config(
+    form_data: WebConfigVerifyForm,
+    user=Depends(get_admin_user),
+):
+    del user
+
+    search_enabled = str(form_data.WEB_SEARCH_ENGINE or "").strip() == "tavily"
+    loader_enabled = str(form_data.WEB_LOADER_ENGINE or "").strip() == "tavily"
+    api_key = str(form_data.TAVILY_API_KEY or "").strip()
+
+    if search_enabled:
+        if not api_key:
+            search_result = _build_tavily_verify_item(
+                enabled=True,
+                ok=False,
+                message="请先填写 Tavily API Key。",
+            )
+        else:
+            normalized_url, force_mode = _normalize_tavily_config_url(
+                form_data.TAVILY_SEARCH_API_BASE_URL,
+                "search",
+                force_mode=bool(form_data.TAVILY_SEARCH_API_FORCE_MODE),
+            )
+            try:
+                search_tavily(
+                    api_key=api_key,
+                    query="OpenAI",
+                    count=1,
+                    api_base_url=normalized_url,
+                    force_mode=force_mode,
+                )
+                search_result = _build_tavily_verify_item(
+                    enabled=True,
+                    ok=True,
+                    message="Tavily 搜索接口可用。",
+                )
+            except Exception as exc:
+                search_result = _build_tavily_verify_item(
+                    enabled=True,
+                    ok=False,
+                    message=f"Tavily 搜索接口不可用：{_extract_error_text_from_exception(exc)}",
+                    http_status=_extract_http_status_from_exception(exc),
+                )
+    else:
+        search_result = _build_tavily_verify_item(
+            enabled=False,
+            ok=None,
+            message="未启用 Tavily 搜索接口。",
+        )
+
+    if loader_enabled:
+        if not api_key:
+            loader_result = _build_tavily_verify_item(
+                enabled=True,
+                ok=False,
+                message="请先填写 Tavily API Key。",
+            )
+        else:
+            normalized_url, force_mode = _normalize_tavily_config_url(
+                form_data.TAVILY_EXTRACT_API_BASE_URL,
+                "extract",
+                force_mode=bool(form_data.TAVILY_EXTRACT_API_FORCE_MODE),
+            )
+            try:
+                loader = TavilyLoader(
+                    urls="https://example.com/",
+                    api_key=api_key,
+                    extract_depth=str(form_data.TAVILY_EXTRACT_DEPTH or "basic"),
+                    continue_on_failure=False,
+                    api_base_url=normalized_url,
+                    force_mode=force_mode,
+                )
+                docs = list(loader.lazy_load())
+                if docs:
+                    loader_result = _build_tavily_verify_item(
+                        enabled=True,
+                        ok=True,
+                        message="Tavily 网页提取接口可用。",
+                    )
+                else:
+                    loader_result = _build_tavily_verify_item(
+                        enabled=True,
+                        ok=False,
+                        message="Tavily 网页提取接口已响应，但没有返回网页正文。",
+                    )
+            except Exception as exc:
+                loader_result = _build_tavily_verify_item(
+                    enabled=True,
+                    ok=False,
+                    message=f"Tavily 网页提取接口不可用：{_extract_error_text_from_exception(exc)}",
+                    http_status=_extract_http_status_from_exception(exc),
+                )
+    else:
+        loader_result = _build_tavily_verify_item(
+            enabled=False,
+            ok=None,
+            message="未启用 Tavily 网页提取接口。",
+        )
+
+    return {
+        "search": search_result,
+        "loader": loader_result,
+    }
+
+
+@router.post("/config/web/playwright/verify")
+async def verify_playwright_web_config(
+    form_data: PlaywrightConfigVerifyForm,
+    user=Depends(get_admin_user),
+):
+    del user
+
+    requested_mode = str(form_data.PLAYWRIGHT_MODE or "").strip()
+    mode: Literal["local", "remote"] = (
+        "remote" if requested_mode == "remote" else "local"
+    )
+
+    if not requested_mode and str(form_data.PLAYWRIGHT_WS_URL or "").strip():
+        mode = "remote"
+
+    return await run_in_threadpool(
+        _verify_playwright_loader,
+        mode=mode,
+        playwright_ws_url=form_data.PLAYWRIGHT_WS_URL,
+        playwright_timeout=form_data.PLAYWRIGHT_TIMEOUT,
+    )
 
 ####################################
 #
@@ -1283,9 +1578,7 @@ def merge_docs_to_target_size(
     request: Request,
     chunks: list[Document],
 ) -> list[Document]:
-    min_chunk_size_target = getattr(
-        request.app.state.config, "CHUNK_MIN_SIZE_TARGET", 0
-    )
+    min_chunk_size_target = getattr(request.app.state.config, "CHUNK_MIN_SIZE_TARGET", 0)
     max_chunk_size = request.app.state.config.CHUNK_SIZE
 
     if min_chunk_size_target <= 0:
@@ -1380,9 +1673,7 @@ def save_docs_to_vector_db(
             existing_doc_ids = result.ids[0]
             if existing_doc_ids:
                 if overwrite:
-                    log.info(
-                        f"Overwriting document with hash {metadata['hash']} ({len(existing_doc_ids)} chunks)"
-                    )
+                    log.info(f"Overwriting document with hash {metadata['hash']} ({len(existing_doc_ids)} chunks)")
                     VECTOR_DB_CLIENT.delete(
                         collection_name=collection_name,
                         ids=existing_doc_ids,
@@ -1410,9 +1701,7 @@ def save_docs_to_vector_db(
                         ids=stale_ids,
                     )
         except Exception as e:
-            log.warning(
-                f"Failed to clean stale vectors for file_id={metadata.get('file_id')}: {e}"
-            )
+            log.warning(f"Failed to clean stale vectors for file_id={metadata.get('file_id')}: {e}")
 
     if split:
         if getattr(
@@ -1438,9 +1727,7 @@ def save_docs_to_vector_db(
                             page_content=split_chunk.page_content,
                             metadata={**doc.metadata},
                         )
-                        for split_chunk in markdown_splitter.split_text(
-                            doc.page_content
-                        )
+                        for split_chunk in markdown_splitter.split_text(doc.page_content)
                     ]
                 )
 
@@ -1681,11 +1968,7 @@ def _prepare_documents_for_processing(
 
     if allow_cached_collection_docs:
         cached_docs = _get_cached_file_collection_docs(file)
-        if (
-            cached_docs
-            and current_mode == FILE_PROCESSING_MODE_RETRIEVAL
-            and current_provider == requested_provider
-        ):
+        if cached_docs and current_mode == FILE_PROCESSING_MODE_RETRIEVAL and current_provider == requested_provider:
             return (
                 cached_docs,
                 " ".join(doc.page_content for doc in cached_docs),
@@ -1979,9 +2262,7 @@ def process_file(
             )
         else:
             file_name = file.filename if file else None
-            file_content_type = (
-                file.meta.get("content_type") if file and file.meta else None
-            )
+            file_content_type = file.meta.get("content_type") if file and file.meta else None
             diagnostic = classify_file_upload_error(
                 e,
                 filename=file_name,
@@ -2371,9 +2652,7 @@ def _fill_favicons(results: list[SearchResult]) -> list[SearchResult]:
             try:
                 domain = urlparse(result.link).netloc
                 if domain:
-                    result.favicon = (
-                        f"https://www.google.com/s2/favicons?domain={domain}&sz=32"
-                    )
+                    result.favicon = f"https://www.google.com/s2/favicons?domain={domain}&sz=32"
             except Exception:
                 pass
     return results
@@ -2394,10 +2673,7 @@ def _build_direct_docs_from_web_results(
 
         title = str(result.title or "").strip() or "Search Result"
         link = str(result.link or "").strip()
-        source = (
-            link
-            or f"{engine or 'web'}://search/{calculate_sha256_string(f'{query}-{idx}')}"
-        )
+        source = link or f"{engine or 'web'}://search/{calculate_sha256_string(f'{query}-{idx}')}"
 
         metadata = {
             "source": source,
@@ -2436,6 +2712,7 @@ async def process_web_search(
     request: Request, form_data: SearchForm, user=Depends(get_verified_user)
 ):
     engine = str(request.app.state.config.WEB_SEARCH_ENGINE or "").strip()
+    loader_engine = str(request.app.state.config.WEB_LOADER_ENGINE or "").strip()
     try:
         logging.info(f"trying to web search with {engine, form_data.query}")
         web_results = _fill_favicons(search_web(request, engine, form_data.query))
@@ -2450,6 +2727,7 @@ async def process_web_search(
     _log_web_results_summary(engine, web_results)
 
     try:
+        loader_runtime_notice = None
         urls = [
             str(result.link or "").strip()
             for result in web_results
@@ -2477,21 +2755,95 @@ async def process_web_search(
                 "direct_content_only": True,
             }
 
-        from open_webui.retrieval.web.utils import get_web_loader
+        try:
+            docs = await _load_web_documents_with_loader(request, urls)
+        except TavilyExtractAuthError as exc:
+            if engine == "tavily" or loader_engine != "tavily":
+                raise
 
-        loader = get_web_loader(
-            urls,
-            verify_ssl=request.app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION,
-            requests_per_second=request.app.state.config.WEB_SEARCH_CONCURRENT_REQUESTS,
-            trust_env=request.app.state.config.WEB_SEARCH_TRUST_ENV,
-        )
-        docs = await loader.aload()
+            status_code = _extract_http_status_from_exception(exc)
+            log.warning(
+                "Tavily loader auth failed during web search; retrying once with safe_web "
+                "(query=%s, status=%s)",
+                form_data.query,
+                status_code,
+            )
+
+            try:
+                docs = await _load_web_documents_with_loader(
+                    request,
+                    urls,
+                    loader_engine="safe_web",
+                )
+            except Exception as fallback_exc:
+                log.warning(
+                    "Safe web loader retry failed after Tavily auth error "
+                    "(query=%s, error=%s)",
+                    form_data.query,
+                    _extract_error_text_from_exception(fallback_exc),
+                )
+                direct_docs = _build_direct_docs_from_web_results(
+                    form_data.query,
+                    web_results,
+                    engine,
+                )
+                loader_runtime_notice = _build_tavily_loader_runtime_notice(
+                    fallback_succeeded=False,
+                    used_direct_docs=direct_docs is not None,
+                    status_code=status_code,
+                )
+                if direct_docs is not None:
+                    direct_docs["loader_runtime_notice"] = loader_runtime_notice
+                    return direct_docs
+
+                return {
+                    "status": True,
+                    "collection_name": None,
+                    "filenames": [],
+                    "docs": [],
+                    "loaded_count": 0,
+                    "failed_count": 0,
+                    "direct_content_only": True,
+                    "loader_runtime_notice": loader_runtime_notice,
+                }
+
+            if docs:
+                loader_runtime_notice = _build_tavily_loader_runtime_notice(
+                    fallback_succeeded=True,
+                    status_code=status_code,
+                )
+            else:
+                direct_docs = _build_direct_docs_from_web_results(
+                    form_data.query,
+                    web_results,
+                    engine,
+                )
+                loader_runtime_notice = _build_tavily_loader_runtime_notice(
+                    fallback_succeeded=False,
+                    used_direct_docs=direct_docs is not None,
+                    status_code=status_code,
+                )
+                if direct_docs is not None:
+                    direct_docs["loader_runtime_notice"] = loader_runtime_notice
+                    return direct_docs
+
+                return {
+                    "status": True,
+                    "collection_name": None,
+                    "filenames": [],
+                    "docs": [],
+                    "loaded_count": 0,
+                    "failed_count": 0,
+                    "direct_content_only": True,
+                    "loader_runtime_notice": loader_runtime_notice,
+                }
+
         urls = [
             doc.metadata["source"] for doc in docs
         ]  # only keep URLs which could be retrieved
 
         if request.app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
-            return {
+            result = {
                 "status": True,
                 "collection_name": None,
                 "filenames": urls,
@@ -2504,20 +2856,16 @@ async def process_web_search(
                 ],
                 "loaded_count": len(docs),
             }
+            if loader_runtime_notice is not None:
+                result["loader_runtime_notice"] = loader_runtime_notice
+            return result
         else:
-            MAX_WEB_PAGE_SIZE = (
-                100_000  # ~100KB, prevent huge pages from blocking embedding
-            )
+            MAX_WEB_PAGE_SIZE = 100_000  # ~100KB, prevent huge pages from blocking embedding
             collection_names = []
             failed_count = 0
             # Known challenge / block page title prefixes (lowercase).
             # These pages contain no useful content — skip to save embedding quota.
-            _CHALLENGE_TITLES = (
-                "just a moment",
-                "checking your browser",
-                "attention required",
-                "access denied",
-            )
+            _CHALLENGE_TITLES = ("just a moment", "checking your browser", "attention required", "access denied")
 
             for doc_idx, doc in enumerate(docs):
                 if doc and doc.page_content:
@@ -2535,10 +2883,7 @@ async def process_web_search(
                         continue
 
                     # Skip known challenge pages (Cloudflare etc.) with short content
-                    if (
-                        any(title_lower.startswith(t) for t in _CHALLENGE_TITLES)
-                        and content_len < 500
-                    ):
+                    if any(title_lower.startswith(t) for t in _CHALLENGE_TITLES) and content_len < 500:
                         log.info(
                             f"Skipping challenge page {urls[doc_idx]} "
                             f"(title='{doc.metadata.get('title', '')}', content_len={content_len})"
@@ -2573,13 +2918,16 @@ async def process_web_search(
                         )
                         failed_count += 1
 
-            return {
+            result = {
                 "status": True,
                 "collection_names": collection_names,
                 "filenames": urls,
                 "loaded_count": len(docs),
                 "failed_count": failed_count,
             }
+            if loader_runtime_notice is not None:
+                result["loader_runtime_notice"] = loader_runtime_notice
+            return result
     except Exception as e:
         log.exception(e)
         raise HTTPException(

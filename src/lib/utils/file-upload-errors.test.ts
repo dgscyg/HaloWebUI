@@ -79,6 +79,25 @@ describe('file upload errors', () => {
 		expect(message).toContain('administrator');
 	});
 
+	it('localizes document provider fallback diagnostics', () => {
+		const localized = getLocalizedFileUploadDiagnostic(
+			{
+				diagnostic: {
+					code: 'document_provider_fallback_failed',
+					title: 'ignored',
+					message: 'ignored',
+					hint: 'ignored',
+					blocking: true
+				}
+			},
+			t
+		);
+
+		expect(localized.title).toBe('Document parsing failed');
+		expect(localized.message).toContain('backup parser');
+		expect(localized.hint).toContain('API keys');
+	});
+
 	it('falls back to encoding detection localization for legacy string errors', () => {
 		const message = localizeFileUploadError('Could not detect encoding for demo.rar', t);
 
@@ -90,5 +109,54 @@ describe('file upload errors', () => {
 		const message = buildIgnoredFailedFilesMessage([{ name: 'a.rar' }, { name: 'b.html' }], t);
 
 		expect(message).toBe('Ignored failed file(s) for this message: a.rar, b.html');
+	});
+
+	describe('embedding_chunk_too_large diagnostic', () => {
+		const buildChunkTooLargeError = () => ({
+			diagnostic: {
+				code: 'embedding_chunk_too_large',
+				title: '',
+				message: '',
+				hint: '',
+				blocking: true
+			}
+		});
+
+		it('returns the specific title and message keys via getDiagnosticKeys', () => {
+			const localized = getLocalizedFileUploadDiagnostic(buildChunkTooLargeError(), t);
+
+			expect(localized.title).toBe('Chunk exceeds embedding model limit');
+			expect(localized.message).toContain("input token limit");
+		});
+
+		it('returns an admin-specific hint pointing at Chunk Size', () => {
+			const localized = getLocalizedFileUploadDiagnostic(buildChunkTooLargeError(), t, {
+				isAdmin: true
+			});
+
+			expect(localized.hint).toContain('Chunk Size');
+			expect(localized.hint).toContain('Documents');
+		});
+
+		it('returns a non-admin hint asking to contact an administrator', () => {
+			const localized = getLocalizedFileUploadDiagnostic(buildChunkTooLargeError(), t, {
+				isAdmin: false
+			});
+
+			expect(localized.hint.toLowerCase()).toContain('administrator');
+			expect(localized.hint).not.toContain('Chunk Size');
+		});
+
+		it('is NOT captured by the getEmbeddingHintKey whitelist (regression)', () => {
+			// If the new code were mistakenly added to getEmbeddingHintKey's whitelist,
+			// the admin hint would become the generic "configure an embedding model"
+			// message rather than the Chunk Size guidance.
+			const localized = getLocalizedFileUploadDiagnostic(buildChunkTooLargeError(), t, {
+				isAdmin: true
+			});
+
+			expect(localized.hint).not.toContain('configure an embedding model');
+			expect(localized.hint).not.toContain('Full Context');
+		});
 	});
 });

@@ -45,14 +45,17 @@ fake-useragent==2.1.0
 chromadb==0.6.3
 # ChromaDB 0.6.x still calls the pre-6.x PostHog capture API.
 posthog<6
+playwright==1.49.1
 
 beautifulsoup4
 chardet==5.2.0
+brotli==1.1.0
 ftfy==6.2.3
 pypdf==4.3.1
 fpdf2==2.8.2
 pymdown-extensions==10.14.2
 docx2txt==0.8
+python-pptx==1.0.0
 Markdown==3.7
 validators==0.34.0
 rank-bm25==0.2.2
@@ -67,5 +70,7 @@ pydub
 duckduckgo-search~=8.0.0
 
 ldap3==2.9.1
+
+python-telegram-bot[socks]>=21.0
 
 tencentcloud-sdk-python==3.0.1336

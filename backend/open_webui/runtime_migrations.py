@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+import sqlalchemy as sa
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Connection, Engine, URL, make_url
 from sqlalchemy.pool import NullPool
@@ -33,7 +34,10 @@ HALO_BACKUP_DIR = Path(
     )
 ).resolve()
 HALO_STATE_TABLE = "halowebui_migration_state"
-HALO_TARGET_HEAD = "3d4e5f6a7b8c"
+HALO_DATA_MIGRATION_TABLE = "halowebui_data_migrations"
+HALO_TARGET_HEAD = "4c8d9e0f1a2b"
+HALO_CONNECTION_METADATA_BACKFILL_KEY = "connection_metadata_backfill_v2"
+HALO_IMAGE_GENERATION_OPTIONS_CLEANUP_KEY = "image_generation_options_cleanup_v2"
 HALO_SOURCE_FAMILIES = {
     "c440947495f3": "owui_070_family",
     "a1b2c3d4e5f6": "owui_080_family",
@@ -83,6 +87,7 @@ CHAT_META_KEYS = frozenset(
         "error",
         "usage",
         "model_id",
+        "model_ref",
         "modelName",
         "modelIdx",
         "completedAt",
@@ -114,6 +119,8 @@ def ensure_runtime_migrated() -> Optional[DetectionResult]:
     with _locked_connection() as (_engine, conn, url):
         detection = _detect_database(conn, url)
         if detection.family in {"fresh", "already_halo"}:
+            _run_post_halo_data_migrations(conn)
+            conn.commit()
             os.environ["HALO_RUNTIME_MIGRATION_DONE"] = "true"
             return detection
 
@@ -164,6 +171,7 @@ def ensure_runtime_migrated() -> Optional[DetectionResult]:
 
             _seed_migratehistory(conn)
             _stamp_halo_head(conn)
+            _run_post_halo_data_migrations(conn)
 
             _write_state(
                 conn,
@@ -221,10 +229,16 @@ def migrate_auto(
         }
 
         if detection.family == "fresh":
+            if not dry_run and not backup_only:
+                _run_post_halo_data_migrations(conn)
+                conn.commit()
             result["action"] = "fresh_db"
             return result
 
         if detection.family == "already_halo":
+            if not dry_run and not backup_only:
+                _run_post_halo_data_migrations(conn)
+                conn.commit()
             result["action"] = "already_halo"
             return result
 
@@ -697,6 +711,228 @@ def _ensure_state_table(conn: Connection) -> None:
                 updated_at BIGINT NOT NULL
             )
             """))
+
+
+def _ensure_data_migration_table(conn: Connection) -> None:
+    tables = set(inspect(conn).get_table_names())
+    if HALO_DATA_MIGRATION_TABLE in tables:
+        return
+    conn.execute(
+        text(
+            f"""
+            CREATE TABLE "{HALO_DATA_MIGRATION_TABLE}" (
+                key TEXT PRIMARY KEY,
+                details TEXT NULL,
+                completed_at BIGINT NOT NULL
+            )
+            """
+        )
+    )
+
+
+def _has_completed_data_migration(conn: Connection, key: str) -> bool:
+    _ensure_data_migration_table(conn)
+    row = conn.execute(
+        text(
+            f'SELECT 1 FROM "{HALO_DATA_MIGRATION_TABLE}" '
+            "WHERE key = :key LIMIT 1"
+        ),
+        {"key": key},
+    ).first()
+    return row is not None
+
+
+def _mark_data_migration_completed(
+    conn: Connection, key: str, details: Optional[dict[str, Any]] = None
+) -> None:
+    _ensure_data_migration_table(conn)
+    payload = {
+        "key": key,
+        "details": json.dumps(details or {}, ensure_ascii=False),
+        "completed_at": _now(),
+    }
+    if _has_completed_data_migration(conn, key):
+        conn.execute(
+            text(
+                f"""
+                UPDATE "{HALO_DATA_MIGRATION_TABLE}"
+                SET details = :details, completed_at = :completed_at
+                WHERE key = :key
+                """
+            ),
+            payload,
+        )
+        return
+
+    conn.execute(
+        text(
+            f"""
+            INSERT INTO "{HALO_DATA_MIGRATION_TABLE}" (key, details, completed_at)
+            VALUES (:key, :details, :completed_at)
+            """
+        ),
+        payload,
+    )
+
+
+def _settings_payload_to_dict(value: Any) -> dict:
+    if isinstance(value, dict):
+        return json.loads(json.dumps(value, ensure_ascii=False))
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _backfill_user_connection_metadata(conn: Connection) -> dict[str, int]:
+    from open_webui.models.users import User
+    from open_webui.utils.user_connections import build_migrated_user_settings
+
+    scanned_users = 0
+    updated_users = 0
+
+    if not _table_exists(conn, "user"):
+        return {"scanned_users": 0, "updated_users": 0}
+
+    rows = conn.execute(text('SELECT id, role, settings FROM "user"')).mappings().all()
+    for row in rows:
+        scanned_users += 1
+        settings_dict = _settings_payload_to_dict(row.get("settings"))
+        next_settings, changed = build_migrated_user_settings(
+            settings_dict,
+            is_admin=str(row.get("role") or "").strip().lower() == "admin",
+            global_provider_defaults=None,
+            id_strategy="derived",
+        )
+        if not changed or next_settings == settings_dict:
+            continue
+
+        values = {"settings": next_settings}
+        if "updated_at" in User.__table__.c:
+            values["updated_at"] = _now()
+
+        conn.execute(
+            User.__table__.update().where(User.__table__.c.id == row["id"]).values(**values)
+        )
+        updated_users += 1
+
+    return {"scanned_users": scanned_users, "updated_users": updated_users}
+
+
+def _cleanup_legacy_image_generation_options(conn: Connection) -> dict[str, int]:
+    from open_webui.utils.image_generation_options import (
+        sanitize_chat_payload_image_generation_options,
+    )
+
+    updated_configs = 0
+    scanned_chats = 0
+    updated_chats = 0
+
+    if _table_exists(conn, "config"):
+        config_table = sa.table(
+            "config",
+            sa.column("id", sa.Integer()),
+            sa.column("data", sa.JSON()),
+        )
+        rows = conn.execute(
+            sa.select(config_table.c.id, config_table.c.data)
+        ).mappings().all()
+        for row in rows:
+            config_data = _settings_payload_to_dict(row.get("data"))
+            image_generation = config_data.get("image_generation")
+            if not isinstance(image_generation, dict):
+                continue
+
+            changed = False
+            for key in ("model", "size", "aspect_ratio", "resolution", "steps"):
+                if key in image_generation:
+                    image_generation.pop(key, None)
+                    changed = True
+
+            engine = str(image_generation.get("engine") or "").strip().lower()
+            if engine in {"openai", "gemini", "grok"}:
+                image_generation.pop("engine", None)
+                changed = True
+
+            if not changed:
+                continue
+
+            conn.execute(
+                config_table.update()
+                .where(config_table.c.id == row["id"])
+                .values(data=config_data)
+            )
+            updated_configs += 1
+
+    if not _table_exists(conn, "chat"):
+        return {
+            "updated_configs": updated_configs,
+            "scanned_chats": scanned_chats,
+            "updated_chats": updated_chats,
+        }
+
+    chat_table = sa.table(
+        "chat",
+        sa.column("id", sa.String()),
+        sa.column("chat", sa.JSON()),
+    )
+    batch_size = 1000
+    offset = 0
+    base_query = sa.select(chat_table.c.id, chat_table.c.chat).order_by(chat_table.c.id)
+
+    while True:
+        rows = conn.execute(base_query.limit(batch_size).offset(offset)).mappings().all()
+        if not rows:
+            break
+
+        offset += len(rows)
+        for row in rows:
+            scanned_chats += 1
+            chat_payload = row.get("chat")
+            if isinstance(chat_payload, str):
+                try:
+                    chat_payload = json.loads(chat_payload)
+                except Exception:
+                    continue
+
+            cleaned_chat, changed = sanitize_chat_payload_image_generation_options(
+                chat_payload
+            )
+            if not changed:
+                continue
+
+            conn.execute(
+                chat_table.update()
+                .where(chat_table.c.id == row["id"])
+                .values(chat=cleaned_chat)
+            )
+            updated_chats += 1
+
+    return {
+        "updated_configs": updated_configs,
+        "scanned_chats": scanned_chats,
+        "updated_chats": updated_chats,
+    }
+
+
+def _run_post_halo_data_migrations(conn: Connection) -> None:
+    if not _has_completed_data_migration(conn, HALO_CONNECTION_METADATA_BACKFILL_KEY):
+        details = _backfill_user_connection_metadata(conn)
+        _mark_data_migration_completed(
+            conn,
+            HALO_CONNECTION_METADATA_BACKFILL_KEY,
+            details,
+        )
+    if not _has_completed_data_migration(conn, HALO_IMAGE_GENERATION_OPTIONS_CLEANUP_KEY):
+        details = _cleanup_legacy_image_generation_options(conn)
+        _mark_data_migration_completed(
+            conn,
+            HALO_IMAGE_GENERATION_OPTIONS_CLEANUP_KEY,
+            details,
+        )
 
 
 def _write_state(
@@ -1369,6 +1605,61 @@ def _ensure_halo_extra_tables(conn: Connection, backend: str) -> None:
             text(
                 'CREATE INDEX IF NOT EXISTS "ix_haloclaw_msg_log_chat" '
                 'ON "haloclaw_message_log" ("gateway_id", "platform_chat_id", "created_at")'
+            )
+        )
+
+    if not _table_exists(conn, "external_api_client"):
+        conn.execute(
+            text(
+                """
+                CREATE TABLE "external_api_client" (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    owner_user_id TEXT NOT NULL,
+                    api_key_hash TEXT NOT NULL UNIQUE,
+                    key_prefix TEXT NOT NULL,
+                    enabled BOOLEAN DEFAULT TRUE,
+                    allowed_protocols TEXT NOT NULL,
+                    allowed_model_ids TEXT NOT NULL,
+                    allow_tools BOOLEAN DEFAULT FALSE,
+                    rpm_limit INTEGER NULL,
+                    note TEXT NULL,
+                    created_at BIGINT NOT NULL,
+                    updated_at BIGINT NOT NULL,
+                    last_used_at BIGINT NULL
+                )
+                """
+            )
+        )
+
+    if not _table_exists(conn, "external_api_audit_log"):
+        conn.execute(
+            text(
+                """
+                CREATE TABLE "external_api_audit_log" (
+                    id TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    owner_user_id TEXT NOT NULL,
+                    protocol TEXT NOT NULL,
+                    endpoint TEXT NOT NULL,
+                    model TEXT NULL,
+                    status_code INTEGER NOT NULL,
+                    tools_used BOOLEAN DEFAULT FALSE,
+                    prompt_tokens INTEGER NULL,
+                    completion_tokens INTEGER NULL,
+                    latency_ms INTEGER NULL,
+                    ip_address TEXT NULL,
+                    error TEXT NULL,
+                    meta TEXT NULL,
+                    created_at BIGINT NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                'CREATE INDEX IF NOT EXISTS "ix_external_api_audit_log_client_created" '
+                'ON "external_api_audit_log" ("client_id", "created_at")'
             )
         )
 

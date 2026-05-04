@@ -393,11 +393,11 @@
 				isDark: document.documentElement.classList.contains('dark'),
 				themeId: mermaidThemeId
 			});
-		} catch (error) {
-			console.error('Error:', error);
-			mermaidHtml = null;
-		}
-	};
+			} catch (error) {
+				console.error('Error:', error);
+				mermaidHtml = null;
+			}
+		};
 
 	const render = async () => {
 		if (lang === 'mermaid' && (token?.raw ?? '').slice(-4).includes('```')) {
@@ -565,10 +565,10 @@
 							title={$i18n.t('Save')}
 						>
 							{#if saved}
-								<Check class="size-[17.5px] text-green-500" size={17.5} strokeWidth={2.15} />
-							{:else}
-								<Save class="size-[17.5px]" size={17.5} strokeWidth={1.95} />
-							{/if}
+									<Check class="size-[17.5px] text-green-500" size={17.5} strokeWidth={2.15} />
+								{:else}
+									<Save class="size-[17.5px]" size={17.5} strokeWidth={1.95} />
+								{/if}
 						</button>
 					{/if}
 
@@ -595,10 +595,12 @@
 			</div>
 
 			{#if showPyodideConsent}
-				<div
-					class="border-b border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-				>
-					<div class="font-medium">浏览器 Python 运行时未准备就绪</div>
+				<div class="border-b border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+					<div class="font-medium">
+						{$i18n.t('浏览器 Python 运行时未准备就绪', {
+							defaultValue: 'Browser Python runtime is not ready'
+						})}
+					</div>
 					<div class="mt-1 text-xs leading-relaxed">
 						{getPyodideDownloadSummary(pyodideConsentPackages)}
 					</div>
@@ -616,7 +618,7 @@
 							}}
 							type="button"
 						>
-							下载并启用
+							{$i18n.t('下载并启用', { defaultValue: 'Download and Enable' })}
 						</button>
 						<button
 							class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-900/30"
@@ -624,11 +626,13 @@
 								showPyodideConsent = false;
 								pendingPyodideCode = '';
 								pyodideConsentPackages = [];
-								stderr = '已取消下载浏览器 Python 运行时。';
+								stderr = $i18n.t('已取消下载浏览器 Python 运行时。', {
+									defaultValue: 'Browser Python runtime download was cancelled.'
+								});
 							}}
 							type="button"
 						>
-							暂不
+							{$i18n.t('暂不', { defaultValue: 'Not now' })}
 						</button>
 					</div>
 				</div>
@@ -641,34 +645,19 @@
 					: executing || stdout || stderr || result
 						? ''
 						: ''} font-mono"
-				style={collapsed && needsCollapse
-					? `max-height: ${MAX_COLLAPSED_HEIGHT}px; overflow-y: auto;`
-					: ''}
+				style={collapsed && needsCollapse ? `max-height: ${MAX_COLLAPSED_HEIGHT}px; overflow-y: auto;` : ''}
 			>
-				{#if !collapsed}
-					<CodeEditor
-						value={code}
-						{id}
-						{lang}
-						useShikiTheme={false}
-						onSave={() => {
-							saveCode();
-						}}
-						onChange={(value) => {
-							_code = value;
-						}}
-					/>
-				{:else}
-					<div
-						class="bg-gray-50 dark:bg-gray-950 text-gray-400 dark:text-gray-500 py-2 px-4 flex flex-col gap-2 text-sm text-center border-t border-gray-100 dark:border-gray-900"
-					>
-						<span class="italic">
-							{$i18n.t('{{COUNT}} hidden lines', {
-								COUNT: code.split('\n').length
-							})}
-						</span>
-					</div>
-				{/if}
+				<CodeEditor
+					value={code}
+					{id}
+					{lang}
+					onSave={() => {
+						saveCode();
+					}}
+					onChange={(value) => {
+						_code = value;
+					}}
+				/>
 			</div>
 
 			{#if needsCollapse}
@@ -677,31 +666,13 @@
 					on:click={collapseCodeBlock}
 				>
 					{#if collapsed}
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-							class="size-3.5"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
-								clip-rule="evenodd"
-							/>
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
+							<path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
 						</svg>
-						{$i18n.t('Expand')} ({code.split('\n').length})
+							{$i18n.t('Expand')} ({code.split('\n').length})
 					{:else}
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-							class="size-3.5"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M14.78 11.78a.75.75 0 0 1-1.06 0L10 8.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06l4.25-4.25a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06Z"
-								clip-rule="evenodd"
-							/>
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
+							<path fill-rule="evenodd" d="M14.78 11.78a.75.75 0 0 1-1.06 0L10 8.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06l4.25-4.25a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06Z" clip-rule="evenodd" />
 						</svg>
 						{$i18n.t('Collapse')}
 					{/if}

@@ -143,8 +143,7 @@
 				{#if showUserProfile}
 					<ProfilePreview user={message.user}>
 						<ProfileImage
-							src={message.user?.profile_image_url ??
-								($i18n.language === 'dg-DG' ? `/doge.png` : `${WEBUI_BASE_URL}/static/favicon.png`)}
+							src={message.user?.profile_image_url ?? `${WEBUI_BASE_URL}/static/favicon.png`}
 							className={'size-8 translate-y-1 ml-0.5'}
 						/>
 					</ProfilePreview>
@@ -254,7 +253,7 @@
 							id={message.id}
 							content={message.content}
 						/>{#if message.created_at !== message.updated_at}<span class="text-gray-500 text-[10px]"
-								>(edited)</span
+								>({$i18n.t('edited')})</span
 							>{/if}
 					</div>
 

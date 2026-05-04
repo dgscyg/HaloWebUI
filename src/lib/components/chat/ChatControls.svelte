@@ -33,6 +33,7 @@
 	export let showMessage: Function;
 	export let files;
 	export let modelId;
+	export let imageGenerationEnabled = false;
 	export let currentValvesContext = null;
 
 	export let pane;
@@ -360,6 +361,7 @@
 								{submitPrompt}
 								{stopResponse}
 								{modelId}
+								{imageGenerationEnabled}
 								{chatId}
 								{eventTarget}
 								on:close={() => {
@@ -447,6 +449,7 @@
 										{submitPrompt}
 										{stopResponse}
 										{modelId}
+										{imageGenerationEnabled}
 										{chatId}
 										{eventTarget}
 										on:close={() => {

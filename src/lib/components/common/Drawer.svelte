@@ -2,6 +2,7 @@
 	import { onDestroy, createEventDispatcher } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import { isApp } from '$lib/stores';
+	import { lockBodyScroll, unlockBodyScroll } from '$lib/utils/body-scroll-lock';
 
 	const dispatch = createEventDispatcher();
 
@@ -12,6 +13,7 @@
 
 	let modalElement = null;
 	let enterTransition = { y: 100, duration: 100 };
+	let isAttached = false;
 
 	$: enterTransition =
 		placement === 'right' ? { x: 100, duration: 120 } : { y: 100, duration: 100 };
@@ -27,28 +29,38 @@
 		return modals.length && modals[modals.length - 1] === modalElement;
 	};
 
-	$: if (show && modalElement) {
+	const attachDrawer = () => {
+		if (!modalElement || isAttached) return;
+
 		document.body.appendChild(modalElement);
 		window.addEventListener('keydown', handleKeyDown);
-		document.body.style.overflow = 'hidden';
-	} else if (modalElement) {
+		lockBodyScroll();
+		isAttached = true;
+	};
+
+	const detachDrawer = () => {
+		if (!modalElement || !isAttached) return;
+
 		dispatch('close');
 		window.removeEventListener('keydown', handleKeyDown);
 
 		if (document.body.contains(modalElement)) {
 			document.body.removeChild(modalElement);
-			document.body.style.overflow = 'unset';
 		}
+
+		unlockBodyScroll();
+		isAttached = false;
+	};
+
+	$: if (show && modalElement) {
+		attachDrawer();
+	} else if (modalElement) {
+		detachDrawer();
 	}
 
 	onDestroy(() => {
 		show = false;
-		if (modalElement) {
-			if (document.body.contains(modalElement)) {
-				document.body.removeChild(modalElement);
-				document.body.style.overflow = 'unset';
-			}
-		}
+		detachDrawer();
 	});
 </script>
 
@@ -59,7 +71,8 @@
 	bind:this={modalElement}
 	class="modal fixed right-0 {$isApp
 		? ' ml-[4.5rem] max-w-[calc(100%-4.5rem)]'
-		: ''} left-0 top-0 bg-black/60 w-full h-screen max-h-[100dvh] flex {placement === 'right'
+		: ''} left-0 top-0 bg-black/60 w-full h-screen max-h-[100dvh] flex {placement ===
+		'right'
 		? 'items-stretch justify-end'
 		: 'justify-center'} z-999 overflow-hidden overscroll-contain {overlayClassName}"
 	in:fly={enterTransition}
@@ -68,9 +81,7 @@
 	}}
 >
 	<div
-		class="{placement === 'right'
-			? 'ml-auto h-full w-full'
-			: 'mt-auto w-full'} bg-gray-50 dark:bg-gray-900 dark:text-gray-100 {className} max-h-[100dvh] overflow-y-auto scrollbar-hidden"
+		class="{placement === 'right' ? 'ml-auto h-full w-full' : 'mt-auto w-full'} bg-gray-50 dark:bg-gray-900 dark:text-gray-100 {className} max-h-[100dvh] overflow-y-auto scrollbar-hidden scrollbar-stable"
 		on:mousedown={(e) => {
 			e.stopPropagation();
 		}}

@@ -58,18 +58,6 @@ def _tool_call_args_from_item(item: Any) -> Any:
     )
 
 
-def _tool_output_from_item(item: Any) -> Any:
-    if not isinstance(item, dict):
-        return ""
-    return (
-        item.get("output")
-        or item.get("content")
-        or item.get("result")
-        or item.get("value")
-        or ""
-    )
-
-
 def _stringify_message_content(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -99,7 +87,10 @@ def _stringify_message_content(content: Any) -> str:
         return "".join(parts)
     if isinstance(content, dict):
         return (
-            content.get("text") or content.get("content") or content.get("value") or ""
+            content.get("text")
+            or content.get("content")
+            or content.get("value")
+            or ""
         )
     return ""
 
@@ -122,18 +113,11 @@ def _stringify_reasoning_content(content: Any) -> str:
     if isinstance(content, dict):
         item_type = content.get("type", "")
         if item_type in ("summary_text", "reasoning_text", "output_text", "text"):
-            text = (
-                content.get("text")
-                or content.get("content")
-                or content.get("value")
-                or ""
-            )
+            text = content.get("text") or content.get("content") or content.get("value") or ""
             if text:
                 return str(text)
 
-        direct_text = (
-            content.get("text") or content.get("content") or content.get("value")
-        )
+        direct_text = content.get("text") or content.get("content") or content.get("value")
         if isinstance(direct_text, str) and direct_text:
             return direct_text
 
@@ -172,11 +156,7 @@ def convert_tools_chat_to_responses(tools: Any) -> Any:
                         {
                             "type": "function",
                             "name": name,
-                            **(
-                                {"description": fn.get("description")}
-                                if fn.get("description")
-                                else {}
-                            ),
+                            **({"description": fn.get("description")} if fn.get("description") else {}),
                             "parameters": params,
                             # Responses defaults strict=true; keep explicit if provided.
                             **({"strict": fn.get("strict")} if "strict" in fn else {}),
@@ -270,12 +250,7 @@ def _content_chat_to_responses(content: Any, *, role: str = "user") -> Any:
                         url = image_url
                     if url is None and t == "input_image":
                         url = item.get("image_url")
-                    parts.append(
-                        {
-                            "type": text_part_type,
-                            "text": f"[image]{' ' + url if url else ''}",
-                        }
-                    )
+                    parts.append({"type": text_part_type, "text": f"[image]{' ' + url if url else ''}"})
                     continue
                 image_url = item.get("image_url")
                 url = None
@@ -306,9 +281,7 @@ def _content_chat_to_responses(content: Any, *, role: str = "user") -> Any:
                 continue
         # If we couldn't map anything, fall back to a string.
         if not parts:
-            return [
-                {"type": text_part_type, "text": _stringify_message_content(content)}
-            ]
+            return [{"type": text_part_type, "text": _stringify_message_content(content)}]
         return parts
 
     return [{"type": text_part_type, "text": _stringify_message_content(content)}]
@@ -361,14 +334,13 @@ def convert_chat_completions_to_responses_payload(
                 if isinstance(content, str)
                 else json.dumps(content, ensure_ascii=False, default=str)
             )
-            tool_message: Dict[str, Any] = {
-                "type": "function_call_output",
-                "call_id": call_id,
-                "output": output,
-            }
-            if "files" in msg:
-                tool_message["files"] = msg.get("files")
-            input_items.append(tool_message)
+            input_items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": output,
+                }
+            )
             continue
 
         # Normal message (user/assistant/developer).
@@ -419,9 +391,7 @@ def convert_chat_completions_to_responses_payload(
     # Responses API has its own stream_options schema and does not accept
     # Chat Completions' `stream_options.include_usage`.
     # Keep only options that are valid for Responses streaming.
-    if responses_payload.get("stream") is True and isinstance(
-        chat_payload.get("stream_options"), dict
-    ):
+    if responses_payload.get("stream") is True and isinstance(chat_payload.get("stream_options"), dict):
         stream_options = sanitize_stream_options_for_responses(
             chat_payload.get("stream_options")
         )
@@ -442,13 +412,8 @@ def convert_chat_completions_to_responses_payload(
     # GPT-5 series: text parameter (verbosity control).
     if isinstance(chat_payload.get("text"), dict):
         responses_payload["text"] = chat_payload["text"]
-    elif (
-        isinstance(chat_payload.get("verbosity"), str)
-        and chat_payload["verbosity"].strip()
-    ):
-        responses_payload.setdefault("text", {})["verbosity"] = (
-            chat_payload["verbosity"].strip().lower()
-        )
+    elif isinstance(chat_payload.get("verbosity"), str) and chat_payload["verbosity"].strip():
+        responses_payload.setdefault("text", {})["verbosity"] = chat_payload["verbosity"].strip().lower()
 
     # Reasoning config.
     reasoning = (
@@ -464,10 +429,7 @@ def convert_chat_completions_to_responses_payload(
     reasoning_summary = chat_payload.get("reasoning_summary")
     if isinstance(reasoning_summary, str) and reasoning_summary.strip():
         reasoning["summary"] = reasoning_summary.strip().lower()
-    elif (
-        isinstance(reasoning.get("summary"), str)
-        and reasoning.get("summary", "").strip()
-    ):
+    elif isinstance(reasoning.get("summary"), str) and reasoning.get("summary", "").strip():
         reasoning["summary"] = reasoning["summary"].strip().lower()
 
     # Responses API does not emit reasoning summaries unless explicitly requested.
@@ -506,9 +468,7 @@ def convert_chat_completions_to_responses_payload(
 
     # Tools/tool_choice.
     if "tools" in chat_payload:
-        responses_payload["tools"] = convert_tools_chat_to_responses(
-            chat_payload.get("tools")
-        )
+        responses_payload["tools"] = convert_tools_chat_to_responses(chat_payload.get("tools"))
     if "tool_choice" in chat_payload:
         responses_payload["tool_choice"] = convert_tool_choice_chat_to_responses(
             chat_payload.get("tool_choice")
@@ -535,14 +495,11 @@ def convert_chat_completions_to_responses_payload(
     return responses_payload
 
 
-def convert_responses_to_chat_completions(
-    responses_data: Dict[str, Any], model_id: str
-) -> Dict[str, Any]:
+def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_id: str) -> Dict[str, Any]:
     output = responses_data.get("output", []) or []
     content = ""
     reasoning_content = ""
     tool_calls: List[dict] = []
-    output_messages: List[dict] = []
     tool_call_index = 0
 
     for item in output:
@@ -572,21 +529,6 @@ def convert_responses_to_chat_completions(
                 }
             )
             tool_call_index += 1
-        elif item_type == "function_call_output":
-            call_id = _tool_call_id_from_item(item)
-            output = _tool_output_from_item(item)
-            message: Dict[str, Any] = {
-                "role": "tool",
-                "tool_call_id": call_id or f"call_{uuid.uuid4().hex}",
-                "content": (
-                    output
-                    if isinstance(output, str)
-                    else json.dumps(output, ensure_ascii=False, default=str)
-                ),
-            }
-            if "files" in item:
-                message["files"] = item.get("files")
-            output_messages.append(message)
 
     # Some proxies put the final text in a top-level "output_text" or "text" field.
     if not content:
@@ -596,15 +538,6 @@ def convert_responses_to_chat_completions(
                 content = v
                 break
 
-    assistant_message: Dict[str, Any] = {
-        "role": "assistant",
-        "content": content,
-        **({"reasoning_content": reasoning_content} if reasoning_content else {}),
-        **({"tool_calls": tool_calls} if tool_calls else {}),
-    }
-
-    all_messages: List[dict] = [assistant_message, *output_messages]
-
     return {
         "id": responses_data.get("id", f"chatcmpl-{uuid.uuid4().hex}"),
         "object": "chat.completion",
@@ -613,8 +546,16 @@ def convert_responses_to_chat_completions(
         "choices": [
             {
                 "index": 0,
-                "message": assistant_message,
-                **({"messages": all_messages} if output_messages else {}),
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                    **(
+                        {"reasoning_content": reasoning_content}
+                        if reasoning_content
+                        else {}
+                    ),
+                    **({"tool_calls": tool_calls} if tool_calls else {}),
+                },
                 "finish_reason": "tool_calls" if tool_calls else "stop",
             }
         ],
@@ -723,6 +664,7 @@ async def responses_events_to_chat_completions_sse(
     saw_tool_calls = False
     saw_content = False
     saw_text_content = False
+    saw_reasoning_content = False
     reasoning_delta_seen: set[str] = set()
 
     def _tool_state(stable_id: str, idx: int) -> Dict[str, Any]:
@@ -863,17 +805,10 @@ async def responses_events_to_chat_completions_sse(
 
         # Temporary diagnostic: log every upstream event type
         if event_type and event_type not in ("response.output_text.delta",):
-            log.info(
-                "[RESPONSES SSE] event_type=%s keys=%s",
-                event_type,
-                sorted(event.keys()),
-            )
+            log.info("[RESPONSES SSE] event_type=%s keys=%s", event_type, sorted(event.keys()))
         # Extra: log full payload for any reasoning-related event
         if "reasoning" in event_type:
-            log.info(
-                "[RESPONSES SSE] REASONING_EVENT_FULL: %s",
-                json.dumps(event, ensure_ascii=False, default=str)[:3000],
-            )
+            log.info("[RESPONSES SSE] REASONING_EVENT_FULL: %s", json.dumps(event, ensure_ascii=False, default=str)[:3000])
 
         if event_type == "response.output_text.delta":
             delta = event.get("delta", "")
@@ -915,6 +850,7 @@ async def responses_events_to_chat_completions_sse(
                     _reasoning_event_key(event, _reasoning_event_family(event_type))
                 )
                 saw_content = True
+                saw_reasoning_content = True
                 yield f"data: {json.dumps(make_chunk(reasoning_content=delta_text), ensure_ascii=False)}\n\n"
             continue
 
@@ -924,13 +860,16 @@ async def responses_events_to_chat_completions_sse(
             "response.reasoning_summary_part.done",
             "response.reasoning.done",
         ):
-            event_key = _reasoning_event_key(event, _reasoning_event_family(event_type))
+            event_key = _reasoning_event_key(
+                event, _reasoning_event_family(event_type)
+            )
             if event_key in reasoning_delta_seen:
                 continue
 
             reasoning_text = _extract_reasoning_event_text(event)
             if reasoning_text:
                 saw_content = True
+                saw_reasoning_content = True
                 yield f"data: {json.dumps(make_chunk(reasoning_content=reasoning_text), ensure_ascii=False)}\n\n"
             continue
 
@@ -976,11 +915,7 @@ async def responses_events_to_chat_completions_sse(
             continue
 
         # Compatibility: tool calls and/or text can arrive as output items.
-        if event_type in (
-            "response.output_item.added",
-            "response.output_item.delta",
-            "response.output_item.done",
-        ):
+        if event_type in ("response.output_item.added", "response.output_item.delta", "response.output_item.done"):
             item = event.get("item") or event.get("delta") or {}
             if isinstance(item, dict):
                 item_type = item.get("type") or ""
@@ -1026,40 +961,27 @@ async def responses_events_to_chat_completions_sse(
                         yield f"data: {json.dumps(make_chunk(tool_calls=tool_calls), ensure_ascii=False)}\n\n"
                     continue
 
-                # Reasoning output item: extract summary text from item.summary array.
-                if item_type == "reasoning" and event_type in (
-                    "response.output_item.done",
-                    "response.output_item.added",
-                ):
+                # Reasoning output item: extract any human-readable reasoning text
+                # the upstream includes on the item itself.
+                if item_type == "reasoning" and event_type in ("response.output_item.done", "response.output_item.added"):
+                    reasoning_text = _stringify_reasoning_content(
+                        item.get("summary") or item.get("content") or item
+                    )
                     log.info(
-                        "[RESPONSES SSE] reasoning item: type=%s summary=%s FULL_ITEM=%s",
+                        "[RESPONSES SSE] reasoning item: type=%s summary_len=%d content_len=%d has_encrypted=%s FULL_ITEM=%s",
                         item_type,
-                        json.dumps(
-                            item.get("summary"), ensure_ascii=False, default=str
-                        )[:500],
+                        len(_stringify_reasoning_content(item.get("summary"))),
+                        len(_stringify_reasoning_content(item.get("content"))),
+                        bool(item.get("encrypted_content")),
                         json.dumps(item, ensure_ascii=False, default=str)[:2000],
                     )
-                    summary = item.get("summary")
-                    if isinstance(summary, list) and summary:
-                        parts = []
-                        for s in summary:
-                            if isinstance(s, dict):
-                                t = s.get("text") or ""
-                                if t:
-                                    parts.append(t)
-                            elif isinstance(s, str) and s:
-                                parts.append(s)
-                        reasoning_text = "\n".join(parts)
-                        if reasoning_text:
-                            saw_content = True
-                            yield f"data: {json.dumps(make_chunk(reasoning_content=reasoning_text), ensure_ascii=False)}\n\n"
+                    if reasoning_text:
+                        saw_content = True
+                        saw_reasoning_content = True
+                        yield f"data: {json.dumps(make_chunk(reasoning_content=reasoning_text), ensure_ascii=False)}\n\n"
                     continue
 
-                if (
-                    item_type == "message"
-                    and not saw_text_content
-                    and event_type == "response.output_item.done"
-                ):
+                if item_type == "message" and not saw_text_content and event_type == "response.output_item.done":
                     # Fallback: extract text from final message content when deltas are missing.
                     content_items = item.get("content") or []
                     if isinstance(content_items, list):
@@ -1079,17 +1001,32 @@ async def responses_events_to_chat_completions_sse(
 
         if event_type in ("response.completed", "response.done"):
             # Diagnostic: log output items in the final response
+            completed_reasoning_texts: List[str] = []
             if isinstance(event.get("response"), dict):
                 resp_obj = event["response"]
                 output_items = resp_obj.get("output", [])
                 if isinstance(output_items, list):
                     for oi_idx, oi in enumerate(output_items):
                         if isinstance(oi, dict) and oi.get("type") == "reasoning":
+                            reasoning_text = _stringify_reasoning_content(
+                                oi.get("summary") or oi.get("content") or oi
+                            )
+                            if reasoning_text:
+                                completed_reasoning_texts.append(reasoning_text)
                             log.info(
-                                "[RESPONSES SSE] FINAL reasoning output[%d]: %s",
+                                "[RESPONSES SSE] FINAL reasoning output[%d]: summary_len=%d content_len=%d has_encrypted=%s FULL_ITEM=%s",
                                 oi_idx,
+                                len(_stringify_reasoning_content(oi.get("summary"))),
+                                len(_stringify_reasoning_content(oi.get("content"))),
+                                bool(oi.get("encrypted_content")),
                                 json.dumps(oi, ensure_ascii=False, default=str)[:3000],
                             )
+            if completed_reasoning_texts and not saw_reasoning_content:
+                reasoning_text = "\n".join(part for part in completed_reasoning_texts if part)
+                if reasoning_text:
+                    saw_content = True
+                    saw_reasoning_content = True
+                    yield f"data: {json.dumps(make_chunk(reasoning_content=reasoning_text), ensure_ascii=False)}\n\n"
             # Attach usage when available (some proxies include it here).
             usage = None
             if isinstance(event.get("response"), dict):
@@ -1126,9 +1063,7 @@ async def responses_events_to_chat_completions_sse(
                 saw_tool_calls = True
                 yield f"data: {json.dumps(make_chunk(tool_calls=pending_tool_calls), ensure_ascii=False)}\n\n"
 
-            finish_reason = (
-                "tool_calls" if saw_tool_calls and not saw_text_content else "stop"
-            )
+            finish_reason = "tool_calls" if saw_tool_calls and not saw_text_content else "stop"
             yield f"data: {json.dumps(make_chunk(finish_reason=finish_reason, usage=usage), ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
             return

@@ -12,6 +12,7 @@
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { findModelByIdentity } from '$lib/utils/model-identity';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 
 	const i18n = getContext('i18n');
@@ -29,7 +30,7 @@
 		selectedModelIdx = models.length - 1;
 	}
 
-	$: models = modelIds.map((id) => $_models.find((m) => m.id === id));
+	$: models = modelIds.map((id) => findModelByIdentity($_models, id));
 
 	onMount(() => {
 		mounted = true;
@@ -57,9 +58,7 @@
 							<ModelIcon
 								src={model?.info?.meta?.profile_image_url ??
 									model?.meta?.profile_image_url ??
-									($i18n.language === 'dg-DG'
-										? `/doge.png`
-										: `${WEBUI_BASE_URL}/static/favicon.png`)}
+									`${WEBUI_BASE_URL}/static/favicon.png`}
 								alt="logo"
 								className="size-[2.7rem] rounded-2xl border-[1px] border-gray-100 dark:border-none"
 							/>

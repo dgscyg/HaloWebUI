@@ -28,7 +28,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Optional
 
-from open_webui.models.users import Users, UserModel
+from open_webui.models.users import UserModel, UserSettings, Users
 
 TOOLS_KEY = "tools"
 NATIVE_TOOLS_KEY = "native_tools"
@@ -123,6 +123,11 @@ def _get_tools_settings(user: Optional[UserModel]) -> dict:
     return _as_dict(settings.get(TOOLS_KEY))
 
 
+def _with_settings(user: UserModel, settings_dict: dict) -> UserModel:
+    settings_model = UserSettings.model_validate(settings_dict)
+    return user.model_copy(update={"settings": settings_model})
+
+
 def _update_tools_settings(user_id: str, patch: dict) -> Optional[UserModel]:
     """
     Merge a partial patch into user.settings["tools"] without clobbering sibling keys
@@ -152,6 +157,7 @@ def maybe_migrate_user_tool_settings(request, user: UserModel) -> UserModel:
     - Only admins are seeded from global configs.
     - Only seed missing keys (do not overwrite an existing per-user value).
     - Never delete legacy global configs.
+    - Read paths must stay read-only: return an in-memory migrated view instead of mutating DB.
     """
     if not user or getattr(user, "role", None) != "admin":
         return user
@@ -178,8 +184,9 @@ def maybe_migrate_user_tool_settings(request, user: UserModel) -> UserModel:
     if not changed:
         return user
 
-    updated = Users.update_user_settings_by_id(user.id, {TOOLS_KEY: tools})
-    return updated or user
+    next_settings = _get_settings_dict(user)
+    next_settings[TOOLS_KEY] = tools
+    return _with_settings(user, next_settings)
 
 
 def get_user_tool_server_connections(request, user: Optional[UserModel]) -> list[dict]:

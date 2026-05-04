@@ -257,6 +257,59 @@ export const verifyToolServerConnection = async (token: string, connection: obje
 	return res;
 };
 
+export const shareToolServerConnection = async (
+	token: string,
+	index: number,
+	payload: { access_control?: object | null }
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/tool_servers/${index}/share`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify(payload)
+	})
+		.then(parseJsonResponse)
+		.catch((err) => {
+			console.log(err);
+			error = err.detail ?? err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const unshareToolServerConnection = async (token: string, index: number) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/tool_servers/${index}/share`, {
+		method: 'DELETE',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(parseJsonResponse)
+		.catch((err) => {
+			console.log(err);
+			error = err.detail ?? err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const getNativeToolsConfig = async (token: string) => {
 	let error = null;
 
@@ -396,13 +449,10 @@ export const getMCPAppsConfig = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
-			error = err.detail;
+			error = err.detail ?? err;
 			return null;
 		});
 
@@ -426,13 +476,63 @@ export const setMCPAppsConfig = async (token: string, config: object) => {
 			...config
 		})
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
-			error = err.detail;
+			error = err.detail ?? err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const shareMCPServerConnection = async (
+	token: string,
+	index: number,
+	payload: { access_control?: object | null }
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/mcp_servers/${index}/share`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify(payload)
+	})
+		.then(parseJsonResponse)
+		.catch((err) => {
+			console.log(err);
+			error = err.detail ?? err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const unshareMCPServerConnection = async (token: string, index: number) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/mcp_servers/${index}/share`, {
+		method: 'DELETE',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(parseJsonResponse)
+		.catch((err) => {
+			console.log(err);
+			error = err.detail ?? err;
 			return null;
 		});
 
@@ -453,13 +553,10 @@ export const getMCPAppsCapabilities = async (token: string) => {
 			Authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
-			error = err.detail;
+			error = err.detail ?? err;
 			return null;
 		});
 

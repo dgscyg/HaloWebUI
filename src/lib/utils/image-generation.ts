@@ -9,6 +9,11 @@ export type AspectRatioOption = {
 	label: string;
 };
 
+export type NativeResolutionOption = {
+	value: string;
+	label: string;
+};
+
 export const GEMINI_IMAGE_SIZE_OPTIONS: GeminiImageSizeOption[] = [
 	{ value: '512', label: '512', pixels: '512x512' },
 	{ value: '1K', label: '1K', pixels: '1024x1024' },
@@ -29,6 +34,28 @@ export const IMAGE_ASPECT_RATIO_OPTIONS: AspectRatioOption[] = [
 	{ value: '21:9', label: '21:9' }
 ];
 
+export const GROK_IMAGE_ASPECT_RATIO_OPTIONS: AspectRatioOption[] = [
+	{ value: '1:1', label: '1:1' },
+	{ value: '16:9', label: '16:9' },
+	{ value: '9:16', label: '9:16' },
+	{ value: '4:3', label: '4:3' },
+	{ value: '3:4', label: '3:4' },
+	{ value: '3:2', label: '3:2' },
+	{ value: '2:3', label: '2:3' },
+	{ value: '2:1', label: '2:1' },
+	{ value: '1:2', label: '1:2' },
+	{ value: '19.5:9', label: '19.5:9' },
+	{ value: '9:19.5', label: '9:19.5' },
+	{ value: '20:9', label: '20:9' },
+	{ value: '9:20', label: '9:20' },
+	{ value: 'auto', label: 'auto' }
+];
+
+export const GROK_IMAGE_RESOLUTION_OPTIONS: NativeResolutionOption[] = [
+	{ value: '1k', label: '1K' },
+	{ value: '2k', label: '2K' }
+];
+
 const LEGACY_SIZE_TO_GEMINI_IMAGE_SIZE: Record<string, string> = {
 	'512x512': '512',
 	'1024x1024': '1K',
@@ -45,21 +72,29 @@ const LEGACY_SIZE_TO_ASPECT_RATIO: Record<string, string> = {
 
 export const normalizeGeminiImageSize = (value: unknown): string | null => {
 	const normalized = `${value ?? ''}`.trim().toUpperCase();
-	return GEMINI_IMAGE_SIZE_OPTIONS.some((option) => option.value === normalized)
-		? normalized
-		: null;
+	return GEMINI_IMAGE_SIZE_OPTIONS.some((option) => option.value === normalized) ? normalized : null;
 };
 
 export const normalizeAspectRatio = (value: unknown): string | null => {
 	const normalized = `${value ?? ''}`.trim();
-	return IMAGE_ASPECT_RATIO_OPTIONS.some((option) => option.value === normalized)
+	return IMAGE_ASPECT_RATIO_OPTIONS.some((option) => option.value === normalized) ? normalized : null;
+};
+
+export const normalizeGrokAspectRatio = (value: unknown): string | null => {
+	const normalized = `${value ?? ''}`.trim();
+	return GROK_IMAGE_ASPECT_RATIO_OPTIONS.some((option) => option.value === normalized)
 		? normalized
 		: null;
 };
 
-export const mapLegacySizeToGeminiParams = (
-	size: unknown
-): {
+export const normalizeGrokResolution = (value: unknown): string | null => {
+	const normalized = `${value ?? ''}`.trim().toLowerCase();
+	return GROK_IMAGE_RESOLUTION_OPTIONS.some((option) => option.value === normalized)
+		? normalized
+		: null;
+};
+
+export const mapLegacySizeToGeminiParams = (size: unknown): {
 	imageSize: string | null;
 	aspectRatio: string | null;
 } => {
@@ -101,10 +136,13 @@ export const getFunctionPipeRootId = (modelId: unknown): string => {
 
 export const looksLikeImageValveSpec = (schema: any): boolean => {
 	const properties = schema?.properties ?? {};
-	return Boolean(properties?.image_size || properties?.aspect_ratio);
+	return Boolean(properties?.image_size || properties?.aspect_ratio || properties?.resolution);
 };
 
-export const getImageValveProperty = (schema: any, key: 'image_size' | 'aspect_ratio') =>
+export const getImageValveProperty = (
+	schema: any,
+	key: 'image_size' | 'aspect_ratio' | 'resolution'
+) =>
 	schema?.properties?.[key] ?? null;
 
 export const getPropertyEnumOptions = (
@@ -122,10 +160,19 @@ export const getPropertyEnumOptions = (
 	return fallback;
 };
 
+export const modelSupportsNativeImageOptions = (model: any): boolean =>
+	Boolean(
+		model &&
+			((model?.supports_image_size ?? false) ||
+				(model?.supports_resolution ?? false) ||
+				model?.size_mode === 'aspect_ratio' ||
+				model?.generation_mode === 'gemini_generate_content_image' ||
+				model?.generation_mode === 'xai_images')
+	);
+
 export const modelSupportsGeminiImageOptions = (model: any): boolean =>
 	Boolean(
 		model &&
 			((model?.supports_image_size ?? false) ||
-				model?.size_mode === 'aspect_ratio' ||
 				model?.generation_mode === 'gemini_generate_content_image')
 	);

@@ -6,6 +6,7 @@ from qdrant_client.http.models import PointStruct
 from qdrant_client.models import models
 
 from open_webui.retrieval.vector.main import VectorItem, SearchResult, GetResult
+from open_webui.retrieval.vector.utils import process_metadata
 from open_webui.config import QDRANT_URI, QDRANT_API_KEY, QDRANT_COLLECTION_PREFIX
 from open_webui.env import SRC_LOG_LEVELS
 
@@ -67,7 +68,10 @@ class QdrantClient:
             PointStruct(
                 id=item["id"],
                 vector=item["vector"],
-                payload={"text": item["text"], "metadata": item["metadata"]},
+                payload={
+                    "text": item["text"],
+                    "metadata": process_metadata(item["metadata"]),
+                },
             )
             for item in items
         ]

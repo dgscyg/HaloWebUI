@@ -1,14 +1,19 @@
 import json
 import logging
+import time
+import uuid
+from copy import deepcopy
 from typing import Literal, Optional
 
 
 from open_webui.socket.main import get_event_emitter
 from open_webui.models.chats import (
     ChatForm,
+    ChatComposerStateForm,
     ChatImportForm,
     ChatResponse,
     Chats,
+    ChatMessages,
     ChatTitleIdResponse,
     normalize_chat_payload,
     # [REACTION_FEATURE] Commented out - reaction feature disabled for now
@@ -22,11 +27,13 @@ from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS, FOLDER_MAX_ITEM_COUNT
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_permission
+from open_webui.utils.chat_image_refs import normalize_chat_payload_image_refs
 from open_webui.tasks import list_task_ids_by_chat_id
 
 log = logging.getLogger(__name__)
@@ -91,6 +98,189 @@ def _sync_imported_chat_tags(chat, user_id: str) -> None:
         ):
             Tags.insert_new_tag(tag_name, user_id)
 
+
+async def _normalize_chat_payload_images(chat_payload: dict, user) -> tuple[dict, set[str]]:
+    return await run_in_threadpool(
+        lambda: normalize_chat_payload_image_refs(
+            chat_payload,
+            user_id=user.id,
+            is_admin=user.role == "admin",
+        )
+    )
+
+
+def _sync_changed_chat_messages(
+    chat_id: str, user_id: str, chat_payload: dict, changed_message_ids: set[str]
+) -> None:
+    if not changed_message_ids:
+        return
+
+    messages = chat_payload.get("history", {}).get("messages", {}) or {}
+    for message_id in changed_message_ids:
+        message = messages.get(message_id)
+        if isinstance(message, dict):
+            ChatMessages.upsert_message(
+                chat_id=chat_id,
+                user_id=user_id,
+                message_id=message_id,
+                message=message,
+            )
+
+
+BRANCH_FILE_TYPES = {"doc", "file", "collection"}
+
+
+def _build_branch_chain(
+    history: dict, branch_point_message_id: str
+) -> tuple[list[str], dict[str, str]]:
+    messages = history.get("messages", {}) or {}
+    chain_ids: list[str] = []
+    visited: set[str] = set()
+    current_id: Optional[str] = branch_point_message_id
+
+    while current_id is not None:
+        if current_id in visited:
+            raise ValueError("Cycle detected while building branch chain.")
+
+        message = messages.get(current_id)
+        if not isinstance(message, dict):
+            raise ValueError("Branch point message was not found in chat history.")
+
+        chain_ids.append(current_id)
+        visited.add(current_id)
+
+        parent_id = message.get("parentId")
+        current_id = parent_id if isinstance(parent_id, str) and parent_id else None
+
+    chain_ids.reverse()
+    return chain_ids, {message_id: str(uuid.uuid4()) for message_id in chain_ids}
+
+
+def _build_branch_history(
+    history: dict, branch_point_message_id: str
+) -> tuple[dict, list[str], dict[str, str]]:
+    if not isinstance(history, dict):
+        raise ValueError("Chat history is missing or invalid.")
+
+    messages = history.get("messages", {}) or {}
+    if not isinstance(messages, dict):
+        raise ValueError("Chat history messages are missing or invalid.")
+
+    chain_ids, message_id_map = _build_branch_chain(history, branch_point_message_id)
+    branched_messages: dict[str, dict] = {}
+
+    for index, original_message_id in enumerate(chain_ids):
+        original_message = messages.get(original_message_id)
+        if not isinstance(original_message, dict):
+            raise ValueError("Encountered an invalid message while building branch.")
+
+        cloned_message = deepcopy(original_message)
+        cloned_message_id = message_id_map[original_message_id]
+        cloned_message["id"] = cloned_message_id
+        cloned_message["parentId"] = (
+            message_id_map[chain_ids[index - 1]] if index > 0 else None
+        )
+        cloned_message["childrenIds"] = (
+            [message_id_map[chain_ids[index + 1]]]
+            if index + 1 < len(chain_ids)
+            else []
+        )
+        branched_messages[cloned_message_id] = cloned_message
+
+    return {
+        "messages": branched_messages,
+        "currentId": message_id_map[branch_point_message_id],
+    }, chain_ids, message_id_map
+
+
+def _collect_branch_files(history_messages: dict, chain_ids: list[str]) -> list[dict]:
+    files: list[dict] = []
+    seen: set[str] = set()
+
+    for message_id in chain_ids:
+        message = history_messages.get(message_id)
+        if not isinstance(message, dict):
+            continue
+
+        for file_item in message.get("files") or []:
+            if not isinstance(file_item, dict):
+                continue
+            if file_item.get("type") not in BRANCH_FILE_TYPES:
+                continue
+
+            serialized = json.dumps(file_item, sort_keys=True, ensure_ascii=False)
+            if serialized in seen:
+                continue
+
+            seen.add(serialized)
+            files.append(deepcopy(file_item))
+
+    return files
+
+
+def _remap_branch_selection_threads(
+    selection_threads: object, message_id_map: dict[str, str]
+) -> dict:
+    if not isinstance(selection_threads, dict):
+        return {"version": 1, "items": []}
+
+    items = selection_threads.get("items", [])
+    if not isinstance(items, list):
+        items = []
+
+    remapped_items: list[dict] = []
+    for thread in items:
+        if not isinstance(thread, dict):
+            continue
+
+        source_message_id = thread.get("sourceMessageId")
+        if not isinstance(source_message_id, str):
+            continue
+
+        new_source_message_id = message_id_map.get(source_message_id)
+        if not new_source_message_id:
+            continue
+
+        remapped_thread = deepcopy(thread)
+        remapped_thread["sourceMessageId"] = new_source_message_id
+        remapped_items.append(remapped_thread)
+
+    version = selection_threads.get("version")
+    return {
+        "version": version if isinstance(version, int) else 1,
+        "items": remapped_items,
+    }
+
+
+def _build_branch_chat_payload(
+    source_chat: dict,
+    source_chat_id: str,
+    branch_point_message_id: str,
+    title: str,
+) -> dict:
+    if not isinstance(source_chat, dict):
+        raise ValueError("Chat payload is missing or invalid.")
+
+    payload = deepcopy(source_chat)
+    history = payload.get("history")
+    branched_history, chain_ids, message_id_map = _build_branch_history(
+        history, branch_point_message_id
+    )
+
+    history_messages = history.get("messages", {}) if isinstance(history, dict) else {}
+
+    payload["history"] = branched_history
+    payload["files"] = _collect_branch_files(history_messages, chain_ids)
+    payload["selectionThreads"] = _remap_branch_selection_threads(
+        payload.get("selectionThreads"), message_id_map
+    )
+    payload["title"] = title
+    payload["timestamp"] = int(time.time() * 1000)
+    payload["originalChatId"] = source_chat_id
+    payload["branchPointMessageId"] = branch_point_message_id
+    payload.pop("messages", None)
+
+    return payload
 
 ############################
 # GetChatList
@@ -161,7 +351,23 @@ async def get_user_chat_list_by_user_id(
 @router.post("/new", response_model=Optional[ChatResponse])
 async def create_new_chat(form_data: ChatForm, user=Depends(get_verified_user)):
     try:
-        chat = Chats.insert_new_chat(user.id, form_data)
+        normalized_chat, changed_message_ids = await _normalize_chat_payload_images(
+            form_data.chat, user
+        )
+        chat = Chats.insert_new_chat(
+            user.id,
+            ChatForm(
+                chat=normalized_chat,
+                folder_id=form_data.folder_id,
+                assistant_id=form_data.assistant_id,
+            ),
+        )
+        if chat and changed_message_ids:
+            await run_in_threadpool(
+                lambda: _sync_changed_chat_messages(
+                    chat.id, user.id, normalized_chat, changed_message_ids
+                )
+            )
         return _chat_response(chat)
     except Exception as e:
         log.exception(e)
@@ -178,7 +384,25 @@ async def create_new_chat(form_data: ChatForm, user=Depends(get_verified_user)):
 @router.post("/import", response_model=Optional[ChatResponse])
 async def import_chat(form_data: ChatImportForm, user=Depends(get_verified_user)):
     try:
-        chat = Chats.import_chat(user.id, form_data)
+        normalized_chat, changed_message_ids = await _normalize_chat_payload_images(
+            form_data.chat, user
+        )
+        chat = Chats.import_chat(
+            user.id,
+            ChatImportForm(
+                chat=normalized_chat,
+                meta=form_data.meta,
+                pinned=form_data.pinned,
+                folder_id=form_data.folder_id,
+                assistant_id=form_data.assistant_id,
+            ),
+        )
+        if chat and changed_message_ids:
+            await run_in_threadpool(
+                lambda: _sync_changed_chat_messages(
+                    chat.id, user.id, normalized_chat, changed_message_ids
+                )
+            )
         _sync_imported_chat_tags(chat, user.id)
         return _chat_response(chat)
     except Exception as e:
@@ -196,11 +420,31 @@ async def import_chats_batch(
 
     if form_data.mode == "replace":
         try:
-            import_forms = [
-                ChatImportForm(**item.model_dump()) for item in form_data.items
-            ]
+            import_forms = []
+            normalized_entries: list[tuple[dict, set[str]]] = []
+            for item in form_data.items:
+                normalized_chat, changed_message_ids = await _normalize_chat_payload_images(
+                    item.chat, user
+                )
+                import_forms.append(
+                    ChatImportForm(
+                        chat=normalized_chat,
+                        meta=item.meta,
+                        pinned=item.pinned,
+                        folder_id=item.folder_id,
+                        assistant_id=item.assistant_id,
+                    )
+                )
+                normalized_entries.append((normalized_chat, changed_message_ids))
             chats = Chats.replace_chats_by_user_id(user.id, import_forms)
-            for chat in chats:
+            for idx, chat in enumerate(chats):
+                normalized_chat, changed_message_ids = normalized_entries[idx]
+                if changed_message_ids:
+                    await run_in_threadpool(
+                        lambda chat_id=chat.id, payload=normalized_chat, changed_ids=changed_message_ids: _sync_changed_chat_messages(
+                            chat_id, user.id, payload, changed_ids
+                        )
+                    )
                 _sync_imported_chat_tags(chat, user.id)
 
             return ChatBatchImportResponse(
@@ -222,7 +466,19 @@ async def import_chats_batch(
 
     for index, item in enumerate(form_data.items):
         try:
-            chat = Chats.import_chat(user.id, ChatImportForm(**item.model_dump()))
+            normalized_chat, changed_message_ids = await _normalize_chat_payload_images(
+                item.chat, user
+            )
+            chat = Chats.import_chat(
+                user.id,
+                ChatImportForm(
+                    chat=normalized_chat,
+                    meta=item.meta,
+                    pinned=item.pinned,
+                    folder_id=item.folder_id,
+                    assistant_id=item.assistant_id,
+                ),
+            )
             if chat is None:
                 failures.append(
                     ChatImportFailure(
@@ -233,6 +489,12 @@ async def import_chats_batch(
                 )
                 continue
 
+            if changed_message_ids:
+                await run_in_threadpool(
+                    lambda: _sync_changed_chat_messages(
+                        chat.id, user.id, normalized_chat, changed_message_ids
+                    )
+                )
             _sync_imported_chat_tags(chat, user.id)
             imported += 1
         except Exception as e:
@@ -530,8 +792,8 @@ async def get_chat_by_id(id: str, user=Depends(get_verified_user)):
 
 @router.get("/{id}/context", response_model=ChatContextResponse)
 async def get_chat_context_by_id(id: str, user=Depends(get_verified_user)):
-    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
-    if not chat:
+    chat_meta = Chats.get_chat_meta_by_id_and_user_id(id, user.id)
+    if chat_meta is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
         )
@@ -540,7 +802,7 @@ async def get_chat_context_by_id(id: str, user=Depends(get_verified_user)):
     task_ids: list[str] = []
 
     try:
-        tag_ids = chat.meta.get("tags", [])
+        tag_ids = chat_meta.get("tags", [])
         tag_models = Tags.get_tags_by_ids_and_user_id(tag_ids, user.id)
     except Exception:
         log.exception("Failed to load chat tags for chat_id=%s", id)
@@ -567,13 +829,47 @@ async def update_chat_by_id(
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
         updated_chat = {**chat.chat, **form_data.chat}
-        chat = Chats.update_chat_by_id(id, updated_chat)
+        normalized_chat, changed_message_ids = await _normalize_chat_payload_images(
+            updated_chat, user
+        )
+        chat = Chats.update_chat_by_id(id, normalized_chat)
+        if chat and changed_message_ids:
+            await run_in_threadpool(
+                lambda: _sync_changed_chat_messages(
+                    id, user.id, normalized_chat, changed_message_ids
+                )
+            )
         return _chat_response(chat)
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+
+
+############################
+# UpdateChatComposerStateById
+############################
+
+
+@router.post("/{id}/composer-state", response_model=Optional[ChatResponse])
+async def update_chat_composer_state_by_id(
+    id: str,
+    form_data: ChatComposerStateForm,
+    user=Depends(get_verified_user),
+):
+    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    if chat:
+        updated = Chats.update_chat_composer_state_by_id(
+            id,
+            form_data.composer_state if isinstance(form_data.composer_state, dict) else {},
+        )
+        return _chat_response(updated)
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+    )
 
 
 ############################
@@ -744,6 +1040,67 @@ async def pin_chat_by_id(id: str, user=Depends(get_verified_user)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.DEFAULT()
         )
+
+
+############################
+# BranchChat
+############################
+
+
+class BranchForm(BaseModel):
+    branch_point_message_id: str
+    title: Optional[str] = None
+
+
+@router.post("/{id}/branch", response_model=Optional[ChatResponse])
+async def branch_chat_by_id(
+    form_data: BranchForm, id: str, user=Depends(get_verified_user)
+):
+    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    if not chat:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.DEFAULT(),
+        )
+
+    branch_point_message_id = form_data.branch_point_message_id.strip()
+    if not branch_point_message_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Branch point message is required.",
+        )
+
+    branch_title = (
+        form_data.title.strip()
+        if isinstance(form_data.title, str) and form_data.title.strip()
+        else f"{chat.title} · 分支"
+    )
+
+    try:
+        branched_chat = _build_branch_chat_payload(
+            chat.chat,
+            chat.id,
+            branch_point_message_id,
+            branch_title,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        )
+
+    new_chat = Chats.import_chat(
+        user.id,
+        ChatImportForm(
+            chat=branched_chat,
+            meta=deepcopy(chat.meta),
+            pinned=False,
+            folder_id=chat.folder_id,
+            assistant_id=chat.assistant_id,
+        ),
+    )
+
+    return _chat_response(new_chat)
 
 
 ############################

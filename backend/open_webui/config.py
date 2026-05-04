@@ -1166,6 +1166,9 @@ OPENAI_API_BASE_URL = os.environ.get("OPENAI_API_BASE_URL", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_API_BASE_URL = os.environ.get("GEMINI_API_BASE_URL", "")
 
+GROK_CONNECTION_API_KEY = os.environ.get("GROK_API_KEY", "")
+GROK_CONNECTION_API_BASE_URL = os.environ.get("GROK_API_BASE_URL", "")
+
 
 if OPENAI_API_BASE_URL == "":
     OPENAI_API_BASE_URL = "https://api.openai.com/v1"
@@ -1195,6 +1198,26 @@ OPENAI_API_CONFIGS = PersistentConfig(
     "OPENAI_API_CONFIGS",
     "openai.api_configs",
     {},
+)
+
+_chat_response_base64_image_url_conversion_raw = os.environ.get(
+    "ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION"
+)
+if _chat_response_base64_image_url_conversion_raw is None:
+    _chat_response_base64_image_url_conversion_raw = os.environ.get(
+        "REPLACE_IMAGE_URLS_IN_CHAT_RESPONSE", "False"
+    )
+
+ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION = PersistentConfig(
+    "ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION",
+    "openai.chat_response.base64_image_url_conversion",
+    str(_chat_response_base64_image_url_conversion_raw).lower() == "true",
+)
+
+CHAT_STREAM_RESPONSE_CHUNK_MAX_BUFFER_SIZE = PersistentConfig(
+    "CHAT_STREAM_RESPONSE_CHUNK_MAX_BUFFER_SIZE",
+    "openai.chat_response.chunk_max_buffer_size",
+    max(int(os.environ.get("CHAT_STREAM_RESPONSE_CHUNK_MAX_BUFFER_SIZE", "16777216")), 65536),
 )
 
 # Get the actual OpenAI API key based on the base URL
@@ -1255,6 +1278,61 @@ GEMINI_API_BASE_URLS = PersistentConfig(
 GEMINI_API_CONFIGS = PersistentConfig(
     "GEMINI_API_CONFIGS",
     "gemini.api_configs",
+    {},
+)
+
+####################################
+# GROK_API
+####################################
+
+DEFAULT_GROK_API_BASE_URL = "https://api.x.ai/v1"
+
+ENABLE_GROK_API = PersistentConfig(
+    "ENABLE_GROK_API",
+    "grok.enable",
+    os.environ.get("ENABLE_GROK_API", "False").lower() == "true",
+)
+
+if (
+    GROK_CONNECTION_API_BASE_URL != ""
+    and GROK_CONNECTION_API_BASE_URL.endswith("/")
+):
+    GROK_CONNECTION_API_BASE_URL = GROK_CONNECTION_API_BASE_URL[:-1]
+
+_effective_grok_base_url = (
+    GROK_CONNECTION_API_BASE_URL or DEFAULT_GROK_API_BASE_URL
+)
+
+GROK_API_KEYS = os.environ.get("GROK_API_KEYS", "")
+GROK_API_KEYS = (
+    GROK_API_KEYS if GROK_API_KEYS != "" else GROK_CONNECTION_API_KEY
+)
+
+GROK_API_KEYS = [key.strip() for key in GROK_API_KEYS.split(";")]
+GROK_API_KEYS = PersistentConfig(
+    "GROK_API_KEYS",
+    "grok.api_keys",
+    GROK_API_KEYS,
+)
+
+GROK_API_BASE_URLS = os.environ.get("GROK_API_BASE_URLS", "")
+GROK_API_BASE_URLS = (
+    GROK_API_BASE_URLS if GROK_API_BASE_URLS != "" else _effective_grok_base_url
+)
+
+GROK_API_BASE_URLS = [
+    url.strip() if url.strip() != "" else DEFAULT_GROK_API_BASE_URL
+    for url in GROK_API_BASE_URLS.split(";")
+]
+GROK_API_BASE_URLS = PersistentConfig(
+    "GROK_API_BASE_URLS",
+    "grok.api_base_urls",
+    GROK_API_BASE_URLS,
+)
+
+GROK_API_CONFIGS = PersistentConfig(
+    "GROK_API_CONFIGS",
+    "grok.api_configs",
     {},
 )
 
@@ -3476,8 +3554,31 @@ IMAGES_GEMINI_API_KEY = PersistentConfig(
     os.getenv("IMAGES_GEMINI_API_KEY", GEMINI_API_KEY),
 )
 
+IMAGES_GROK_API_BASE_URL = PersistentConfig(
+    "IMAGES_GROK_API_BASE_URL",
+    "image_generation.grok.api_base_url",
+    os.getenv("IMAGES_GROK_API_BASE_URL", _effective_grok_base_url),
+)
+IMAGES_GROK_API_KEY = PersistentConfig(
+    "IMAGES_GROK_API_KEY",
+    "image_generation.grok.api_key",
+    os.getenv("IMAGES_GROK_API_KEY", GROK_CONNECTION_API_KEY),
+)
+
 IMAGE_SIZE = PersistentConfig(
-    "IMAGE_SIZE", "image_generation.size", os.getenv("IMAGE_SIZE", "512x512")
+    "IMAGE_SIZE", "image_generation.size", os.getenv("IMAGE_SIZE", "auto")
+)
+
+IMAGE_ASPECT_RATIO = PersistentConfig(
+    "IMAGE_ASPECT_RATIO",
+    "image_generation.aspect_ratio",
+    os.getenv("IMAGE_ASPECT_RATIO", "1:1"),
+)
+
+IMAGE_RESOLUTION = PersistentConfig(
+    "IMAGE_RESOLUTION",
+    "image_generation.resolution",
+    os.getenv("IMAGE_RESOLUTION", "1k"),
 )
 
 IMAGE_STEPS = PersistentConfig(

@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 
 from open_webui.retrieval.vector.main import VectorItem, SearchResult, GetResult
+from open_webui.retrieval.vector.utils import process_metadata
 from open_webui.config import (
     MILVUS_URI,
     MILVUS_DB,
@@ -239,7 +240,7 @@ class MilvusClient:
                     "id": item["id"],
                     "vector": item["vector"],
                     "data": {"text": item["text"]},
-                    "metadata": item["metadata"],
+                    "metadata": process_metadata(item["metadata"]),
                 }
                 for item in items
             ],
@@ -262,7 +263,7 @@ class MilvusClient:
                     "id": item["id"],
                     "vector": item["vector"],
                     "data": {"text": item["text"]},
-                    "metadata": item["metadata"],
+                    "metadata": process_metadata(item["metadata"]),
                 }
                 for item in items
             ],

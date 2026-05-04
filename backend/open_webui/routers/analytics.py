@@ -2,7 +2,9 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from open_webui.internal.db import get_db
 from open_webui.models.chats import Chat, ChatMessage
@@ -13,7 +15,7 @@ from open_webui.utils.auth import get_admin_user
 from open_webui.config import ENABLE_ADMIN_ANALYTICS
 from open_webui.env import SRC_LOG_LEVELS
 from pydantic import BaseModel, Field
-from sqlalchemy import func, cast, BigInteger, or_
+from sqlalchemy import func, or_
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -87,6 +89,27 @@ def _extract_usage_tokens(usage: object) -> tuple[Optional[int], Optional[int]]:
         )
 
     return _coerce_int(prompt_tokens), _coerce_int(completion_tokens)
+
+
+def _resolve_analytics_timezone(timezone_name: Optional[str]):
+    if not timezone_name:
+        return timezone.utc
+
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid timezone",
+        )
+
+
+def _format_local_analytics_day(timestamp_seconds: int, tzinfo) -> str:
+    return (
+        datetime.fromtimestamp(int(timestamp_seconds), timezone.utc)
+        .astimezone(tzinfo)
+        .strftime("%Y-%m-%d")
+    )
 
 
 def _safe_chat_dict(chat_value: object) -> Optional[dict]:
@@ -472,41 +495,44 @@ async def get_daily_stats(
     user=Depends(get_admin_user),
     days: int = Query(default=30, ge=1, le=365),
     model: Optional[str] = Query(default=None),
+    timezone_name: Optional[str] = Query(default=None, alias="timezone"),
 ):
     """Daily message count and token consumption, optionally filtered by model."""
     _require_analytics_enabled()
     cutoff = int(time.time()) - (days * 86400)
+    tzinfo = _resolve_analytics_timezone(timezone_name)
 
     with get_db() as db:
         await _ensure_tokens_backfilled(db, cutoff, model=model)
 
-        # Group by day: divide epoch by 86400 to get day number
-        day_expr = cast(ChatMessage.created_at / 86400, BigInteger)
-
         query = db.query(
-            day_expr.label("day"),
-            func.count(ChatMessage.id).label("message_count"),
-            func.coalesce(func.sum(ChatMessage.prompt_tokens), 0).label(
-                "total_prompt_tokens"
-            ),
-            func.coalesce(func.sum(ChatMessage.completion_tokens), 0).label(
-                "total_completion_tokens"
-            ),
+            ChatMessage.created_at.label("created_at"),
+            func.coalesce(ChatMessage.prompt_tokens, 0).label("prompt_tokens"),
+            func.coalesce(ChatMessage.completion_tokens, 0).label("completion_tokens"),
         ).filter(ChatMessage.created_at >= cutoff)
 
         if model:
             query = query.filter(ChatMessage.model == model)
 
-        rows = query.group_by(day_expr).order_by(day_expr).all()
+        daily_stats: dict[str, dict] = {}
+        for row in query.order_by(ChatMessage.created_at).yield_per(1000):
+            date = _format_local_analytics_day(row.created_at, tzinfo)
+            if date not in daily_stats:
+                daily_stats[date] = {
+                    "date": date,
+                    "message_count": 0,
+                    "total_prompt_tokens": 0,
+                    "total_completion_tokens": 0,
+                    "total_tokens": 0,
+                }
 
-        return [
-            {
-                "date": time.strftime("%Y-%m-%d", time.gmtime(row.day * 86400)),
-                "message_count": row.message_count,
-                "total_prompt_tokens": int(row.total_prompt_tokens),
-                "total_completion_tokens": int(row.total_completion_tokens),
-                "total_tokens": int(row.total_prompt_tokens)
-                + int(row.total_completion_tokens),
-            }
-            for row in rows
-        ]
+            bucket = daily_stats[date]
+            prompt_tokens = int(row.prompt_tokens or 0)
+            completion_tokens = int(row.completion_tokens or 0)
+
+            bucket["message_count"] += 1
+            bucket["total_prompt_tokens"] += prompt_tokens
+            bucket["total_completion_tokens"] += completion_tokens
+            bucket["total_tokens"] += prompt_tokens + completion_tokens
+
+        return list(daily_stats.values())

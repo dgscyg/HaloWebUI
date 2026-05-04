@@ -5,6 +5,8 @@ type ModelLike = {
 	anthropic?: Record<string, unknown>;
 };
 
+type Translator = (key: string, options?: Record<string, unknown>) => string;
+
 export type AnthropicThinkingProfile = {
 	isAnthropic: boolean;
 	supportsThinking: boolean;
@@ -148,15 +150,21 @@ export const getAnthropicThinkingProfile = (
 	};
 };
 
-export const getAnthropicEffortSteps = (model: ModelLike | null | undefined) => {
+const translateLabel = (t: Translator | undefined, key: string, defaultValue: string) =>
+	t ? t(key, { defaultValue }) : defaultValue;
+
+export const getAnthropicEffortSteps = (
+	model: ModelLike | null | undefined,
+	t?: Translator
+) => {
 	const profile = getAnthropicThinkingProfile(model);
 	if (!profile.isAnthropic) {
 		return null;
 	}
 
 	return [
-		{ value: 'none', label: '关闭' },
-		{ value: null, label: '默认' },
+		{ value: 'none', label: translateLabel(t, '关闭', 'Off') },
+		{ value: null, label: translateLabel(t, '默认', 'Default') },
 		{ value: 'low', label: 'Low' },
 		{ value: 'medium', label: 'Medium' },
 		{ value: 'high', label: 'High' },
@@ -176,7 +184,10 @@ const formatTokenLabel = (value: number) => {
 	return `${rounded}K`;
 };
 
-export const getAnthropicBudgetSteps = (model: ModelLike | null | undefined) => {
+export const getAnthropicBudgetSteps = (
+	model: ModelLike | null | undefined,
+	t?: Translator
+) => {
 	const profile = getAnthropicThinkingProfile(model);
 	if (!profile.isAnthropic) {
 		return null;
@@ -190,8 +201,8 @@ export const getAnthropicBudgetSteps = (model: ModelLike | null | undefined) => 
 		.filter((value, index, array) => array.indexOf(value) === index);
 
 	return [
-		{ value: 0, label: '关闭' },
-		{ value: null, label: '默认' },
+		{ value: 0, label: translateLabel(t, '关闭', 'Off') },
+		{ value: null, label: translateLabel(t, '默认', 'Default') },
 		...numericSteps.map((value) => ({
 			value,
 			label: formatTokenLabel(value)

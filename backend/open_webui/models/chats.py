@@ -7,6 +7,9 @@ from typing import Optional
 from open_webui.internal.db import Base, get_db
 from open_webui.models.tags import TagModel, Tag, Tags
 from open_webui.env import SRC_LOG_LEVELS
+from open_webui.utils.image_generation_options import (
+    sanitize_chat_payload_image_generation_options,
+)
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Boolean, Column, Integer, String, Text, JSON, Index
@@ -148,6 +151,10 @@ class ChatTitleForm(BaseModel):
     title: str
 
 
+class ChatComposerStateForm(BaseModel):
+    composer_state: dict
+
+
 class ChatResponse(BaseModel):
     id: str
     user_id: str
@@ -178,7 +185,6 @@ class ChatTitleIdResponse(BaseModel):
 
 class ChatReaction(Base):
     """Kept for Alembic migration compatibility - do not remove."""
-
     __tablename__ = "chat_reaction"
 
     id = Column(Text, primary_key=True)
@@ -188,7 +194,9 @@ class ChatReaction(Base):
     name = Column(Text, nullable=False)
     created_at = Column(BigInteger, nullable=False)
 
-    __table_args__ = (Index("ix_chat_reaction_chat_message", "chat_id", "message_id"),)
+    __table_args__ = (
+        Index("ix_chat_reaction_chat_message", "chat_id", "message_id"),
+    )
 
 
 # [REACTION_FEATURE] Commented out - reaction feature disabled for now
@@ -224,6 +232,13 @@ def normalize_chat_payload(chat: Optional[dict]) -> dict:
 
 
 class ChatTable:
+    def _next_user_chat_timestamp(self, db, user_id: str) -> int:
+        now = int(time.time())
+        latest_updated_at = (
+            db.query(func.max(Chat.updated_at)).filter_by(user_id=user_id).scalar() or 0
+        )
+        return latest_updated_at + 1 if latest_updated_at >= now else now
+
     def _build_chat_row(
         self,
         *,
@@ -233,9 +248,13 @@ class ChatTable:
         pinned: Optional[bool] = False,
         folder_id: Optional[str] = None,
         assistant_id: Optional[str] = None,
+        now: Optional[int] = None,
     ) -> Chat:
         normalized_chat = normalize_chat_payload(chat_payload)
-        now = int(time.time())
+        normalized_chat, _changed = sanitize_chat_payload_image_generation_options(
+            normalized_chat
+        )
+        now = now if now is not None else int(time.time())
         title = normalized_chat["title"] if "title" in normalized_chat else "New Chat"
 
         return Chat(
@@ -255,11 +274,13 @@ class ChatTable:
 
     def insert_new_chat(self, user_id: str, form_data: ChatForm) -> Optional[ChatModel]:
         with get_db() as db:
+            now = self._next_user_chat_timestamp(db, user_id)
             result = self._build_chat_row(
                 user_id=user_id,
                 chat_payload=form_data.chat,
                 folder_id=form_data.folder_id,
                 assistant_id=form_data.assistant_id,
+                now=now,
             )
             db.add(result)
             db.commit()
@@ -270,6 +291,7 @@ class ChatTable:
         self, user_id: str, form_data: ChatImportForm
     ) -> Optional[ChatModel]:
         with get_db() as db:
+            now = self._next_user_chat_timestamp(db, user_id)
             result = self._build_chat_row(
                 user_id=user_id,
                 chat_payload=form_data.chat,
@@ -277,6 +299,7 @@ class ChatTable:
                 pinned=form_data.pinned,
                 folder_id=form_data.folder_id,
                 assistant_id=form_data.assistant_id,
+                now=now,
             )
             db.add(result)
             db.commit()
@@ -287,6 +310,7 @@ class ChatTable:
         self, user_id: str, import_forms: list[ChatImportForm]
     ) -> list[ChatModel]:
         with get_db() as db:
+            base_now = int(time.time())
             rows = [
                 self._build_chat_row(
                     user_id=user_id,
@@ -295,13 +319,13 @@ class ChatTable:
                     pinned=form_data.pinned,
                     folder_id=form_data.folder_id,
                     assistant_id=form_data.assistant_id,
+                    now=base_now + idx,
                 )
-                for form_data in import_forms
+                for idx, form_data in enumerate(import_forms)
             ]
 
             existing_chat_ids = [
-                chat_id
-                for (chat_id,) in db.query(Chat.id).filter_by(user_id=user_id).all()
+                chat_id for (chat_id,) in db.query(Chat.id).filter_by(user_id=user_id).all()
             ]
             shared_chat_ids = [f"shared-{chat_id}" for chat_id in existing_chat_ids]
 
@@ -326,25 +350,46 @@ class ChatTable:
 
             return [ChatModel.model_validate(row) for row in rows]
 
-    def update_chat_by_id(self, id: str, chat: dict) -> Optional[ChatModel]:
+    def update_chat_by_id(
+        self, id: str, chat: dict
+    ) -> Optional[ChatModel]:
         try:
             with get_db() as db:
                 normalized_chat = normalize_chat_payload(chat)
+                normalized_chat, _changed = sanitize_chat_payload_image_generation_options(
+                    normalized_chat
+                )
                 chat_item = db.get(Chat, id)
                 chat_item.chat = normalized_chat
                 flag_modified(chat_item, "chat")
                 chat_item.title = (
-                    normalized_chat["title"]
-                    if "title" in normalized_chat
-                    else "New Chat"
+                    normalized_chat["title"] if "title" in normalized_chat else "New Chat"
                 )
-                chat_item.updated_at = int(time.time())
+                chat_item.updated_at = self._next_user_chat_timestamp(db, chat_item.user_id)
                 db.commit()
                 db.refresh(chat_item)
 
                 return ChatModel.model_validate(chat_item)
         except Exception:
             return None
+
+    def update_chat_composer_state_by_id(
+        self, id: str, composer_state: dict
+    ) -> Optional[ChatModel]:
+        chat = self.get_chat_by_id(id)
+        if chat is None:
+            return None
+
+        chat_dict = chat.chat or {}
+        sanitized_composer_state, _changed = sanitize_chat_payload_image_generation_options(
+            {"composer_state": composer_state if isinstance(composer_state, dict) else {}}
+        )
+        next_chat = {
+            **chat_dict,
+            "composer_state": sanitized_composer_state.get("composer_state", {}),
+        }
+
+        return self.update_chat_by_id(id, next_chat)
 
     def update_chat_title_by_id(self, id: str, title: str) -> Optional[ChatModel]:
         chat = self.get_chat_by_id(id)
@@ -472,7 +517,7 @@ class ChatTable:
                     "chat": normalized_chat,
                     "assistant_id": chat.assistant_id,
                     "created_at": chat.created_at,
-                    "updated_at": int(time.time()),
+                    "updated_at": self._next_user_chat_timestamp(db, f"shared-{chat_id}"),
                 }
             )
             shared_result = Chat(**shared_chat.model_dump())
@@ -503,7 +548,9 @@ class ChatTable:
                 shared_chat.title = chat.title
                 shared_chat.chat = normalize_chat_payload(chat.chat)
 
-                shared_chat.updated_at = int(time.time())
+                shared_chat.updated_at = self._next_user_chat_timestamp(
+                    db, shared_chat.user_id
+                )
                 db.commit()
                 db.refresh(shared_chat)
 
@@ -539,7 +586,7 @@ class ChatTable:
             with get_db() as db:
                 chat = db.get(Chat, id)
                 chat.pinned = not chat.pinned
-                chat.updated_at = int(time.time())
+                chat.updated_at = self._next_user_chat_timestamp(db, chat.user_id)
                 db.commit()
                 db.refresh(chat)
                 return ChatModel.model_validate(chat)
@@ -551,7 +598,7 @@ class ChatTable:
             with get_db() as db:
                 chat = db.get(Chat, id)
                 chat.archived = not chat.archived
-                chat.updated_at = int(time.time())
+                chat.updated_at = self._next_user_chat_timestamp(db, chat.user_id)
                 db.commit()
                 db.refresh(chat)
                 return ChatModel.model_validate(chat)
@@ -709,6 +756,18 @@ class ChatTable:
         except Exception:
             return None
 
+    def get_chat_meta_by_id_and_user_id(self, id: str, user_id: str) -> Optional[dict]:
+        try:
+            with get_db() as db:
+                row = (
+                    db.query(Chat.meta)
+                    .filter_by(id=id, user_id=user_id)
+                    .first()
+                )
+                return row[0] if row else None
+        except Exception:
+            return None
+
     def get_chats(self, skip: int = 0, limit: int = 50) -> list[ChatModel]:
         with get_db() as db:
             all_chats = (
@@ -789,7 +848,12 @@ class ChatTable:
             if dialect_name == "sqlite":
                 # SQLite case: using JSON1 extension for JSON searching
                 query = query.filter(
-                    (Chat.title.ilike(f"%{search_text}%") | text("""
+                    (
+                        Chat.title.ilike(
+                            f"%{search_text}%"
+                        )  # Case-insensitive search in title
+                        | text(
+                            """
                             EXISTS (
                                 SELECT 1
                                 FROM json_each(Chat.chat, '$.history.messages') AS message
@@ -800,30 +864,36 @@ class ChatTable:
                                 FROM json_each(Chat.chat, '$.messages') AS message
                                 WHERE LOWER(COALESCE(message.value->>'content', '')) LIKE '%' || :search_text || '%'
                             )
-                            """)).params(  # Case-insensitive search in title
-                        search_text=search_text
-                    )
+                            """
+                        )
+                    ).params(search_text=search_text)
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
-                    query = query.filter(text("""
+                    query = query.filter(
+                        text(
+                            """
                             NOT EXISTS (
                                 SELECT 1
                                 FROM json_each(Chat.meta, '$.tags') AS tag
                             )
-                            """))
+                            """
+                        )
+                    )
                 elif tag_ids:
                     query = query.filter(
                         and_(
                             *[
-                                text(f"""
+                                text(
+                                    f"""
                                     EXISTS (
                                         SELECT 1
                                         FROM json_each(Chat.meta, '$.tags') AS tag
                                         WHERE tag.value = :tag_id_{tag_idx}
                                     )
-                                    """).params(**{f"tag_id_{tag_idx}": tag_id})
+                                    """
+                                ).params(**{f"tag_id_{tag_idx}": tag_id})
                                 for tag_idx, tag_id in enumerate(tag_ids)
                             ]
                         )
@@ -832,7 +902,12 @@ class ChatTable:
             elif dialect_name == "postgresql":
                 # PostgreSQL relies on proper JSON query for search
                 query = query.filter(
-                    (Chat.title.ilike(f"%{search_text}%") | text("""
+                    (
+                        Chat.title.ilike(
+                            f"%{search_text}%"
+                        )  # Case-insensitive search in title
+                        | text(
+                            """
                             EXISTS (
                                 SELECT 1
                                 FROM json_each(COALESCE(Chat.chat->'history'->'messages', '{}'::json)) AS message(key, value)
@@ -843,30 +918,36 @@ class ChatTable:
                                 FROM json_array_elements(COALESCE(Chat.chat->'messages', '[]'::json)) AS message
                                 WHERE LOWER(COALESCE(message->>'content', '')) LIKE '%' || :search_text || '%'
                             )
-                            """)).params(  # Case-insensitive search in title
-                        search_text=search_text
-                    )
+                            """
+                        )
+                    ).params(search_text=search_text)
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
-                    query = query.filter(text("""
+                    query = query.filter(
+                        text(
+                            """
                             NOT EXISTS (
                                 SELECT 1
                                 FROM json_array_elements_text(Chat.meta->'tags') AS tag
                             )
-                            """))
+                            """
+                        )
+                    )
                 elif tag_ids:
                     query = query.filter(
                         and_(
                             *[
-                                text(f"""
+                                text(
+                                    f"""
                                     EXISTS (
                                         SELECT 1
                                         FROM json_array_elements_text(Chat.meta->'tags') AS tag
                                         WHERE tag = :tag_id_{tag_idx}
                                     )
-                                    """).params(**{f"tag_id_{tag_idx}": tag_id})
+                                    """
+                                ).params(**{f"tag_id_{tag_idx}": tag_id})
                                 for tag_idx, tag_id in enumerate(tag_ids)
                             ]
                         )
@@ -952,7 +1033,7 @@ class ChatTable:
             with get_db() as db:
                 chat = db.get(Chat, id)
                 chat.folder_id = folder_id
-                chat.updated_at = int(time.time())
+                chat.updated_at = self._next_user_chat_timestamp(db, chat.user_id)
                 chat.pinned = False
                 db.commit()
                 db.refresh(chat)
@@ -960,14 +1041,12 @@ class ChatTable:
         except Exception:
             return None
 
-    def count_chats_by_folder_id_and_user_id(self, folder_id: str, user_id: str) -> int:
+    def count_chats_by_folder_id_and_user_id(
+        self, folder_id: str, user_id: str
+    ) -> int:
         try:
             with get_db() as db:
-                return (
-                    db.query(Chat)
-                    .filter_by(folder_id=folder_id, user_id=user_id)
-                    .count()
-                )
+                return db.query(Chat).filter_by(folder_id=folder_id, user_id=user_id).count()
         except Exception:
             return 0
 
@@ -1242,26 +1321,12 @@ class ChatMessageTable:
 
             # Collect non-core fields into meta
             meta_keys = {
-                "files",
-                "sources",
-                "code_executions",
-                "statusHistory",
-                "childrenIds",
-                "models",
-                "modelName",
-                "modelIdx",
-                "done",
-                "error",
-                "info",
-                "completedAt",
-                "userContext",
-                "merged",
-                "lastSentence",
-                "originalContent",
+                "files", "sources", "code_executions", "statusHistory",
+                "childrenIds", "models", "modelName", "modelIdx", "model_ref",
+                "done", "error", "info", "completedAt", "userContext",
+                "merged", "lastSentence", "originalContent",
             }
-            meta = {
-                k: v for k, v in message.items() if k in meta_keys and v is not None
-            }
+            meta = {k: v for k, v in message.items() if k in meta_keys and v is not None}
 
             created_at = message.get("timestamp", now)
 
@@ -1325,15 +1390,15 @@ class ChatMessageTable:
             )
             return [ChatMessageModel.model_validate(m) for m in messages]
 
-    def get_usage_by_model(self, model: str, user_id: Optional[str] = None) -> dict:
+    def get_usage_by_model(
+        self, model: str, user_id: Optional[str] = None
+    ) -> dict:
         """Get aggregate token usage for analytics."""
         with get_db() as db:
             query = db.query(
                 func.count(ChatMessage.id).label("message_count"),
                 func.sum(ChatMessage.prompt_tokens).label("total_prompt_tokens"),
-                func.sum(ChatMessage.completion_tokens).label(
-                    "total_completion_tokens"
-                ),
+                func.sum(ChatMessage.completion_tokens).label("total_completion_tokens"),
             ).filter(
                 ChatMessage.model == model,
                 ChatMessage.role == "assistant",
@@ -1355,9 +1420,7 @@ class ChatMessageTable:
                     ChatMessage.model,
                     func.count(ChatMessage.id).label("message_count"),
                     func.sum(ChatMessage.prompt_tokens).label("total_prompt_tokens"),
-                    func.sum(ChatMessage.completion_tokens).label(
-                        "total_completion_tokens"
-                    ),
+                    func.sum(ChatMessage.completion_tokens).label("total_completion_tokens"),
                 )
                 .filter(
                     ChatMessage.role == "assistant",

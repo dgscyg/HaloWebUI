@@ -140,8 +140,26 @@ class PromptsTable:
         return list(dict.fromkeys([normalized, f"/{normalized}"]))
 
     def _to_prompt_model(self, prompt: Prompt) -> PromptModel:
-        payload = PromptModel.model_validate(prompt).model_dump()
-        payload["command"] = self._normalize_command(payload.get("command", ""))
+        created_at = getattr(prompt, "created_at", None)
+        updated_at = getattr(prompt, "updated_at", None)
+
+        payload = {
+            "id": str(getattr(prompt, "id", "") or ""),
+            "command": self._normalize_command(getattr(prompt, "command", "") or ""),
+            "user_id": getattr(prompt, "user_id", "") or "",
+            "name": getattr(prompt, "name", None) or getattr(prompt, "title", None) or "",
+            "content": getattr(prompt, "content", "") or "",
+            "data": getattr(prompt, "data", None),
+            "meta": getattr(prompt, "meta", None),
+            "tags": getattr(prompt, "tags", None),
+            "is_active": True
+            if getattr(prompt, "is_active", None) is None
+            else prompt.is_active,
+            "version_id": getattr(prompt, "version_id", None),
+            "access_control": getattr(prompt, "access_control", None),
+            "created_at": int(created_at) if created_at is not None else None,
+            "updated_at": int(updated_at) if updated_at is not None else None,
+        }
         return PromptModel.model_validate(payload)
 
     def _uses_legacy_integer_id(self, db) -> bool:

@@ -14,6 +14,7 @@
 		normalizeWebSearchMode,
 		type WebSearchMode
 	} from '$lib/utils/web-search-mode';
+	import { translateWithDefault } from '$lib/i18n';
 	import {
 		buildWebSearchModeOptions,
 		getNativeWebSearchAvailabilityNote,
@@ -22,6 +23,8 @@
 	const dispatch = createEventDispatcher();
 
 	const i18n = getContext('i18n');
+	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
+		translateWithDefault($i18n, key, defaultValue, options);
 
 	export let saveSettings: Function;
 
@@ -60,6 +63,7 @@
 
 	let collapseCodeBlocks = false;
 	let collapseHistoricalLongResponses = true;
+	let showInlineCitations = true;
 	let showMessageOutline = true;
 	let expandDetails = false;
 
@@ -100,6 +104,11 @@
 	const toggleShowMessageOutline = () => {
 		showMessageOutline = !showMessageOutline;
 		saveSettings({ showMessageOutline });
+	};
+
+	const toggleShowInlineCitations = () => {
+		showInlineCitations = !showInlineCitations;
+		saveSettings({ showInlineCitations });
 	};
 
 	const toggleSplitLargeChunks = async () => {
@@ -285,10 +294,9 @@
 		$config,
 		$models ?? []
 	);
-	$: currentWebSearchOption =
-		webSearchModeOptions.find((option) => option.value === webSearchMode) ?? null;
+	$: currentWebSearchOption = webSearchModeOptions.find((option) => option.value === webSearchMode) ?? null;
 	$: currentWebSearchModeLabel =
-		currentWebSearchOption?.label ?? getWebSearchModeLabel(webSearchMode);
+		currentWebSearchOption?.label ?? getWebSearchModeLabel(webSearchMode, $i18n.t.bind($i18n));
 	$: currentWebSearchModeDescription = currentWebSearchOption?.description ?? '';
 	$: webSearchAvailabilityNote = getNativeWebSearchAvailabilityNote(
 		(key, options) => $i18n.t(key, options),
@@ -297,9 +305,7 @@
 	);
 	$: if (
 		(($models ?? []).length > 0 || !$config?.features?.enable_native_web_search) &&
-		!webSearchModeOptions.some(
-			(option) => option.value === webSearchMode && option.disabled !== true
-		)
+		!webSearchModeOptions.some((option) => option.value === webSearchMode && option.disabled !== true)
 	) {
 		webSearchMode =
 			(['auto', 'halo', 'native', 'off'] as WebSearchMode[]).find((mode) =>
@@ -327,7 +333,7 @@
 		autoTags = $settings.autoTags ?? true;
 
 		detectArtifacts = $settings.detectArtifacts ?? true;
-		svgPreviewAutoOpen = $settings.svgPreviewAutoOpen ?? $settings.detectArtifacts ?? true;
+		svgPreviewAutoOpen = $settings.svgPreviewAutoOpen ?? ($settings.detectArtifacts ?? true);
 		responseAutoCopy = $settings.responseAutoCopy ?? false;
 
 		showUsername = $settings.showUsername ?? false;
@@ -344,6 +350,7 @@
 
 		collapseCodeBlocks = $settings.collapseCodeBlocks ?? false;
 		collapseHistoricalLongResponses = $settings.collapseHistoricalLongResponses ?? true;
+		showInlineCitations = $settings.showInlineCitations ?? true;
 		showMessageOutline = $settings.showMessageOutline ?? true;
 		expandDetails = $settings.expandDetails ?? false;
 
@@ -842,6 +849,26 @@
 
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">
+					<div class=" self-center text-xs">{tr('显示正文引用标签', 'Show Inline Citations')}</div>
+
+					<button
+						class="p-1 px-3 text-xs flex rounded-sm transition"
+						on:click={() => {
+							toggleShowInlineCitations();
+						}}
+						type="button"
+					>
+						{#if showInlineCitations === true}
+							<span class="ml-2 self-center">{$i18n.t('On')}</span>
+						{:else}
+							<span class="ml-2 self-center">{$i18n.t('Off')}</span>
+						{/if}
+					</button>
+				</div>
+			</div>
+
+			<div>
+				<div class=" py-0.5 flex w-full justify-between">
 					<div class=" self-center text-xs">
 						{$i18n.t('Expand Tool and Detail Blocks by Default')}
 					</div>
@@ -1001,34 +1028,34 @@
 				<div class=" py-0.5 flex w-full justify-between">
 					<div class=" self-center text-xs">{$i18n.t('Web Search in Chat')}</div>
 
-					<div class="min-w-[10rem]">
-						<HaloSelect
-							value={webSearchMode}
-							options={webSearchModeOptions.map((option) => ({
-								value: option.value,
-								label: option.label,
-								description: option.description,
-								descriptionTone: option.descriptionTone,
-								disabled: option.disabled,
-								badge: option.badge
-							}))}
-							className="w-full"
-							on:change={(e) => {
-								updateWebSearchMode(e.detail?.value);
-							}}
-						/>
+						<div class="min-w-[10rem]">
+							<HaloSelect
+								value={webSearchMode}
+								options={webSearchModeOptions.map((option) => ({
+									value: option.value,
+									label: option.label,
+									description: option.description,
+									descriptionTone: option.descriptionTone,
+									disabled: option.disabled,
+									badge: option.badge
+								}))}
+								className="w-full"
+								on:change={(e) => {
+									updateWebSearchMode(e.detail?.value);
+								}}
+							/>
+						</div>
+					</div>
+					<div class="pt-1 text-right text-[11px] text-gray-400 space-y-1">
+						<div>{$i18n.t('Current mode')}: {currentWebSearchModeLabel}</div>
+						{#if currentWebSearchModeDescription}
+							<div>{currentWebSearchModeDescription}</div>
+						{/if}
+						{#if webSearchAvailabilityNote}
+							<div>{webSearchAvailabilityNote}</div>
+						{/if}
 					</div>
 				</div>
-				<div class="pt-1 text-right text-[11px] text-gray-400 space-y-1">
-					<div>{$i18n.t('Current mode')}: {currentWebSearchModeLabel}</div>
-					{#if currentWebSearchModeDescription}
-						<div>{currentWebSearchModeDescription}</div>
-					{/if}
-					{#if webSearchAvailabilityNote}
-						<div>{webSearchAvailabilityNote}</div>
-					{/if}
-				</div>
-			</div>
 
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">

@@ -1,14 +1,14 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import panzoom, { type PanZoom } from 'panzoom';
+	import { lockBodyScroll, unlockBodyScroll } from '$lib/utils/body-scroll-lock';
 
 	export let show = false;
 	export let src = '';
 	export let alt = '';
 
-	let mounted = false;
-
 	let previewElement = null;
+	let isAttached = false;
 
 	let instance: PanZoom;
 
@@ -52,26 +52,37 @@
 		}
 	};
 
-	onMount(() => {
-		mounted = true;
-	});
+	const attachPreview = () => {
+		if (!previewElement || isAttached) return;
 
-	$: if (show && previewElement) {
 		document.body.appendChild(previewElement);
 		window.addEventListener('keydown', handleKeyDown);
-		document.body.style.overflow = 'hidden';
-	} else if (previewElement) {
+		lockBodyScroll();
+		isAttached = true;
+	};
+
+	const detachPreview = () => {
+		if (!previewElement || !isAttached) return;
+
 		window.removeEventListener('keydown', handleKeyDown);
-		document.body.removeChild(previewElement);
-		document.body.style.overflow = 'unset';
+
+		if (document.body.contains(previewElement)) {
+			document.body.removeChild(previewElement);
+		}
+
+		unlockBodyScroll();
+		isAttached = false;
+	};
+
+	$: if (show && previewElement) {
+		attachPreview();
+	} else if (previewElement) {
+		detachPreview();
 	}
 
 	onDestroy(() => {
 		show = false;
-
-		if (previewElement) {
-			document.body.removeChild(previewElement);
-		}
+		detachPreview();
 	});
 </script>
 

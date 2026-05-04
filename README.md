@@ -22,7 +22,7 @@
     <img src="https://img.shields.io/github/license/ztx888/HaloWebUI?style=for-the-badge&color=6a4c93" alt="License" />
   </a>
 
-<br/><br/>
+  <br/><br/>
 
   <img src="https://img.shields.io/badge/Svelte_4-FF3E00?style=flat-square&logo=svelte&logoColor=white" />
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" />
@@ -72,6 +72,62 @@ docker compose up -d
 
 启动完成后访问 **http://localhost:3000** ，首次注册的用户自动成为管理员。
 
+### 首屏加载优化
+
+如果后端服务器带宽较低，首屏加载可能会变慢。推荐把浏览器访问入口放在 Nginx 或 CDN 后面，让前端静态资源就近缓存，接口和实时聊天仍然转发到后端服务。
+
+- 保持用户访问地址不变，不需要单独配置前端后端地址。
+- `/api`、`/ws`、`/openai`、`/ollama`、`/gemini`、`/anthropic`、`/grok` 等路径继续反向代理到后端。
+- `/_app/immutable/` 是带版本指纹的前端构建文件，可以设置一年长缓存。
+- `/assets/`、`/wasm/`、`/static/` 可以设置较短缓存，例如一天；`/cache/`、上传文件、接口响应不建议套用长缓存。
+- 如果要把前端和后端放到不同域名，需要单独处理跨域、登录态、WebSocket、上传下载等链路，不建议只改一个后端 API 地址。
+
+Nginx 示例：
+
+```nginx
+location /_app/immutable/ {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    expires 1y;
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
+}
+
+location /static/ {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    expires 1d;
+    add_header Cache-Control "public, max-age=86400" always;
+}
+
+location ~ ^/(assets|wasm)/ {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    expires 1d;
+    add_header Cache-Control "public, max-age=86400" always;
+}
+
+location /ws {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
 ### MCP stdio 说明
 
 - 官方 `main` 镜像是默认推荐版，内置了 `uv/uvx`、`node/npx` 与 `git`，可直接体验当前内置的常见 stdio MCP 预设，也兼容一部分通过 `uvx --from git+...` 安装的 MCP。
@@ -108,16 +164,20 @@ docker compose -f docker-compose.yaml -f docker-compose.slim.yaml up -d
 <details>
 <summary><strong>⚙️ 常用环境变量</strong></summary>
 
-| 变量                  | 说明                             | 默认值                              |
-| --------------------- | -------------------------------- | ----------------------------------- |
-| `OPENAI_API_KEY`      | OpenAI 兼容 API 密钥             | —                                   |
-| `OPENAI_API_BASE_URL` | OpenAI 兼容 API 地址             | `https://api.openai.com/v1`         |
-| `ANTHROPIC_API_KEY`   | Anthropic Claude API 密钥        | —                                   |
-| `GEMINI_API_KEY`      | Google Gemini API 密钥           | —                                   |
-| `OLLAMA_BASE_URL`     | Ollama 服务地址                  | `http://host.docker.internal:11434` |
-| `WEBUI_SECRET_KEY`    | JWT 签名密钥（生产环境必须设置） | 随机生成                            |
-| `DATABASE_URL`        | 数据库连接串（PostgreSQL）       | SQLite 本地文件                     |
-| `REDIS_URL`           | Redis 缓存地址                   | —                                   |
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `OPENAI_API_KEY` | OpenAI 兼容 API 密钥 | — |
+| `OPENAI_API_BASE_URL` | OpenAI 兼容 API 地址 | `https://api.openai.com/v1` |
+| `REQUESTS_VERIFY` | 后端通过 `requests` 发起 HTTPS 请求时是否校验证书 | `true` |
+| `AIOHTTP_CLIENT_SESSION_SSL` | 后端通过 `aiohttp` 发起 HTTPS 请求时是否校验证书 | `true` |
+| `ANTHROPIC_API_KEY` | Anthropic Claude API 密钥 | — |
+| `GEMINI_API_KEY` | Google Gemini API 密钥 | — |
+| `OLLAMA_BASE_URL` | Ollama 服务地址 | `http://host.docker.internal:11434` |
+| `WEBUI_SECRET_KEY` | JWT 签名密钥（生产环境必须设置） | 随机生成 |
+| `DATABASE_URL` | 数据库连接串（PostgreSQL） | SQLite 本地文件 |
+| `REDIS_URL` | Redis 缓存地址 | — |
+
+使用自签证书时，优先把 CA 证书导入容器信任链；只有临时排障时才建议把上面两个开关设为 `false`。
 
 </details>
 

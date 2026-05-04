@@ -3,16 +3,8 @@ import logging
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    File,
-    HTTPException,
-    Query,
-    Request,
-    UploadFile,
-    status,
-)
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from open_webui.constants import ERROR_MESSAGES
@@ -36,6 +28,14 @@ from open_webui.utils.skill_importer import (
     import_skill_from_github,
     import_skill_from_url,
     import_skill_from_zip,
+)
+from open_webui.utils.skill_runtime import (
+    SkillRuntimeError,
+    cleanup_skill_assets,
+    get_skill_runtime_capabilities,
+    install_skill_runtime,
+    save_imported_skill_assets,
+    uninstall_skill_runtime,
 )
 from open_webui.utils.tools import get_tool_server_data
 from open_webui.utils.user_tools import (
@@ -162,6 +162,13 @@ class SkillImportResult(BaseModel):
     status: str
 
 
+class SkillRuntimeCapabilitiesResponse(BaseModel):
+    profile: str
+    install_allowed: bool
+    python: dict[str, Any]
+    node: dict[str, Any]
+
+
 class SkillImportForm(BaseModel):
     name: str
     description: str = ""
@@ -206,11 +213,7 @@ def _hostname(url: str) -> str:
 
 
 def _prompt_skill_source(skill: SkillModel) -> str:
-    return (
-        "imported"
-        if (skill.source or "manual") in {"url", "github", "zip"}
-        else "custom"
-    )
+    return "imported" if (skill.source or "manual") in {"url", "github", "zip"} else "custom"
 
 
 def _prompt_skill_badge(skill: SkillModel) -> str:
@@ -277,7 +280,10 @@ async def _build_tool_server_items(request: Request, user) -> list[SkillCatalogI
                 description = str(result)
             elif isinstance(result, dict):
                 status_value = "connected"
-                description = result.get("info", {}).get("description") or description
+                description = (
+                    result.get("info", {}).get("description")
+                    or description
+                )
 
         items.append(
             SkillCatalogItem(
@@ -320,8 +326,9 @@ async def _build_mcp_server_items(request: Request, user) -> list[SkillCatalogIt
             status_value = "connected"
             version = server_info.get("version")
             if verified_at:
-                description = f"MCP server with {tool_count} tools" + (
-                    f" (v{version})" if version else ""
+                description = (
+                    f"MCP server with {tool_count} tools"
+                    + (f" (v{version})" if version else "")
                 )
             else:
                 description = "MCP server needs verification."
@@ -438,9 +445,7 @@ def _build_prompt_skill_items(skills: list[SkillModel]) -> list[SkillCatalogItem
     return items
 
 
-async def _upsert_imported_skill(
-    user, payload: ImportedSkillPayload
-) -> SkillImportResult:
+async def _upsert_imported_skill(user, payload: ImportedSkillPayload) -> SkillImportResult:
     existing = Skills.get_skill_by_identifier_and_user_id(user.id, payload.identifier)
 
     if existing:
@@ -455,6 +460,9 @@ async def _upsert_imported_skill(
         )
         if same_hash and same_content:
             return SkillImportResult(skill=existing, status="unchanged")
+
+        await run_in_threadpool(lambda: uninstall_skill_runtime(existing))
+        await run_in_threadpool(lambda: cleanup_skill_assets(existing))
 
         updated = Skills.update_skill_by_id(
             existing.id,
@@ -475,6 +483,27 @@ async def _upsert_imported_skill(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=ERROR_MESSAGES.DEFAULT("Error updating imported skill"),
             )
+        try:
+            persisted_meta = await run_in_threadpool(
+                lambda: save_imported_skill_assets(user.id, updated, payload)
+            )
+            if persisted_meta != (updated.meta or {}):
+                updated = Skills.update_skill_by_id(
+                    updated.id,
+                    SkillForm(
+                        name=updated.name,
+                        description=updated.description,
+                        content=updated.content,
+                        source=updated.source,
+                        identifier=updated.identifier,
+                        source_url=updated.source_url,
+                        meta=persisted_meta,
+                        access_control=updated.access_control,
+                        is_active=updated.is_active,
+                    ),
+                )
+        except SkillRuntimeError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         return SkillImportResult(skill=updated, status="updated")
 
     created = Skills.insert_new_skill(
@@ -496,6 +525,27 @@ async def _upsert_imported_skill(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=ERROR_MESSAGES.DEFAULT("Error creating imported skill"),
         )
+    try:
+        persisted_meta = await run_in_threadpool(
+            lambda: save_imported_skill_assets(user.id, created, payload)
+        )
+        if persisted_meta != (created.meta or {}):
+            created = Skills.update_skill_by_id(
+                created.id,
+                SkillForm(
+                    name=created.name,
+                    description=created.description,
+                    content=created.content,
+                    source=created.source,
+                    identifier=created.identifier,
+                    source_url=created.source_url,
+                    meta=persisted_meta,
+                    access_control=created.access_control,
+                    is_active=created.is_active,
+                ),
+            )
+    except SkillRuntimeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return SkillImportResult(skill=created, status="created")
 
 
@@ -556,23 +606,14 @@ async def get_skill_catalog(request: Request, user=Depends(get_verified_user)):
     prompt_skill_items = _build_prompt_skill_items(visible_skills)
 
     return (
-        sorted(
-            builtin_items,
-            key=lambda item: (item.status != "enabled", item.title.lower()),
-        )
+        sorted(builtin_items, key=lambda item: (item.status != "enabled", item.title.lower()))
         + sorted(
             tool_server_items,
-            key=lambda item: (
-                item.status not in {"connected", "enabled"},
-                item.title.lower(),
-            ),
+            key=lambda item: (item.status not in {"connected", "enabled"}, item.title.lower()),
         )
         + sorted(
             mcp_server_items,
-            key=lambda item: (
-                item.status not in {"connected", "enabled"},
-                item.title.lower(),
-            ),
+            key=lambda item: (item.status not in {"connected", "enabled"}, item.title.lower()),
         )
         + sorted(workspace_tool_items, key=lambda item: item.title.lower())
         + sorted(prompt_skill_items, key=lambda item: item.title.lower())
@@ -688,6 +729,130 @@ async def import_skill_from_zip_route(
 
 
 ############################
+# Skill Runtime
+############################
+
+
+@router.get("/runtime/capabilities", response_model=SkillRuntimeCapabilitiesResponse)
+async def get_skill_runtime_capabilities_route(user=Depends(get_verified_user)):
+    return SkillRuntimeCapabilitiesResponse(**get_skill_runtime_capabilities())
+
+
+@router.post("/{skill_id}/runtime/install", response_model=SkillModel)
+async def install_skill_runtime_route(
+    skill_id: str,
+    user=Depends(get_verified_user),
+):
+    skill = Skills.get_skill_by_id(skill_id)
+    if not skill:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+
+    if not can_write_resource(user, skill):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
+        )
+
+    try:
+        next_meta = await run_in_threadpool(lambda: install_skill_runtime(skill))
+    except SkillRuntimeError as exc:
+        runtime = dict((skill.meta or {}).get("runtime") or {})
+        if runtime:
+            error_message = str(exc)
+            normalized_error = error_message.lower()
+            runtime["install_status"] = (
+                "unsupported"
+                if any(
+                    marker in normalized_error
+                    for marker in (
+                        "not supported",
+                        "must include package-lock.json",
+                        "do not support install lifecycle scripts",
+                    )
+                )
+                else "error"
+            )
+            runtime["last_error"] = error_message
+            updated = Skills.update_skill_by_id(
+                skill.id,
+                SkillForm(
+                    name=skill.name,
+                    description=skill.description,
+                    content=skill.content,
+                    source=skill.source,
+                    identifier=skill.identifier,
+                    source_url=skill.source_url,
+                    meta={**(skill.meta or {}), "runtime": runtime},
+                    access_control=skill.access_control,
+                    is_active=skill.is_active,
+                ),
+            )
+            skill = updated or skill
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    updated = Skills.update_skill_by_id(
+        skill.id,
+        SkillForm(
+            name=skill.name,
+            description=skill.description,
+            content=skill.content,
+            source=skill.source,
+            identifier=skill.identifier,
+            source_url=skill.source_url,
+            meta=next_meta,
+            access_control=skill.access_control,
+            is_active=skill.is_active,
+        ),
+    )
+    if not updated:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ERROR_MESSAGES.DEFAULT("Error updating skill runtime"),
+        )
+    return updated
+
+
+@router.delete("/{skill_id}/runtime/install", response_model=SkillModel)
+async def uninstall_skill_runtime_route(
+    skill_id: str,
+    user=Depends(get_verified_user),
+):
+    skill = Skills.get_skill_by_id(skill_id)
+    if not skill:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+
+    if not can_write_resource(user, skill):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
+        )
+
+    try:
+        next_meta = await run_in_threadpool(lambda: uninstall_skill_runtime(skill))
+    except SkillRuntimeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    updated = Skills.update_skill_by_id(
+        skill.id,
+        SkillForm(
+            name=skill.name,
+            description=skill.description,
+            content=skill.content,
+            source=skill.source,
+            identifier=skill.identifier,
+            source_url=skill.source_url,
+            meta=next_meta,
+            access_control=skill.access_control,
+            is_active=skill.is_active,
+        ),
+    )
+    if not updated:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ERROR_MESSAGES.DEFAULT("Error updating skill runtime"),
+        )
+    return updated
+
+
+############################
 # GetSkillById
 ############################
 
@@ -696,7 +861,9 @@ async def import_skill_from_zip_route(
 async def get_skill_by_id(skill_id: str, user=Depends(get_verified_user)):
     skill = Skills.get_skill_by_id(skill_id)
     if not skill:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
+        )
 
     if not can_read_resource(user, skill):
         raise HTTPException(
@@ -720,7 +887,9 @@ async def update_skill_by_id(
 ):
     skill = Skills.get_skill_by_id(skill_id)
     if not skill:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
+        )
 
     if not can_write_resource(user, skill):
         raise HTTPException(
@@ -756,11 +925,15 @@ async def update_skill_by_id(
 async def delete_skill_by_id(skill_id: str, user=Depends(get_verified_user)):
     skill = Skills.get_skill_by_id(skill_id)
     if not skill:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
+        )
 
     if not can_write_resource(user, skill):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
         )
 
+    await run_in_threadpool(lambda: uninstall_skill_runtime(skill))
+    await run_in_threadpool(lambda: cleanup_skill_assets(skill))
     return Skills.delete_skill_by_id(skill_id)

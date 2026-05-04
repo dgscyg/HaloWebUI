@@ -17,6 +17,15 @@ from open_webui.models.models import Models
 
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.access_control import has_access
+from open_webui.utils.model_identity import (
+    build_model_lookup,
+    decorate_provider_model_identity,
+    get_model_aliases,
+    get_model_ref_from_model,
+    get_model_selection_id,
+    parse_selection_id,
+)
+
 
 
 from open_webui.env import (
@@ -25,6 +34,7 @@ from open_webui.env import (
     GLOBAL_LOG_LEVEL,
 )
 from open_webui.models.users import UserModel
+
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -151,14 +161,21 @@ async def _fetch_all_base_models(request: Request, user: UserModel = None):
     if not isinstance(openai_resp, dict):
         openai_models = []
     else:
-        openai_models = (
-            openai_resp.get("data", []) if isinstance(openai_resp, dict) else []
-        )
+        openai_models = openai_resp.get("data", []) if isinstance(openai_resp, dict) else []
 
     # Process ollama
     if isinstance(ollama_resp, dict) and "models" in ollama_resp:
-        ollama_models = [
-            {
+        ollama_models = []
+        for model in ollama_resp.get("models", []) or []:
+            if not isinstance(model, dict) or not model.get("model") or not model.get("name"):
+                continue
+            original_model_id = model.get("original_model") or model.get("model")
+            connection_index = (
+                model.get("urls", [None])[0]
+                if isinstance(model.get("urls"), list) and model.get("urls")
+                else None
+            )
+            entry = {
                 "id": model["model"],
                 "name": model["name"],
                 "object": "model",
@@ -177,9 +194,15 @@ async def _fetch_all_base_models(request: Request, user: UserModel = None):
                 ),
                 "tags": model.get("tags", []),
             }
-            for model in ollama_resp.get("models", []) or []
-            if isinstance(model, dict) and model.get("model") and model.get("name")
-        ]
+            decorate_provider_model_identity(
+                entry,
+                provider="ollama",
+                model_id=original_model_id,
+                source="personal",
+                connection_index=connection_index,
+                legacy_ids=[model.get("model"), original_model_id],
+            )
+            ollama_models.append(entry)
     else:
         ollama_models = []
 
@@ -187,28 +210,18 @@ async def _fetch_all_base_models(request: Request, user: UserModel = None):
     if not isinstance(gemini_resp, dict):
         gemini_models = []
     else:
-        gemini_models = (
-            gemini_resp.get("data", []) if isinstance(gemini_resp, dict) else []
-        )
+        gemini_models = gemini_resp.get("data", []) if isinstance(gemini_resp, dict) else []
 
     # Process anthropic
     if not isinstance(anthropic_resp, dict):
         anthropic_models = []
     else:
-        anthropic_models = (
-            anthropic_resp.get("data", []) if isinstance(anthropic_resp, dict) else []
-        )
+        anthropic_models = anthropic_resp.get("data", []) if isinstance(anthropic_resp, dict) else []
 
     function_models = (
         function_models_resp if isinstance(function_models_resp, list) else []
     )
-    models = (
-        function_models
-        + openai_models
-        + ollama_models
-        + gemini_models
-        + anthropic_models
-    )
+    models = function_models + openai_models + ollama_models + gemini_models + anthropic_models
 
     return models
 
@@ -217,9 +230,7 @@ async def get_all_base_models(request: Request, user: UserModel = None):
     # Per-user cache + stale-while-revalidate keeps model-aware pages responsive even when
     # one upstream connection is temporarily slow.
     cache_enabled = bool(
-        getattr(
-            getattr(request.app.state, "config", None), "ENABLE_BASE_MODELS_CACHE", True
-        )
+        getattr(getattr(request.app.state, "config", None), "ENABLE_BASE_MODELS_CACHE", True)
     )
     if not cache_enabled:
         return await _fetch_all_base_models(request, user=user)
@@ -265,10 +276,14 @@ async def get_all_models(request, user: UserModel = None):
     ]
 
     # Build quick indexes for matching.
-    model_by_id: dict[str, dict] = {
-        m.get("id"): m for m in models if isinstance(m, dict) and m.get("id")
+    model_by_id, _ambiguous_model_aliases = build_model_lookup(
+        [m for m in models if isinstance(m, dict)]
+    )
+    model_ids = {
+        m.get("id")
+        for m in models
+        if isinstance(m, dict) and m.get("id")
     }
-    model_ids = set(model_by_id.keys())
 
     def _can_read_workspace_model(model_row) -> bool:
         if not user:
@@ -283,13 +298,13 @@ async def get_all_models(request, user: UserModel = None):
     # provider base model metadata from that owner's connections so we can route correctly.
     async def _owner_base_models_by_user_id(user_id: str) -> list[dict]:
         try:
-            from open_webui.models.users import (
-                Users,
-            )  # local import to avoid heavy coupling
+            from open_webui.models.users import Users  # local import to avoid heavy coupling
+            from open_webui.utils.user_connections import maybe_migrate_user_connections
 
             owner = Users.get_user_by_id(user_id)
             if not owner:
                 return []
+            owner = maybe_migrate_user_connections(request, owner)
             return await get_all_base_models(request, user=owner)
         except Exception:
             return []
@@ -299,21 +314,173 @@ async def get_all_models(request, user: UserModel = None):
     def _find_model_like(models_list: list[dict], model_id: str) -> Optional[dict]:
         if not model_id:
             return None
+        local_lookup, local_ambiguous = build_model_lookup(
+            [m for m in (models_list or []) if isinstance(m, dict)]
+        )
+        if model_id in local_ambiguous:
+            return None
+        direct = local_lookup.get(model_id)
+        if direct:
+            return direct
         for m in models_list or []:
             if not isinstance(m, dict):
                 continue
             mid = m.get("id")
-            if mid == model_id:
+            if mid == model_id or model_id in get_model_aliases(m):
                 return m
             # Ollama ids can vary ('llama3' vs 'llama3:7b'); match on base name.
-            if (
-                m.get("owned_by") == "ollama"
-                and isinstance(mid, str)
-                and isinstance(model_id, str)
-            ):
+            if m.get("owned_by") == "ollama" and isinstance(mid, str) and isinstance(model_id, str):
                 if model_id == mid.split(":")[0]:
                     return m
         return None
+
+    def _model_meta_dict(model_row) -> dict:
+        meta = getattr(model_row, "meta", None)
+        if not meta:
+            return {}
+        try:
+            dumped = meta.model_dump()
+            return dumped if isinstance(dumped, dict) else {}
+        except Exception:
+            return meta if isinstance(meta, dict) else {}
+
+    def _clean_model_id_hint(value) -> str:
+        parsed = parse_selection_id(value)
+        if parsed:
+            return parsed.get("model_id") or ""
+        return str(value or "").strip()
+
+    def _candidate_clean_id(model: dict) -> str:
+        return str(
+            model.get("model_id")
+            or model.get("original_id")
+            or model.get("id")
+            or ""
+        ).strip()
+
+    def _model_ref_matches(candidate: dict, target_ref: dict) -> bool:
+        if not isinstance(candidate, dict) or not isinstance(target_ref, dict):
+            return False
+
+        candidate_ref = get_model_ref_from_model(candidate)
+        if not candidate_ref:
+            return False
+
+        target_provider = str(target_ref.get("provider") or "").strip().lower()
+        candidate_provider = str(candidate_ref.get("provider") or "").strip().lower()
+        if target_provider and candidate_provider and target_provider != candidate_provider:
+            return False
+
+        target_source = str(target_ref.get("source") or "").strip()
+        candidate_source = str(candidate_ref.get("source") or "").strip()
+        if target_source and candidate_source and target_source != candidate_source:
+            return False
+
+        target_connection_id = str(
+            target_ref.get("connection_id") or target_ref.get("prefix_id") or ""
+        ).strip()
+        if target_connection_id:
+            candidate_connection_id = str(
+                candidate_ref.get("connection_id") or candidate_ref.get("prefix_id") or ""
+            ).strip()
+            return candidate_connection_id == target_connection_id
+
+        target_index = target_ref.get("connection_index")
+        if target_index is not None and str(target_index).strip() != "":
+            candidate_index = candidate_ref.get("connection_index")
+            return (
+                "" if candidate_index is None else str(candidate_index).strip()
+            ) == str(target_index).strip()
+
+        return False
+
+    def _model_ref_scope_matches(candidate: dict, target_ref: dict) -> bool:
+        if not isinstance(candidate, dict) or not isinstance(target_ref, dict):
+            return False
+
+        candidate_ref = get_model_ref_from_model(candidate)
+        if not candidate_ref:
+            return False
+
+        target_provider = str(target_ref.get("provider") or "").strip().lower()
+        candidate_provider = str(candidate_ref.get("provider") or "").strip().lower()
+        if target_provider and candidate_provider and target_provider != candidate_provider:
+            return False
+
+        target_source = str(target_ref.get("source") or "").strip()
+        candidate_source = str(candidate_ref.get("source") or "").strip()
+        if target_source and candidate_source and target_source != candidate_source:
+            return False
+
+        return True
+
+    def _find_model_by_ref(
+        models_list: list[dict],
+        model_ref: dict,
+        model_id_hint=None,
+    ) -> Optional[dict]:
+        clean_hint = _clean_model_id_hint(model_id_hint)
+        target_connection_id = str(
+            model_ref.get("connection_id") or model_ref.get("prefix_id") or ""
+        ).strip()
+        target_index = model_ref.get("connection_index")
+        if (
+            not target_connection_id
+            and target_index is not None
+            and str(target_index).strip() != ""
+        ):
+            if not clean_hint:
+                return None
+            scoped_matches = [
+                candidate
+                for candidate in models_list or []
+                if _model_ref_scope_matches(candidate, model_ref)
+                and (
+                    _candidate_clean_id(candidate) == clean_hint
+                    or clean_hint in get_model_aliases(candidate)
+                )
+            ]
+            scoped_by_id = {
+                get_model_selection_id(candidate): candidate
+                for candidate in scoped_matches
+                if get_model_selection_id(candidate)
+            }
+            if len(scoped_by_id) != 1:
+                return None
+            return next(iter(scoped_by_id.values()))
+
+        matches = []
+        for candidate in models_list or []:
+            if not _model_ref_matches(candidate, model_ref):
+                continue
+            if (
+                clean_hint
+                and _candidate_clean_id(candidate) != clean_hint
+                and clean_hint not in get_model_aliases(candidate)
+            ):
+                continue
+            matches.append(candidate)
+
+        return matches[0] if len(matches) == 1 else None
+
+    def _resolve_base_model(custom_model, models_list: list[dict]) -> Optional[dict]:
+        meta = _model_meta_dict(custom_model)
+
+        base_like = _find_model_like(models_list, custom_model.base_model_id)
+        if base_like:
+            return base_like
+
+        base_model_ref = meta.get("base_model_ref") or meta.get("model_ref")
+        if isinstance(base_model_ref, dict):
+            base_like = _find_model_by_ref(
+                models_list,
+                base_model_ref,
+                meta.get("base_selection_id") or custom_model.base_model_id,
+            )
+            if base_like:
+                return base_like
+
+        return _find_model_like(models_list, meta.get("base_selection_id"))
 
     custom_models = Models.get_all_models()
 
@@ -326,9 +493,7 @@ async def get_all_models(request, user: UserModel = None):
         if user and user.role == "user" and not _can_read_workspace_model(custom_model):
             continue
 
-        existing = model_by_id.get(custom_model.id) or _find_model_like(
-            models, custom_model.id
-        )
+        existing = model_by_id.get(custom_model.id) or _find_model_like(models, custom_model.id)
         if existing:
             if custom_model.is_active:
                 existing["name"] = custom_model.name
@@ -353,9 +518,7 @@ async def get_all_models(request, user: UserModel = None):
 
         owner_id = custom_model.user_id
         if owner_id not in owner_base_models_cache:
-            owner_base_models_cache[owner_id] = await _owner_base_models_by_user_id(
-                owner_id
-            )
+            owner_base_models_cache[owner_id] = await _owner_base_models_by_user_id(owner_id)
 
         owner_base_model = _find_model_like(
             owner_base_models_cache.get(owner_id, []), custom_model.id
@@ -370,6 +533,14 @@ async def get_all_models(request, user: UserModel = None):
         injected["name"] = custom_model.name
         injected["info"] = custom_model.model_dump()
         injected["preset"] = True
+        injected["legacy_ids"] = list(
+            {
+                *(injected.get("legacy_ids") or []),
+                custom_model.id,
+                get_model_selection_id(owner_base_model),
+            }
+        )
+        injected["selection_id"] = custom_model.id
         models.append(injected)
         model_by_id[injected["id"]] = injected
         model_ids.add(injected["id"])
@@ -390,17 +561,14 @@ async def get_all_models(request, user: UserModel = None):
         pipe = None
         action_ids = []
 
-        base_like = _find_model_like(
-            models, custom_model.base_model_id
-        )  # user's own base models
+        base_like = _resolve_base_model(custom_model, models)  # user's own base models
         if base_like is None and custom_model.user_id:
             owner_id = custom_model.user_id
             if owner_id not in owner_base_models_cache:
-                owner_base_models_cache[owner_id] = await _owner_base_models_by_user_id(
-                    owner_id
-                )
-            base_like = _find_model_like(
-                owner_base_models_cache.get(owner_id, []), custom_model.base_model_id
+                owner_base_models_cache[owner_id] = await _owner_base_models_by_user_id(owner_id)
+            base_like = _resolve_base_model(
+                custom_model,
+                owner_base_models_cache.get(owner_id, []),
             )
 
         if not base_like:
@@ -417,15 +585,27 @@ async def get_all_models(request, user: UserModel = None):
             if "actionIds" in meta:
                 action_ids.extend(meta["actionIds"])
 
+        info_dump = custom_model.model_dump()
+        base_model_ref = get_model_ref_from_model(base_like)
+        if base_model_ref:
+            info_dump.setdefault("meta", {})
+            if isinstance(info_dump["meta"], dict):
+                info_dump["meta"].setdefault("base_model_ref", base_model_ref)
+                info_dump["meta"].setdefault(
+                    "base_selection_id", get_model_selection_id(base_like)
+                )
+
         models.append(
             {
                 "id": f"{custom_model.id}",
+                "selection_id": f"{custom_model.id}",
                 "name": custom_model.name,
                 "object": "model",
                 "created": custom_model.created_at,
                 "owned_by": owned_by,
-                "info": custom_model.model_dump(),
+                "info": info_dump,
                 "preset": True,
+                **({"model_ref": base_model_ref} if base_model_ref else {}),
                 **({"pipe": pipe} if pipe is not None else {}),
                 "action_ids": action_ids,
             }
@@ -498,12 +678,11 @@ async def get_all_models(request, user: UserModel = None):
                 continue
     log.debug(f"get_all_models() returned {len(models)} models")
 
-    # Per-request model map (avoid leaking across users).
-    request.state.MODELS = {
-        model["id"]: model
-        for model in models
-        if isinstance(model, dict) and model.get("id")
-    }
+    # Per-request model map (avoid leaking across users). Ambiguous legacy aliases are
+    # intentionally omitted so a naked duplicate model name can never route by accident.
+    request.state.MODELS, request.state.MODELS_AMBIGUOUS = build_model_lookup(
+        [model for model in models if isinstance(model, dict)]
+    )
     return models
 
 

@@ -31,7 +31,10 @@ from open_webui.utils.auth import (
     get_verified_user,
     invalidate_cached_user,
 )
-from open_webui.utils.user_connections import maybe_migrate_user_connections
+from open_webui.utils.user_connections import (
+    maybe_migrate_user_connections,
+    normalize_connections_payload,
+)
 from open_webui.utils.user_tools import maybe_migrate_user_tool_settings
 from open_webui.utils.access_control import get_permissions
 
@@ -295,16 +298,32 @@ async def update_user_settings_by_session_user(
     if not patch_payload:
         return existing_user.settings or UserSettings()
 
-    next_settings_dict = _deep_merge_dict(existing_settings_dict, patch_payload)
-    connections_changed = _get_ui_connections(
-        existing_settings_dict
-    ) != _get_ui_connections(next_settings_dict)
+    patch_ui = _as_dict(patch_payload.get("ui"))
+    if "connections" in patch_ui:
+        patch_ui["connections"] = normalize_connections_payload(
+            _as_dict(patch_ui.get("connections")),
+            existing_connections=_get_ui_connections(existing_settings_dict),
+            id_strategy="generated",
+            update_tombstones=True,
+        )
+        patch_payload["ui"] = patch_ui
+
+    replace_paths = {("ui", "connections")}
+    next_settings_dict = _deep_merge_dict(
+        existing_settings_dict,
+        patch_payload,
+        replace_paths=replace_paths,
+    )
+    connections_changed = _get_ui_connections(existing_settings_dict) != _get_ui_connections(
+        next_settings_dict
+    )
 
     try:
         user = Users.patch_user_settings_by_id(
             user.id,
             patch_payload,
             expected_revision=form_data.revision,
+            replace_paths=replace_paths,
         )
     except UserSettingsRevisionConflict:
         raise HTTPException(

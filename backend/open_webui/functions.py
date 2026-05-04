@@ -44,6 +44,9 @@ from open_webui.utils.user_tools import (
     get_user_tool_server_connections,
 )
 from open_webui.utils.access_control import has_access
+from open_webui.utils.shared_tool_runtime import (
+    ensure_selected_shared_tool_runtime_loaded,
+)
 
 from open_webui.env import SRC_LOG_LEVELS, GLOBAL_LOG_LEVEL
 
@@ -213,7 +216,13 @@ async def generate_function_chat_completion(
         return params
 
     model_id = form_data.get("model")
-    model_info = Models.get_model_by_id(model_id)
+    model_entry = models.get(model_id) if isinstance(models, dict) else None
+    model_record_id = (
+        model_entry.get("id") if isinstance(model_entry, dict) else model_id
+    )
+    model_info = Models.get_model_by_id(model_id) or Models.get_model_by_id(
+        model_record_id
+    )
 
     metadata = form_data.pop("metadata", {})
 
@@ -223,7 +232,7 @@ async def generate_function_chat_completion(
     if tool_ids is None:
         tool_ids = []
 
-    validate_tool_ids_access(tool_ids, user)
+    validate_tool_ids_access(tool_ids, user, request)
 
     # Ensure per-user server-side toolkits (OpenAPI / MCP) are loaded before resolving tool_ids.
     # This mirrors open_webui.utils.middleware behavior but for function pipes.
@@ -269,6 +278,8 @@ async def generate_function_chat_completion(
                     strict_selected=True,
                 )
 
+        await ensure_selected_shared_tool_runtime_loaded(request, user, tool_ids)
+
     __event_emitter__ = None
     __event_call__ = None
     __task__ = None
@@ -305,7 +316,7 @@ async def generate_function_chat_completion(
         user,
         {
             **extra_params,
-            "__model__": models.get(form_data["model"], None),
+            "__model__": model_entry,
             "__messages__": form_data["messages"],
             "__files__": files,
         },

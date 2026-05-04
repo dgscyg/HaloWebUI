@@ -1,17 +1,41 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { showSidebar } from '$lib/stores';
 	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
+	import { lockBodyScroll, unlockBodyScroll } from '$lib/utils/body-scroll-lock';
 
 	export let show = false;
 	let overlayElement = null;
+	let isAttached = false;
+
+	const attachOverlay = () => {
+		if (!overlayElement || isAttached) return;
+
+		document.body.appendChild(overlayElement);
+		lockBodyScroll();
+		isAttached = true;
+	};
+
+	const detachOverlay = () => {
+		if (!overlayElement || !isAttached) return;
+
+		if (document.body.contains(overlayElement)) {
+			document.body.removeChild(overlayElement);
+		}
+
+		unlockBodyScroll();
+		isAttached = false;
+	};
 
 	$: if (show && overlayElement) {
-		document.body.appendChild(overlayElement);
-		document.body.style.overflow = 'hidden';
+		attachOverlay();
 	} else if (overlayElement) {
-		document.body.removeChild(overlayElement);
-		document.body.style.overflow = 'unset';
+		detachOverlay();
 	}
+
+	onDestroy(() => {
+		detachOverlay();
+	});
 </script>
 
 {#if show}

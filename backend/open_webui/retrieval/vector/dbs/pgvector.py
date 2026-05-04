@@ -23,11 +23,8 @@ from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.exc import NoSuchTableError
 
 from open_webui.retrieval.vector.main import VectorItem, SearchResult, GetResult
-from open_webui.config import (
-    PGVECTOR_DB_URL,
-    PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH,
-    PGVECTOR_INDEX_LISTS,
-)
+from open_webui.retrieval.vector.utils import process_metadata
+from open_webui.config import PGVECTOR_DB_URL, PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH, PGVECTOR_INDEX_LISTS
 
 from open_webui.env import SRC_LOG_LEVELS
 
@@ -156,7 +153,7 @@ class PgvectorClient:
                     vector=vector,
                     collection_name=collection_name,
                     text=item["text"],
-                    vmetadata=item["metadata"],
+                    vmetadata=process_metadata(item["metadata"]),
                 )
                 new_items.append(new_chunk)
             self.session.bulk_save_objects(new_items)
@@ -181,7 +178,7 @@ class PgvectorClient:
                 if existing:
                     existing.vector = vector
                     existing.text = item["text"]
-                    existing.vmetadata = item["metadata"]
+                    existing.vmetadata = process_metadata(item["metadata"])
                     existing.collection_name = (
                         collection_name  # Update collection_name if necessary
                     )
@@ -191,7 +188,7 @@ class PgvectorClient:
                         vector=vector,
                         collection_name=collection_name,
                         text=item["text"],
-                        vmetadata=item["metadata"],
+                        vmetadata=process_metadata(item["metadata"]),
                     )
                     self.session.add(new_chunk)
             self.session.commit()

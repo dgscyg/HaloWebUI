@@ -3,6 +3,7 @@ from typing import Optional
 import ssl
 from elasticsearch.helpers import bulk, scan
 from open_webui.retrieval.vector.main import VectorItem, SearchResult, GetResult
+from open_webui.retrieval.vector.utils import process_metadata
 from open_webui.config import (
     ELASTICSEARCH_URL,
     ELASTICSEARCH_CA_CERTS,
@@ -238,7 +239,7 @@ class ElasticsearchClient:
                         "collection": collection_name,
                         "vector": item["vector"],
                         "text": item["text"],
-                        "metadata": item["metadata"],
+                        "metadata": process_metadata(item["metadata"]),
                     },
                 }
                 for item in batch
@@ -259,7 +260,7 @@ class ElasticsearchClient:
                         "collection": collection_name,
                         "vector": item["vector"],
                         "text": item["text"],
-                        "metadata": item["metadata"],
+                        "metadata": process_metadata(item["metadata"]),
                     },
                     "doc_as_upsert": True,
                 }

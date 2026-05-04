@@ -4,9 +4,11 @@ import { parseJsonResponse } from '../response';
 export type ImageGenerationRequest = {
 	prompt: string;
 	model?: string;
+	model_ref?: Record<string, unknown>;
 	size?: string;
 	image_size?: '512' | '1K' | '2K' | '4K' | string;
 	aspect_ratio?: string;
+	resolution?: string;
 	n?: number;
 	negative_prompt?: string;
 	credential_source?: 'auto' | 'personal' | 'shared';
@@ -17,41 +19,42 @@ export type ImageGenerationRequest = {
 
 export type ImageUsageConfig = {
 	enabled: boolean;
-	engine: 'openai' | 'gemini' | 'comfyui' | 'automatic1111' | string;
-	defaults: {
-		model?: string;
-		size?: string;
-		steps?: number;
-	};
 	shared_key: {
 		enabled: boolean;
 		available: boolean;
+		providers?: Record<string, boolean>;
 	};
 	personal_key: {
 		supported: boolean;
-		provider: 'openai' | 'gemini' | null | string;
+		providers?: string[];
 	};
 };
 
 export type ImageGenerationConfig = {
-	MODEL: string;
-	IMAGE_SIZE: string;
-	IMAGE_STEPS: number;
 	IMAGE_MODEL_FILTER_REGEX?: string | null;
 };
 
 export type ImageGenerationModel = {
 	id: string;
 	name?: string;
+	selection_id?: string;
+	selection_key?: string;
+	legacy_id?: string | null;
+	legacy_ids?: string[];
+	model_ref?: Record<string, unknown> | null;
+	provider?: 'openai' | 'gemini' | 'grok' | string | null;
 	generation_mode?: string;
 	detection_method?: string;
 	supports_background?: boolean;
 	supports_batch?: boolean;
 	size_mode?: 'exact' | 'aspect_ratio' | 'unsupported' | string;
 	supports_image_size?: boolean;
+	supports_resolution?: boolean;
 	text_output_supported?: boolean;
 	source?: 'settings' | 'personal' | 'shared' | string | null;
 	connection_index?: number | null;
+	connection_name?: string | null;
+	connection_icon?: string | null;
 };
 
 export const getConfig = async (token: string = '') => {
@@ -68,11 +71,7 @@ export const getConfig = async (token: string = '') => {
 		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
-			if ('detail' in err) {
-				error = err.detail;
-			} else {
-				error = 'Server connection failed';
-			}
+			error = err;
 			return null;
 		});
 
@@ -243,6 +242,7 @@ export const getImageGenerationModels = async (
 		context?: 'settings' | 'runtime' | string;
 		credentialSource?: 'auto' | 'personal' | 'shared' | string;
 		connectionIndex?: number | null;
+		search?: string;
 	} = {}
 ): Promise<ImageGenerationModel[]> => {
 	let error = null;
@@ -256,6 +256,9 @@ export const getImageGenerationModels = async (
 	}
 	if (Number.isInteger(params.connectionIndex)) {
 		query.set('connection_index', `${params.connectionIndex}`);
+	}
+	if (params.search?.trim()) {
+		query.set('search', params.search.trim());
 	}
 
 	const suffix = query.toString() ? `?${query.toString()}` : '';

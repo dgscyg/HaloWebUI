@@ -229,7 +229,7 @@ export const updateUserSettings = async (
 		.then(parseJsonResponse)
 		.catch((err) => {
 			console.log(err);
-			error = err.detail;
+			error = err;
 			return null;
 		});
 

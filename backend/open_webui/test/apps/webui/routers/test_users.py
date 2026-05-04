@@ -1,5 +1,6 @@
 from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user
+import re
 import time
 
 
@@ -211,6 +212,11 @@ class TestUsers(AbstractPostgresTest):
             )
 
         assert response.status_code == 200
+        assert response.json()["ui"]["connections"]["openai"]["OPENAI_API_CONFIGS"]["0"]["name"] == "Wong"
+        assert re.fullmatch(
+            r"[0-9a-f]{8}",
+            response.json()["ui"]["connections"]["openai"]["OPENAI_API_CONFIGS"]["0"]["prefix_id"],
+        )
         assert invalidated == ["2"]
         assert app.state.BASE_MODELS is None
         assert app.state.MODELS == {}
@@ -246,17 +252,105 @@ class TestUsers(AbstractPostgresTest):
             )
 
         assert response.status_code == 200
-        assert response.json() == {
-            "ui": {
-                "connections": {
-                    "openai": {
-                        "OPENAI_API_BASE_URLS": ["https://api.example.com/v1"],
+        payload = response.json()
+        assert payload["revision"] == 2
+        assert payload["ui"]["autoFollowUps"] is False
+        openai = payload["ui"]["connections"]["openai"]
+        assert openai["OPENAI_API_BASE_URLS"] == ["https://api.example.com/v1"]
+        assert openai["OPENAI_API_KEYS"] == [""]
+        assert openai["OPENAI_API_CONFIGS"]["0"]["name"] == "api.example.com"
+        assert re.fullmatch(r"[0-9a-f]{8}", openai["OPENAI_API_CONFIGS"]["0"]["prefix_id"])
+
+    def test_update_user_settings_replaces_connections_subtree_without_leaking_old_flags(self):
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.post(
+                self.create_url("/user/settings/update"),
+                json={
+                    "ui": {
+                        "connections": {
+                            "openai": {
+                                "OPENAI_API_BASE_URLS": [
+                                    "https://api.example.com/v1",
+                                    "https://old.example.com/v1",
+                                ],
+                                "OPENAI_API_KEYS": ["sk-old", "sk-delete"],
+                                "OPENAI_API_CONFIGS": {
+                                    "0": {
+                                        "remark": "Primary",
+                                        "azure": True,
+                                        "api_version": "2025-01-01-preview",
+                                        "use_responses_api": True,
+                                        "force_mode": True,
+                                        "native_file_inputs_enabled": True,
+                                        "headers": {"X-Test": "1"},
+                                        "model_ids": ["gpt-4.1"],
+                                    },
+                                    "1": {
+                                        "remark": "Secondary",
+                                        "use_responses_api": True,
+                                    },
+                                },
+                            },
+                            "anthropic": {
+                                "ANTHROPIC_API_BASE_URLS": ["https://api.anthropic.com/v1"],
+                                "ANTHROPIC_API_KEYS": ["sk-anthropic"],
+                                "ANTHROPIC_API_CONFIGS": {
+                                    "0": {
+                                        "remark": "Anthropic",
+                                        "anthropic_extra_body": {
+                                            "thinking": {"type": "enabled"}
+                                        },
+                                    }
+                                },
+                            },
+                        },
+                        "autoFollowUps": False,
                     }
                 },
-                "autoFollowUps": False,
-            },
-            "revision": 2,
-        }
+            )
+
+        assert response.status_code == 200
+        assert response.json()["revision"] == 1
+
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.post(
+                self.create_url("/user/settings/update"),
+                json={
+                    "revision": 1,
+                    "ui": {
+                        "connections": {
+                            "openai": {
+                                "OPENAI_API_BASE_URLS": ["https://api.example.com/v1"],
+                                "OPENAI_API_KEYS": ["sk-new"],
+                                "OPENAI_API_CONFIGS": {
+                                    "0": {
+                                        "remark": "Primary",
+                                        "auth_type": "bearer",
+                                        "model_ids": ["gpt-4.1"],
+                                    }
+                                },
+                            }
+                        }
+                    },
+                },
+            )
+
+        assert response.status_code == 200
+
+        payload = response.json()
+        assert payload["revision"] == 2
+        assert payload["ui"]["autoFollowUps"] is False
+        assert "anthropic" not in payload["ui"]["connections"]
+        assert payload["ui"]["connections"]["openai"]["OPENAI_API_BASE_URLS"] == [
+            "https://api.example.com/v1"
+        ]
+        assert payload["ui"]["connections"]["openai"]["OPENAI_API_KEYS"] == ["sk-new"]
+        openai_cfg = payload["ui"]["connections"]["openai"]["OPENAI_API_CONFIGS"]["0"]
+        assert openai_cfg["remark"] == "Primary"
+        assert openai_cfg["auth_type"] == "bearer"
+        assert openai_cfg["model_ids"] == ["gpt-4.1"]
+        assert openai_cfg["name"] == "Primary"
+        assert re.fullmatch(r"[0-9a-f]{8}", openai_cfg["prefix_id"])
 
     def test_update_user_settings_rejects_stale_revision(self):
         with mock_webui_user(id="2"):
@@ -347,6 +441,19 @@ class TestUsers(AbstractPostgresTest):
             "https://api.example.com/v1"
         ]
         assert data["ui"]["_legacy_global_connections_seeded_v1"] is True
+
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.post(
+                self.create_url("/user/settings/update"),
+                json={
+                    "revision": 0,
+                    "ui": {"theme": "dark"},
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json()["revision"] == 1
+        assert response.json()["ui"]["theme"] == "dark"
 
         # Once the one-time backfill marker exists, removed providers should stay removed.
         self.users.update_user_by_id(

@@ -53,8 +53,8 @@ from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access
 from open_webui.utils.user_connections import (
     get_user_connections,
-    set_user_connection_provider_config,
 )
+from open_webui.utils.model_identity import derive_connection_id, parse_selection_id
 
 
 from open_webui.config import (
@@ -245,6 +245,36 @@ def _resolve_ollama_connection_by_model_id(
     base_urls, cfgs = _get_ollama_user_config(connection_user)
     if not base_urls:
         return 0, "", {}
+
+    parsed_selection = parse_selection_id(model_id)
+    if parsed_selection and parsed_selection.get("provider") == "ollama":
+        model_ref = parsed_selection.get("model_ref") or {}
+        ref_index = model_ref.get("connection_index")
+        ref_connection_id = str(model_ref.get("connection_id") or "").strip()
+        if (
+            not ref_connection_id
+            and ref_index is not None
+            and str(ref_index).strip() != ""
+            and len([url for url in base_urls if str(url or "").strip()]) > 1
+        ):
+            raise HTTPException(status_code=400, detail="模型连接不明确，请重新选择模型。")
+        for idx, url in enumerate(base_urls):
+            cfg = cfgs.get(str(idx), cfgs.get(url, {})) or {}
+            cfg_prefix = str(cfg.get("prefix_id") or "").strip()
+            if (
+                (ref_connection_id and cfg_prefix == ref_connection_id)
+                or (
+                    ref_index is not None
+                    and str(ref_index).strip() == str(idx)
+                )
+            ):
+                api_config = {
+                    **(cfg or {}),
+                    "_resolved_prefix_id": cfg_prefix,
+                    "_resolved_model_id": parsed_selection["model_id"],
+                }
+                return idx, base_urls[idx].rstrip("/"), api_config
+        raise HTTPException(status_code=400, detail="模型连接已失效，请重新选择模型。")
 
     if url_idx is not None:
         if url_idx < 0 or url_idx >= len(base_urls):
@@ -623,8 +653,8 @@ async def get_all_models(request: Request, user: UserModel = None):
         request.state.OLLAMA_MODELS = {}
         return {"models": []}
 
-    # If multiple Ollama connections exist, ensure every connection has a stable internal prefix_id.
-    # This avoids id collisions and prevents UI crashes due to duplicate keyed list items.
+    # If multiple Ollama connections exist, derive a stable internal prefix_id in memory.
+    # Read paths must stay read-only so model discovery does not mutate user settings revisions.
     cfgs_changed = False
     if len(base_urls) > 1:
         used = set()
@@ -660,8 +690,12 @@ async def get_all_models(request: Request, user: UserModel = None):
                 if preserved_empty_idx == idx:
                     prefix_id = ""
                 else:
-                    prefix_id = secrets.token_hex(4)
-                    cfgs_changed = True
+                    prefix_id = derive_connection_id(
+                        provider="ollama",
+                        source="personal",
+                        url=url,
+                        api_key=api_config.get("key", None),
+                    )
 
             if prefix_id:
                 if prefix_id in used:
@@ -689,20 +723,6 @@ async def get_all_models(request: Request, user: UserModel = None):
             if cfgs.get(key) != next_cfg:
                 cfgs_changed = True
             cfgs[key] = next_cfg
-
-    # Persist prefix_id/name normalization when needed (keeps model ids stable across sessions).
-    if cfgs_changed and user:
-        try:
-            set_user_connection_provider_config(
-                user.id,
-                "ollama",
-                {
-                    "OLLAMA_BASE_URLS": base_urls,
-                    "OLLAMA_API_CONFIGS": cfgs,
-                },
-            )
-        except Exception:
-            pass
 
     request_tasks = []
     for idx, url in enumerate(base_urls):
@@ -1650,6 +1670,8 @@ async def generate_chat_completion(
     chosen_idx, url, api_config = _resolve_ollama_connection_by_model_id(
         connection_user, payload.get("model", ""), url_idx
     )
+    if api_config.get("_resolved_model_id"):
+        payload["model"] = api_config["_resolved_model_id"]
 
     resolved_prefix = (
         api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or ""
@@ -1658,6 +1680,8 @@ async def generate_chat_completion(
         prefix = f"{resolved_prefix}."
         if payload["model"].startswith(prefix):
             payload["model"] = payload["model"][len(prefix) :]
+    if ":" not in payload["model"]:
+        payload["model"] = f"{payload['model']}:latest"
     # payload["keep_alive"] = -1 # keep alive forever
     base_urls, cfgs = _get_ollama_user_config(connection_user)
     return await send_post_request(
@@ -1759,6 +1783,8 @@ async def generate_openai_completion(
     chosen_idx, url, api_config = _resolve_ollama_connection_by_model_id(
         connection_user, payload.get("model", ""), url_idx
     )
+    if api_config.get("_resolved_model_id"):
+        payload["model"] = api_config["_resolved_model_id"]
 
     resolved_prefix = (
         api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or ""
@@ -1767,6 +1793,8 @@ async def generate_openai_completion(
         prefix = f"{resolved_prefix}."
         if payload["model"].startswith(prefix):
             payload["model"] = payload["model"][len(prefix) :]
+    if ":" not in payload["model"]:
+        payload["model"] = f"{payload['model']}:latest"
 
     base_urls, cfgs = _get_ollama_user_config(connection_user)
     return await send_post_request(
@@ -1844,6 +1872,8 @@ async def generate_openai_chat_completion(
     chosen_idx, url, api_config = _resolve_ollama_connection_by_model_id(
         connection_user, payload.get("model", ""), url_idx
     )
+    if api_config.get("_resolved_model_id"):
+        payload["model"] = api_config["_resolved_model_id"]
 
     resolved_prefix = (
         api_config.get("_resolved_prefix_id") or api_config.get("prefix_id") or ""
@@ -1852,6 +1882,8 @@ async def generate_openai_chat_completion(
         prefix = f"{resolved_prefix}."
         if payload["model"].startswith(prefix):
             payload["model"] = payload["model"][len(prefix) :]
+    if ":" not in payload["model"]:
+        payload["model"] = f"{payload['model']}:latest"
 
     base_urls, cfgs = _get_ollama_user_config(connection_user)
     return await send_post_request(

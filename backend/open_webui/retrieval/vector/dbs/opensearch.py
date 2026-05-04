@@ -3,6 +3,7 @@ from opensearchpy.helpers import bulk
 from typing import Optional
 
 from open_webui.retrieval.vector.main import VectorItem, SearchResult, GetResult
+from open_webui.retrieval.vector.utils import process_metadata
 from open_webui.config import (
     OPENSEARCH_URI,
     OPENSEARCH_SSL,
@@ -195,7 +196,7 @@ class OpenSearchClient:
                     "_source": {
                         "vector": item["vector"],
                         "text": item["text"],
-                        "metadata": item["metadata"],
+                        "metadata": process_metadata(item["metadata"]),
                     },
                 }
                 for item in batch
@@ -216,7 +217,7 @@ class OpenSearchClient:
                     "doc": {
                         "vector": item["vector"],
                         "text": item["text"],
-                        "metadata": item["metadata"],
+                        "metadata": process_metadata(item["metadata"]),
                     },
                     "doc_as_upsert": True,
                 }

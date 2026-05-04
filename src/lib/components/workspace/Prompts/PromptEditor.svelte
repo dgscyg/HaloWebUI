@@ -21,6 +21,7 @@
 
 	let name = '';
 	let command = '';
+	let generatedCommand = '';
 	let content = '';
 	let tags: string[] = [];
 	let tagInput = '';
@@ -44,12 +45,22 @@
 	let initialSnapshot = null;
 	let snapshot = null;
 	let dirty = false;
+	let syncCommandWithName = true;
 	$: canManageAcl = !edit || $user?.role === 'admin' || prompt?.user_id === $user?.id;
 
 	let showAccessControlModal = false;
 
-	$: if (!edit) {
-		command = name !== '' ? `${name.replace(/\s+/g, '-').toLowerCase()}` : '';
+	const generateCommandFromName = (inputString: string) =>
+		(inputString || '')
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, '-')
+			.replace(/^-+|-+$/g, '')
+			.replace(/-{2,}/g, '-');
+
+	$: generatedCommand = generateCommandFromName(name);
+
+	$: if (!edit && syncCommandWithName) {
+		command = generatedCommand;
 	}
 
 	const buildSnapshot = () => ({
@@ -99,6 +110,11 @@
 		return regex.test(inputString);
 	};
 
+	const updateCommandSyncState = () => {
+		if (edit) return;
+		syncCommandWithName = command === generatedCommand;
+	};
+
 	const addTag = () => {
 		const val = tagInput.trim();
 		if (val && !tags.includes(val)) {
@@ -125,6 +141,7 @@
 		const next = cloneSettingsSnapshot(initialSnapshot);
 		name = next.name;
 		command = next.command;
+		syncCommandWithName = !edit && next.command === generateCommandFromName(next.name);
 		content = next.content;
 		tags = next.tags;
 		accessControl = next.accessControl;
@@ -137,6 +154,7 @@
 			await tick();
 
 			command = prompt.command.at(0) === '/' ? prompt.command.slice(1) : prompt.command;
+			syncCommandWithName = !edit && command === generateCommandFromName(name);
 			content = prompt.content;
 			tags = prompt.tags ?? [];
 
@@ -168,12 +186,15 @@
 		<div class="my-2">
 			<div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
 				<Tooltip
-					content={`${$i18n.t('Only alphanumeric characters and hyphens are allowed')} - ${$i18n.t(
-						'Activate this command by typing "/{{COMMAND}}" to chat input.',
-						{
-							COMMAND: command
-						}
-					)}`}
+					content={`${$i18n.t('Only alphanumeric characters and hyphens are allowed')} - ${
+						command !== ''
+							? $i18n.t('Activate this command by typing "/{{COMMAND}}" to chat input.', {
+									COMMAND: command
+								})
+							: $i18n.t(
+									'Title can be in any language. If the command is blank, enter an English command manually.'
+								)
+					}`}
 					placement="bottom-start"
 				>
 					<div class="flex flex-col w-full">
@@ -212,8 +233,16 @@
 								bind:value={command}
 								required
 								disabled={edit}
+								on:input={updateCommandSyncState}
 							/>
 						</div>
+						{#if !edit && name.trim() !== '' && command === ''}
+							<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+								{$i18n.t(
+									'Title can be in any language. If the command is blank, enter an English command manually.'
+								)}
+							</div>
+						{/if}
 					</div>
 				</Tooltip>
 

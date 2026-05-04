@@ -19,6 +19,8 @@ const PYODIDE_PACKAGE_SIZES_MB: Record<string, number> = {
 
 export const KOKORO_MODEL_DOWNLOAD_MB = 90;
 
+type Translator = (key: string, options?: Record<string, unknown>) => string;
+
 const hasWindow = () => typeof window !== 'undefined';
 
 export const canUsePyodideRuntime = () => APP_ENABLE_PYODIDE || Boolean(APP_PYODIDE_INDEX_URL);
@@ -44,13 +46,25 @@ export const getPyodideDownloadEstimateMb = (packages: string[]) =>
 	PYODIDE_BASE_DOWNLOAD_MB +
 	packages.reduce((sum, pkg) => sum + (PYODIDE_PACKAGE_SIZES_MB[pkg] ?? 0), 0);
 
-export const getPyodideDownloadSummary = (packages: string[]) => {
+export const getPyodideDownloadSummary = (packages: string[], t?: Translator) => {
 	const rounded = Math.round(getPyodideDownloadEstimateMb(packages));
 	if (packages.length === 0) {
-		return `首次运行需要下载浏览器 Python 运行时，约 ${rounded} MB。`;
+		return t
+			? t('首次运行需要下载浏览器 Python 运行时，约 {{size}} MB。', {
+					defaultValue: 'The browser Python runtime needs to be downloaded on first use, about {{size}} MB.',
+					size: rounded
+				})
+			: `The browser Python runtime needs to be downloaded on first use, about ${rounded} MB.`;
 	}
 
-	return `首次运行需要下载浏览器 Python 运行时，约 ${rounded} MB；其中包含基础运行时和 ${packages.join(', ')} 等附加包。`;
+	return t
+		? t('首次运行需要下载浏览器 Python 运行时，约 {{size}} MB；其中包含基础运行时和 {{packages}} 等附加包。', {
+				defaultValue:
+					'The browser Python runtime needs to be downloaded on first use, about {{size}} MB, including the base runtime and extra packages such as {{packages}}.',
+				size: rounded,
+				packages: packages.join(', ')
+			})
+		: `The browser Python runtime needs to be downloaded on first use, about ${rounded} MB, including the base runtime and extra packages such as ${packages.join(', ')}.`;
 };
 
 export const hasPyodideConsent = () =>

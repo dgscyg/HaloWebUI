@@ -749,6 +749,50 @@ export const cloneChatById = async (token: string, id: string, title?: string) =
 	return res;
 };
 
+export const branchChatById = async (
+	token: string,
+	id: string,
+	branchPointMessageId: string,
+	title?: string
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/branch`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		},
+		body: JSON.stringify({
+			branch_point_message_id: branchPointMessageId,
+			...(title ? { title } : {})
+		})
+	})
+		.then(parseJsonResponse)
+		.then((json) => {
+			return json;
+		})
+		.catch((err) => {
+			error = err;
+
+			if ('detail' in err) {
+				error = err.detail;
+			} else {
+				error = err;
+			}
+
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const cloneSharedChatById = async (token: string, id: string) => {
 	let error = null;
 
@@ -924,6 +968,39 @@ export const updateChatById = async (token: string, id: string, chat: object) =>
 		.catch((err) => {
 			error = err;
 
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const updateChatComposerStateById = async (
+	token: string,
+	id: string,
+	composerState: object
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/composer-state`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		},
+		body: JSON.stringify({
+			composer_state: composerState
+		})
+	})
+		.then(parseJsonResponse)
+		.then((json) => json)
+		.catch((err) => {
+			error = err;
 			console.log(err);
 			return null;
 		});

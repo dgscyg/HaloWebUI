@@ -1,7 +1,7 @@
-<script lang="ts">
+<script>
 	import { io } from 'socket.io-client';
 
-	import { onMount, tick, setContext, getContext } from 'svelte';
+	import { onMount, tick, setContext } from 'svelte';
 	import {
 		config,
 		user,
@@ -20,16 +20,14 @@
 		isLastActiveTab,
 		isApp,
 		appInfo,
-		appData,
-		toolServers,
-		type ToolServerConfig
+		toolServers
 	} from '$lib/stores';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { Toaster, toast } from 'svelte-sonner';
 
 	import { executeToolServer, getBackendConfig } from '$lib/apis';
-	import { clearClientAuthState, getSessionUser } from '$lib/apis/auths';
+	import { getSessionUser } from '$lib/apis/auths';
 	import { APP_NAME } from '$lib/constants';
 
 	import '../tailwind.css';
@@ -39,7 +37,6 @@
 
 	import { WEBUI_BASE_URL, WEBUI_HOSTNAME } from '$lib/constants';
 	import i18n, { initI18n, getLanguages, changeLanguage } from '$lib/i18n';
-	import { get } from 'svelte/store';
 	import { bestMatchingLanguage } from '$lib/utils';
 	import {
 		approvePyodideConsent,
@@ -53,12 +50,10 @@
 	import { initScrollbarAutohide } from '$lib/utils/scrollbars';
 	import { setTextScale } from '$lib/utils/text-scale';
 	import { getAllTags, getChatList } from '$lib/apis/chats';
+	import { initPWAInstallSupport } from '$lib/utils/pwa';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
-	import type { Socket } from 'socket.io-client';
-	import type { Unsubscriber } from 'svelte/store';
 
-	getContext('i18n');
 	setContext('i18n', i18n);
 
 	const bc = new BroadcastChannel('active-tab-channel');
@@ -66,23 +61,18 @@
 	const CHAT_COMPLETION_NOTIFICATION_TTL = 60 * 1000;
 
 	let loaded = false;
-	let currentSocket: Socket | null = null;
-	let unsubscribeUser: Unsubscriber | null = null;
-	const notifiedChatCompletions = new Map<string, number>();
+	let currentSocket = null;
+	let unsubscribeUser = null;
+	const notifiedChatCompletions = new Map();
 
 	const BREAKPOINT = 768;
 
 	$: setTextScale($settings?.textScale ?? 1);
 
-	const formatError = (error: unknown) =>
-		localizeCommonError(error, (key, options) => get(i18n).t(key, options));
+	const formatError = (error) =>
+		localizeCommonError(error, (key, options) => $i18n.t(key, options));
 
-	const clearClientSession = async () => {
-		user.set(undefined);
-		clearClientAuthState();
-	};
-
-	const normalizeTheme = (rawTheme: string | null | undefined) => {
+	const normalizeTheme = (rawTheme) => {
 		if (rawTheme === 'system' || rawTheme === 'dark' || rawTheme === 'light') return rawTheme;
 		if (rawTheme === 'oled-dark' || rawTheme === 'her' || rawTheme === 'rose-pine dark')
 			return 'dark';
@@ -90,7 +80,7 @@
 		return 'system';
 	};
 
-	const handleSocketConnectError = (err: unknown) => {
+	const handleSocketConnectError = (err) => {
 		console.log('connect_error', err);
 	};
 
@@ -98,7 +88,7 @@
 		console.log('connected', currentSocket?.id);
 	};
 
-	const handleSocketReconnectAttempt = (attempt: number) => {
+	const handleSocketReconnectAttempt = (attempt) => {
 		console.log('reconnect_attempt', attempt);
 	};
 
@@ -106,24 +96,24 @@
 		console.log('reconnect_failed');
 	};
 
-	const handleSocketDisconnect = (reason: string, details?: unknown) => {
+	const handleSocketDisconnect = (reason, details) => {
 		console.log(`Socket ${currentSocket?.id} disconnected due to ${reason}`);
 		if (details) {
 			console.log('Additional details:', details);
 		}
 	};
 
-	const handleSocketUserList = (data: { user_ids: string[] }) => {
+	const handleSocketUserList = (data) => {
 		console.log('user-list', data);
 		activeUserIds.set(data.user_ids);
 	};
 
-	const handleSocketUsage = (data: { models: string[] }) => {
+	const handleSocketUsage = (data) => {
 		console.log('usage', data);
 		USAGE_POOL.set(data['models']);
 	};
 
-	const detachSocketEventHandlers = (socketInstance: Socket | null) => {
+	const detachSocketEventHandlers = (socketInstance) => {
 		socketInstance?.off('chat-events', chatEventHandler);
 		socketInstance?.off('channel-events', channelEventHandler);
 		socketInstance?.off('connect_error', handleSocketConnectError);
@@ -135,7 +125,7 @@
 		socketInstance?.off('usage', handleSocketUsage);
 	};
 
-	const attachSocketEventHandlers = (socketInstance: Socket | null) => {
+	const attachSocketEventHandlers = (socketInstance) => {
 		if (!socketInstance) {
 			return;
 		}
@@ -149,7 +139,7 @@
 		}
 	};
 
-	const teardownSocket = (socketInstance: Socket | null) => {
+	const teardownSocket = (socketInstance) => {
 		if (!socketInstance) {
 			return;
 		}
@@ -166,10 +156,7 @@
 		}
 	};
 
-	const shouldShowChatCompletionNotification = (
-		event: { chat_id?: string; message_id?: string | null },
-		data?: { title?: string | null }
-	) => {
+	const shouldShowChatCompletionNotification = (event, data) => {
 		const now = Date.now();
 		for (const [key, timestamp] of notifiedChatCompletions) {
 			if (now - timestamp > CHAT_COMPLETION_NOTIFICATION_TTL) {
@@ -186,10 +173,10 @@
 		return true;
 	};
 
-	const setupSocket = async (enableWebsocket: boolean) => {
+	const setupSocket = async (enableWebsocket) => {
 		teardownSocket(currentSocket ?? $socket);
 
-		const _socket = io(WEBUI_BASE_URL, {
+		const _socket = io(`${WEBUI_BASE_URL}` || undefined, {
 			reconnection: true,
 			reconnectionDelay: 1000,
 			reconnectionDelayMax: 5000,
@@ -212,15 +199,7 @@
 		attachSocketEventHandlers(_socket);
 	};
 
-	type WorkerExecutionResult = {
-		stdout: string | null;
-		stderr: string | null;
-		result: unknown;
-	};
-
-	type WorkerExecutionCallback = (payload: WorkerExecutionResult) => void;
-
-	const executePythonAsWorker = async (id: string, code: string, cb?: WorkerExecutionCallback) => {
+	const executePythonAsWorker = async (id, code, cb) => {
 		if (!canUsePyodideRuntime()) {
 			if (cb) {
 				cb({
@@ -232,21 +211,23 @@
 			return;
 		}
 
-		let result: unknown = null;
-		let stdout: string | null = null;
-		let stderr: string | null = null;
+		let result = null;
+		let stdout = null;
+		let stderr = null;
 
 		let executing = true;
 		const packages = getPyodidePackagesForCode(code);
 
 		if (usesRemotePyodideRuntime() && !hasPyodideConsent()) {
-			const shouldContinue = window.confirm(getPyodideDownloadSummary(packages));
+			const shouldContinue = window.confirm(getPyodideDownloadSummary(packages, $i18n.t.bind($i18n)));
 			if (!shouldContinue) {
 				executing = false;
 				if (cb) {
 					cb({
 						stdout: null,
-						stderr: '已取消下载浏览器 Python 运行时。',
+						stderr: $i18n.t('已取消下载浏览器 Python 运行时。', {
+							defaultValue: 'Browser Python runtime download was cancelled.'
+						}),
 						result: null
 					});
 				}
@@ -287,7 +268,7 @@
 			}
 		}, 60000);
 
-		pyodideWorker.onmessage = (event: MessageEvent) => {
+		pyodideWorker.onmessage = (event) => {
 			console.log('pyodideWorker.onmessage', event);
 			const { id, ...data } = event.data;
 
@@ -315,7 +296,7 @@
 			executing = false;
 		};
 
-		pyodideWorker.onerror = (event: ErrorEvent) => {
+		pyodideWorker.onerror = (event) => {
 			console.log('pyodideWorker.onerror', event);
 
 			if (cb) {
@@ -336,28 +317,19 @@
 		};
 	};
 
-	type ToolExecutionData = {
-		server?: { url?: string };
-		name?: string;
-		params?: unknown;
-	};
-
-	const executeTool = async (data: ToolExecutionData, cb?: (payload: unknown) => void) => {
-		const configuredToolServers = ($settings?.toolServers ?? []) as ToolServerConfig[];
-		const toolServer = configuredToolServers.find((server) => server.url === data.server?.url);
-		const toolServerData = (($toolServers ?? []) as ToolServerConfig[]).find(
-			(server) => server.url === data.server?.url
-		) as { openapi: any; info: any; specs: any } | undefined;
+	const executeTool = async (data, cb) => {
+		const toolServer = $settings?.toolServers?.find((server) => server.url === data.server?.url);
+		const toolServerData = $toolServers?.find((server) => server.url === data.server?.url);
 
 		console.log('executeTool', data, toolServer);
 
-		if (toolServer && toolServerData) {
+		if (toolServer) {
 			console.log(toolServer);
 			const res = await executeToolServer(
 				(toolServer?.auth_type ?? 'bearer') === 'bearer' ? toolServer?.key : localStorage.token,
 				toolServer.url,
-				data?.name ?? '',
-				(data?.params ?? {}) as Record<string, any>,
+				data?.name,
+				data?.params,
 				toolServerData
 			);
 
@@ -378,16 +350,7 @@
 		}
 	};
 
-	type ChatSocketEvent = {
-		chat_id: string;
-		message_id?: string | null;
-		data?: {
-			type?: string | null;
-			data?: any;
-		};
-	};
-
-	const chatEventHandler = async (event: ChatSocketEvent, cb?: (payload: unknown) => void) => {
+	const chatEventHandler = async (event, cb) => {
 		const chat = $page.url.pathname.includes(`/c/${event.chat_id}`);
 
 		let isFocused = document.visibilityState !== 'visible';
@@ -440,7 +403,7 @@
 			} else if (type === 'chat:tags') {
 				tags.set(await getAllTags(localStorage.token));
 			}
-		} else if (data?.session_id === $socket?.id) {
+		} else if (data?.session_id === $socket.id) {
 			if (type === 'execute:python') {
 				console.log('execute:python', data);
 				executePythonAsWorker(data.id, data.code, cb);
@@ -451,9 +414,6 @@
 				// Legacy "directConnections" path (browser makes the OpenAI-compatible request).
 				// This UI now uses server-side connections, so we explicitly reject to avoid hanging tasks.
 				try {
-					if (!cb) {
-						return;
-					}
 					cb({
 						error: {
 							message: 'Direct connections are disabled. Please use Settings > Connections.',
@@ -466,7 +426,7 @@
 					try {
 						const channel = data?.channel;
 						if (channel) {
-							$socket?.emit(channel, { done: true });
+							$socket.emit(channel, { done: true });
 						}
 					} catch (e) {
 						// no-op
@@ -478,17 +438,7 @@
 		}
 	};
 
-	type ChannelSocketEvent = {
-		channel_id: string;
-		user?: { id?: string };
-		channel?: { name?: string };
-		data?: {
-			type?: string | null;
-			data?: any;
-		};
-	};
-
-	const channelEventHandler = async (event: ChannelSocketEvent) => {
+	const channelEventHandler = async (event) => {
 		if (event.data?.type === 'typing') {
 			return;
 		}
@@ -536,13 +486,62 @@
 		}
 	};
 
-	onMount(() => {
+	onMount(async () => {
+		initScrollbarAutohide();
+
+		const cleanupPWA = await initPWAInstallSupport();
+
+		if (typeof window !== 'undefined' && window.applyTheme) {
+			window.applyTheme();
+		}
+
+		if (window?.electronAPI) {
+			const info = await window.electronAPI.send({
+				type: 'app:info'
+			});
+
+			if (info) {
+				isApp.set(true);
+				appInfo.set(info);
+
+				const data = await window.electronAPI.send({
+					type: 'app:data'
+				});
+
+				if (data) {
+					appData.set(data);
+				}
+			}
+		}
+
+		// Listen for messages on the BroadcastChannel
+		bc.onmessage = (event) => {
+			if (event.data === 'active') {
+				isLastActiveTab.set(false); // Another tab became active
+			}
+		};
+
+		// Set yourself as the last active tab when this tab is focused
 		const handleVisibilityChange = () => {
 			if (document.visibilityState === 'visible') {
 				isLastActiveTab.set(true); // This tab is now the active tab
 				bc.postMessage('active'); // Notify other tabs that this tab is active
 			}
 		};
+
+		// Add event listener for visibility state changes
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+
+		// Call visibility change handler initially to set state on load
+		handleVisibilityChange();
+
+		const normalizedTheme = normalizeTheme(localStorage.theme);
+		if (localStorage.theme !== normalizedTheme) {
+			localStorage.theme = normalizedTheme;
+		}
+		theme.set(normalizedTheme);
+
+		mobile.set(window.innerWidth < BREAKPOINT);
 
 		const onResize = () => {
 			if (window.innerWidth < BREAKPOINT) {
@@ -551,139 +550,88 @@
 				mobile.set(false);
 			}
 		};
+		window.addEventListener('resize', onResize);
 
-		const init = async () => {
-			initScrollbarAutohide();
-
-			if (typeof window !== 'undefined' && window.applyTheme) {
-				window.applyTheme();
+		unsubscribeUser = user.subscribe((value) => {
+			if (value) {
+				attachSocketEventHandlers(currentSocket);
+			} else {
+				currentSocket?.off('chat-events', chatEventHandler);
+				currentSocket?.off('channel-events', channelEventHandler);
 			}
+		});
 
-			if (window?.electronAPI) {
-				const info = await window.electronAPI.send({
-					type: 'app:info'
-				});
+		let backendConfig = null;
+		try {
+			backendConfig = await getBackendConfig();
+			console.log('Backend config:', backendConfig);
+		} catch (error) {
+			console.error('Error loading backend config:', error);
+		}
+		// Initialize i18n even if we didn't get a backend config,
+		// so `/error` can show something that's not `undefined`.
 
-				if (info) {
-					isApp.set(true);
-					appInfo.set(info);
+		await initI18n(localStorage?.locale);
+		if (!localStorage.locale) {
+			const languages = await getLanguages();
+			const browserLanguages = navigator.languages
+				? navigator.languages
+				: [navigator.language || navigator.userLanguage];
+			const lang = backendConfig.default_locale
+				? backendConfig.default_locale
+				: bestMatchingLanguage(languages, browserLanguages, 'en-US');
+			await changeLanguage(lang);
+		}
 
-					const data = await window.electronAPI.send({
-						type: 'app:data'
+		if (backendConfig) {
+			// Save Backend Status to Store
+			// Branding: treat APP_NAME as source of truth for frontend identity.
+			// Backend config name may still be the upstream default ("Open WebUI"), which causes title flicker.
+			await config.set({ ...backendConfig, name: APP_NAME });
+			await WEBUI_NAME.set(APP_NAME);
+
+			if ($config) {
+				await setupSocket($config.features?.enable_websocket ?? true);
+
+				const currentUrl = `${window.location.pathname}${window.location.search}`;
+				const encodedUrl = encodeURIComponent(currentUrl);
+
+				if (localStorage.token) {
+					// Get Session User Info
+					const sessionUser = await getSessionUser(localStorage.token).catch((error) => {
+						toast.error(formatError(error));
+						return null;
 					});
 
-					if (data) {
-						appData.set(data);
-					}
-				}
-			}
+					if (sessionUser) {
+						// Save Session User to Store
+						$socket.emit('user-join', { auth: { token: sessionUser.token } });
 
-			// Listen for messages on the BroadcastChannel
-			bc.onmessage = (event: MessageEvent) => {
-				if (event.data === 'active') {
-					isLastActiveTab.set(false); // Another tab became active
-				}
-			};
-
-			// Add event listener for visibility state changes
-			document.addEventListener('visibilitychange', handleVisibilityChange);
-
-			// Call visibility change handler initially to set state on load
-			handleVisibilityChange();
-
-			const normalizedTheme = normalizeTheme(localStorage.theme);
-			if (localStorage.theme !== normalizedTheme) {
-				localStorage.theme = normalizedTheme;
-			}
-			theme.set(normalizedTheme);
-
-			mobile.set(window.innerWidth < BREAKPOINT);
-
-			window.addEventListener('resize', onResize);
-
-			unsubscribeUser = user.subscribe((value) => {
-				if (value) {
-					attachSocketEventHandlers(currentSocket);
-				} else {
-					currentSocket?.off('chat-events', chatEventHandler);
-					currentSocket?.off('channel-events', channelEventHandler);
-				}
-			});
-
-			let backendConfig: Awaited<ReturnType<typeof getBackendConfig>> | null = null;
-			try {
-				backendConfig = await getBackendConfig();
-				console.log('Backend config:', backendConfig);
-			} catch (error) {
-				console.error('Error loading backend config:', error);
-			}
-			// Initialize i18n even if we didn't get a backend config,
-			// so `/error` can show something that's not `undefined`.
-
-			await initI18n(localStorage?.locale);
-			if (!localStorage.locale) {
-				const languages = await getLanguages();
-				const browserLanguages =
-					navigator.languages && navigator.languages.length > 0
-						? navigator.languages
-						: [navigator.language];
-				const lang = backendConfig?.default_locale
-					? backendConfig.default_locale
-					: bestMatchingLanguage(languages, browserLanguages, 'en-US');
-				await changeLanguage(lang);
-			}
-
-			if (backendConfig) {
-				// Save Backend Status to Store
-				// Branding: treat APP_NAME as source of truth for frontend identity.
-				// Backend config name may still be the upstream default ("Open WebUI"), which causes title flicker.
-				await config.set({ ...backendConfig, name: APP_NAME });
-				await WEBUI_NAME.set(APP_NAME);
-
-				if ($config) {
-					await setupSocket($config.features?.enable_websocket ?? true);
-
-					const currentUrl = `${window.location.pathname}${window.location.search}`;
-					const encodedUrl = encodeURIComponent(currentUrl);
-
-					if (localStorage.token) {
-						// Get Session User Info
-						const sessionUser = await getSessionUser(localStorage.token).catch((error) => {
-							toast.error(formatError(error));
-							return null;
-						});
-
-						if (sessionUser) {
-							// Save Session User to Store
-							$socket?.emit('user-join', { auth: { token: sessionUser.token } });
-
-							await user.set(sessionUser);
-						} else {
-							// Redirect Invalid Session User to /auth Page
-							await clearClientSession();
-							await goto(`/auth?redirect=${encodedUrl}`);
-						}
+						await user.set(sessionUser);
 					} else {
-						// Don't redirect if we're already on the auth page
-						// Needed because we pass in tokens from OAuth logins via URL fragments
-						if ($page.url.pathname !== '/auth') {
-							await goto(`/auth?redirect=${encodedUrl}`);
-						}
+						// Redirect Invalid Session User to /auth Page
+						localStorage.removeItem('token');
+						await goto(`/auth?redirect=${encodedUrl}`);
+					}
+				} else {
+					// Don't redirect if we're already on the auth page
+					// Needed because we pass in tokens from OAuth logins via URL fragments
+					if ($page.url.pathname !== '/auth') {
+						await goto(`/auth?redirect=${encodedUrl}`);
 					}
 				}
-			} else {
-				// Redirect to /error when Backend Not Detected
-				await goto(`/error`);
 			}
+		} else {
+			// Redirect to /error when Backend Not Detected
+			await goto(`/error`);
+		}
 
-			await tick();
-			document.getElementById('splash-screen')?.remove();
-			loaded = true;
-		};
-
-		void init();
+		await tick();
+		document.getElementById('splash-screen')?.remove();
+		loaded = true;
 
 		return () => {
+			cleanupPWA?.();
 			unsubscribeUser?.();
 			unsubscribeUser = null;
 			document.removeEventListener('visibilitychange', handleVisibilityChange);

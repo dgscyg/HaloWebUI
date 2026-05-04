@@ -45,24 +45,45 @@
 	export let showMessage: Function = () => {};
 	export let submitMessage: Function = () => {};
 	export let addMessages: Function = () => {};
+	export let onBranchMessage: Function = () => {};
+	export let branchingMessageId: string | null = null;
+	export let branchSupported = false;
 
 	export let readOnly = false;
+	export let showAllMessages = false;
+	export let forceExpandContent = false;
+	export let initialMessagesCount = 20;
+	export let messagesLoadStep = 20;
+	export let deferOffscreenRendering = false;
 
 	export let bottomPadding = false;
 	export let autoScroll;
 
-	let messagesCount = 20;
+	let messagesCount = initialMessagesCount;
 	let messagesLoading = false;
+	let lastMessageWindowKey = '';
+
+	$: {
+		const messageWindowKey = `${chatId}:${initialMessagesCount}:${messagesLoadStep}:${showAllMessages}`;
+		if (messageWindowKey !== lastMessageWindowKey) {
+			lastMessageWindowKey = messageWindowKey;
+			messagesCount = initialMessagesCount;
+		}
+	}
 
 	const loadMoreMessages = async () => {
-		// scroll slightly down to disable continuous loading
 		const element = document.getElementById('messages-container');
-		element.scrollTop = element.scrollTop + 100;
+		const previousScrollHeight = element?.scrollHeight ?? 0;
+		const previousScrollTop = element?.scrollTop ?? 0;
 
 		messagesLoading = true;
-		messagesCount += 20;
+		messagesCount += messagesLoadStep;
 
 		await tick();
+
+		if (element) {
+			element.scrollTop = previousScrollTop + (element.scrollHeight - previousScrollHeight);
+		}
 
 		messagesLoading = false;
 	};
@@ -71,7 +92,7 @@
 		let _messages = [];
 
 		let message = history.messages[history.currentId];
-		while (message && _messages.length < messagesCount) {
+		while (message && (showAllMessages || _messages.length < messagesCount)) {
 			_messages.unshift({ ...message });
 			message = message.parentId !== null ? history.messages[message.parentId] : null;
 		}
@@ -444,8 +465,13 @@
 							{continueResponse}
 							{mergeResponses}
 							{addMessages}
+							{onBranchMessage}
+							{branchingMessageId}
+							{branchSupported}
 							{triggerScroll}
 							{readOnly}
+							{forceExpandContent}
+							deferOffscreenRendering={deferOffscreenRendering && !showAllMessages}
 						/>
 					{/each}
 				</div>

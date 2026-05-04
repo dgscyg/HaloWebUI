@@ -56,6 +56,14 @@ export const activeChatIds: Writable<Set<string>> = writable(new Set());
 export const channels = writable([]);
 export const chats = writable(null);
 export const pinnedChats = writable([]);
+export const chatListRefreshRevision = writable(0);
+export const chatListRefreshTarget = writable<{
+	id: string;
+	title: string;
+	updated_at: number;
+	created_at: number;
+	assistant_id?: string | null;
+} | null>(null);
 export const tags = writable([]);
 export const folders = writable([]);
 export const selectedFolder = writable(null);
@@ -82,6 +90,7 @@ export const settingsRevision = writable(0);
 export const ollamaConfigCache = writable(null);
 export const openaiConfigCache = writable(null);
 export const geminiConfigCache = writable(null);
+export const grokConfigCache = writable(null);
 export const anthropicConfigCache = writable(null);
 export const connectionsConfigCache = writable(null);
 
@@ -161,6 +170,11 @@ export type NativeWebSearchSupport = {
 
 type BaseModel = {
 	id: string;
+	selection_id?: string;
+	model_id?: string;
+	original_id?: string;
+	model_ref?: Record<string, unknown>;
+	legacy_ids?: string[];
 	name: string;
 	info?: ModelConfig;
 	owned_by: 'ollama' | 'openai' | 'google' | 'gemini' | 'anthropic' | 'claude';
@@ -257,7 +271,9 @@ type Settings = {
 	regenerateMenu?: boolean;
 	collapseCodeBlocks?: boolean;
 	collapseHistoricalLongResponses?: boolean;
+	showInlineCitations?: boolean;
 	showMessageOutline?: boolean;
+	showFormulaQuickCopyButton?: boolean;
 	expandDetails?: boolean;
 	renderMarkdownInPreviews?: boolean;
 	displayMultiModelResponsesInTabs?: boolean;

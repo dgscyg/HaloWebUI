@@ -29,12 +29,14 @@
 		MAX_FEATURED_ASSISTANTS,
 		toChatAssistantSnapshot
 	} from '$lib/utils/chat-assistants';
+	import { translateWithDefault } from '$lib/i18n';
 
 	import Suggestions from './Suggestions.svelte';
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
-	import type { WebSearchMode } from '$lib/utils/web-search-mode';
+	import { findModelByIdentity } from '$lib/utils/model-identity';
+	import type { WebSearchMode, WebSearchModeSource } from '$lib/utils/web-search-mode';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 	import MessageInput from './MessageInput.svelte';
 	import AssistantPickerModal from './AssistantPickerModal.svelte';
@@ -53,6 +55,7 @@
 
 	export let createMessagePair: Function;
 	export let stopResponse: Function;
+	export let onChange: Function = () => {};
 
 	export let autoScroll = false;
 
@@ -68,10 +71,14 @@
 	export let files = [];
 
 	export let selectedToolIds = [];
+	export let toolSelectionTouched = false;
+	export let selectedSkillIds = [];
+	export let skillSelectionTouched = false;
 	export let imageGenerationEnabled = false;
 	export let imageGenerationOptions = {};
 	export let codeInterpreterEnabled = false;
 	export let webSearchMode: WebSearchMode = 'off';
+	export let webSearchModeSource: WebSearchModeSource = 'default';
 
 	export let reasoningEffort: string | null = null;
 	export let maxThinkingTokens: number | null = null;
@@ -86,6 +93,8 @@
 	let dropTargetIdx: number | null = null;
 	let isMobileSortingMode = false;
 	let featuredAssistants: ChatAssistantSnapshot[] = [];
+	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
+		translateWithDefault($i18n, key, defaultValue, options);
 
 	$: isMobileSortingMode = $mobile;
 	$: featuredAssistants = featuredIds
@@ -141,8 +150,7 @@
 		selectedModelIdx = models.length - 1;
 	}
 
-	$: models = selectedModels.map((id) => $_models.find((m) => m.id === id));
-	$: promptSuggestionsEnabled = $config?.features?.enable_prompt_suggestions ?? true;
+	$: models = selectedModels.map((id) => findModelByIdentity($_models, id));
 
 	const persistFeaturedIds = (nextIds: string[]) => {
 		featuredIds = nextIds;
@@ -246,9 +254,7 @@
 									<ModelIcon
 										src={model?.info?.meta?.profile_image_url ??
 											model?.meta?.profile_image_url ??
-											($i18n.language === 'dg-DG'
-												? `/doge.png`
-												: `${WEBUI_BASE_URL}/static/favicon.png`)}
+											`${WEBUI_BASE_URL}/static/favicon.png`}
 										className="size-14 @sm:size-16 rounded-2xl border-2 border-white dark:border-gray-800 shadow-lg"
 										alt="logo"
 									/>
@@ -308,11 +314,7 @@
 				</div>
 			{/if}
 
-			<div
-				class="mx-auto w-full max-w-4xl pt-2 pb-3 text-base font-normal {atSelectedModel
-					? 'mt-2'
-					: ''}"
-			>
+			<div class="mx-auto w-full max-w-4xl pt-2 pb-3 text-base font-normal {atSelectedModel ? 'mt-2' : ''}">
 				<MessageInput
 					{history}
 					{selectedModels}
@@ -321,13 +323,18 @@
 					bind:prompt
 					bind:autoScroll
 					bind:selectedToolIds
+					bind:toolSelectionTouched
+					bind:selectedSkillIds
+					bind:skillSelectionTouched
 					bind:imageGenerationEnabled
 					bind:imageGenerationOptions
 					bind:codeInterpreterEnabled
 					bind:webSearchMode
+					{webSearchModeSource}
 					bind:atSelectedModel
 					bind:reasoningEffort
 					bind:maxThinkingTokens
+					{onChange}
 					{onDeactivateAssistant}
 					{toolServers}
 					{transparentBackground}
@@ -344,29 +351,13 @@
 			</div>
 		</div>
 	</div>
-	{#if promptSuggestionsEnabled}
-		<div class="mx-auto max-w-3xl font-primary" in:fade={{ duration: 200, delay: 200 }}>
-			<div class="mx-4">
-				<Suggestions
-					suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??
-						models[selectedModelIdx]?.info?.meta?.suggestion_prompts ??
-						$config?.default_prompt_suggestions ??
-						[]}
-					inputValue={prompt}
-					on:select={(e) => {
-						selectSuggestionPrompt(e.detail);
-					}}
-				/>
-			</div>
-		</div>
-	{/if}
 	{#if !$selectedAssistantScene && !activeAssistant && onActivateAssistant && ($settings?.showFeaturedAssistantsOnHome ?? true)}
 		<div class="mx-auto mt-1 w-full max-w-4xl px-2.5" in:fade={{ duration: 160, delay: 120 }}>
-			<div
-				class="rounded-3xl border border-gray-200/60 bg-white/65 p-3 text-left shadow-sm backdrop-blur-xl dark:border-gray-700/30 dark:bg-white/[0.03]"
-			>
+			<div class="rounded-3xl border border-gray-200/60 bg-white/65 p-3 text-left shadow-sm backdrop-blur-xl dark:border-gray-700/30 dark:bg-white/[0.03]">
 				<div class="flex items-center justify-between gap-3 px-1">
-					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">精选助手</div>
+					<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+						{tr('精选助手', 'Featured Assistants')}
+					</div>
 					<button
 						class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 						on:click={() => {
@@ -377,10 +368,10 @@
 					>
 						{#if editMode}
 							<Check className="size-3.5" strokeWidth="2.25" />
-							<span>完成</span>
+							<span>{tr('完成', 'Done')}</span>
 						{:else}
 							<Pencil className="size-3.5" strokeWidth="2.1" />
-							<span>管理</span>
+							<span>{tr('管理', 'Manage')}</span>
 						{/if}
 					</button>
 				</div>
@@ -464,9 +455,7 @@
 										{assistant.name}
 									</div>
 									{#if assistant.description}
-										<div
-											class="mt-1 line-clamp-2 text-xs leading-5 text-gray-500 dark:text-gray-400"
-										>
+										<div class="mt-1 line-clamp-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
 											{assistant.description}
 										</div>
 									{/if}
@@ -486,30 +475,35 @@
 								<div class="rounded-full border border-current p-1">
 									<Plus className="size-4" />
 								</div>
-								<div class="text-xs font-medium">添加助手</div>
+								<div class="text-xs font-medium">
+									{tr('添加助手', 'Add Assistant')}
+								</div>
 							</div>
 						</button>
 					{/if}
 				</div>
 
 				{#if !editMode && featuredAssistants.length === 0}
-					<div
-						class="mt-2 rounded-2xl border border-dashed border-gray-200/80 px-4 py-8 text-center text-sm text-gray-400 dark:border-gray-700/70 dark:text-gray-500"
-					>
-						暂无精选助手，点击右上角“管理”即可添加
+					<div class="mt-2 rounded-2xl border border-dashed border-gray-200/80 px-4 py-8 text-center text-sm text-gray-400 dark:border-gray-700/70 dark:text-gray-500">
+						{tr(
+							'暂无精选助手，点击右上角“管理”即可添加',
+							'No featured assistants yet. Click "Manage" in the top-right corner to add one.'
+						)}
 					</div>
 				{/if}
 
 				{#if editMode}
 					<div class="mt-3 flex items-center justify-between px-1">
 						<div class="text-xs text-gray-400 dark:text-gray-500">
-							最多 {MAX_FEATURED_ASSISTANTS} 个精选助手
+							{tr('最多 {{count}} 个精选助手', 'Up to {{count}} featured assistants', {
+								count: MAX_FEATURED_ASSISTANTS
+							})}
 						</div>
 						<button
 							class="text-xs font-medium text-gray-500 transition hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400"
 							on:click={handleResetFeaturedAssistants}
 						>
-							恢复默认
+							{tr('恢复默认', 'Restore Defaults')}
 						</button>
 					</div>
 				{/if}
@@ -525,11 +519,7 @@
 		</div>
 	{:else}
 		<div
-			class="mx-auto w-full max-w-4xl px-2.5 font-primary {!activeAssistant &&
-			onActivateAssistant &&
-			($settings?.showFeaturedAssistantsOnHome ?? true)
-				? 'mt-4'
-				: 'mt-2'}"
+			class="mx-auto w-full max-w-4xl px-2.5 font-primary {!activeAssistant && onActivateAssistant && ($settings?.showFeaturedAssistantsOnHome ?? true) ? 'mt-4' : 'mt-2'}"
 			in:fade={{ duration: 200, delay: 200 }}
 		>
 			<div>

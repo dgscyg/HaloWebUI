@@ -6,17 +6,17 @@
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-	import { downloadChatAsPDF } from '$lib/apis/utils';
 	import { copyToClipboard, createMessagesList } from '$lib/utils';
+	import { buildPdfExportMessages, buildPdfFileName } from '$lib/utils/chat-pdf-document';
+	import { downloadChatAsPDF } from '$lib/apis/utils';
+	import { getErrorDetail } from '$lib/apis/response';
 
 	import {
 		showOverview,
 		showControls,
 		showArtifacts,
 		mobile,
-		temporaryChatEnabled,
-		theme,
-		settings
+		temporaryChatEnabled
 	} from '$lib/stores';
 	import { flyAndScale } from '$lib/utils/transitions';
 
@@ -59,94 +59,41 @@
 		saveAs(blob, `chat-${chat.chat.title}.txt`);
 	};
 
+	const resolveChatForPdfExport = async () => {
+		if (chat?.chat?.history) {
+			return chat;
+		}
+
+		if (chat?.id && !String(chat.id).startsWith('local') && !$temporaryChatEnabled) {
+			return await getChatById(localStorage.token, chat.id);
+		}
+
+		return chat;
+	};
+
 	const downloadPdf = async () => {
-		if ($settings?.stylizedPdfExport ?? true) {
-			const history = chat?.chat?.history;
-			const messages = history ? createMessagesList(history, history.currentId) : [];
-			const blob = await downloadChatAsPDF(
-				localStorage.token,
-				chat?.chat?.title ?? 'chat',
-				messages
-			);
-			if (blob) {
-				saveAs(blob, `chat-${chat.chat.title}.pdf`);
-			}
+		const targetChat = await resolveChatForPdfExport();
+		if (!targetChat?.chat?.history) {
+			toast.error($i18n.t('Failed to export PDF'));
 			return;
 		}
 
-		const containerElement = document.getElementById('messages-container');
+		try {
+			const messages = buildPdfExportMessages(targetChat);
+			const blob = await downloadChatAsPDF(
+				localStorage.token,
+				targetChat?.chat?.title ?? 'chat',
+				messages
+			);
 
-		if (containerElement) {
-			try {
-				const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
-					import('jspdf'),
-					import('html2canvas-pro')
-				]);
-				const isDarkMode = document.documentElement.classList.contains('dark');
-
-				console.log('isDarkMode', isDarkMode);
-
-				// Define a fixed virtual screen size
-				const virtualWidth = 800; // Fixed width (adjust as needed)
-				// Clone the container to avoid layout shifts
-				const clonedElement = containerElement.cloneNode(true);
-				clonedElement.classList.add('text-black');
-				clonedElement.classList.add('dark:text-white');
-				clonedElement.style.width = `${virtualWidth}px`; // Apply fixed width
-				clonedElement.style.height = 'auto'; // Allow content to expand
-
-				document.body.appendChild(clonedElement); // Temporarily add to DOM
-
-				// Render to canvas with predefined width
-				const canvas = await html2canvas(clonedElement, {
-					backgroundColor: isDarkMode ? '#000' : '#fff',
-					useCORS: true,
-					scale: 2, // Keep at 1x to avoid unexpected enlargements
-					width: virtualWidth, // Set fixed virtual screen width
-					windowWidth: virtualWidth // Ensure consistent rendering
-				});
-
-				document.body.removeChild(clonedElement); // Clean up temp element
-
-				const imgData = canvas.toDataURL('image/png');
-
-				// A4 page settings
-				const pdf = new jsPDF('p', 'mm', 'a4');
-				const imgWidth = 210; // A4 width in mm
-				const pageHeight = 297; // A4 height in mm
-
-				// Maintain aspect ratio
-				const imgHeight = (canvas.height * imgWidth) / canvas.width;
-				let heightLeft = imgHeight;
-				let position = 0;
-
-				// Set page background for dark mode
-				if (isDarkMode) {
-					pdf.setFillColor(0, 0, 0);
-					pdf.rect(0, 0, imgWidth, pageHeight, 'F'); // Apply black bg
-				}
-
-				pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-				heightLeft -= pageHeight;
-
-				// Handle additional pages
-				while (heightLeft > 0) {
-					position -= pageHeight;
-					pdf.addPage();
-
-					if (isDarkMode) {
-						pdf.setFillColor(0, 0, 0);
-						pdf.rect(0, 0, imgWidth, pageHeight, 'F');
-					}
-
-					pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-					heightLeft -= pageHeight;
-				}
-
-				pdf.save(`chat-${chat.chat.title}.pdf`);
-			} catch (error) {
-				console.error('Error generating PDF', error);
+			if (!blob) {
+				throw new Error('Failed to export PDF');
 			}
+
+			saveAs(blob, buildPdfFileName(targetChat?.chat?.title));
+		} catch (error) {
+			console.error('Error generating PDF', error);
+			toast.error(getErrorDetail(error, $i18n.t('Failed to export PDF')));
 		}
 	};
 

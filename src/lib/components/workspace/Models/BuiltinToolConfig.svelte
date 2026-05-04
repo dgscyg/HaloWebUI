@@ -8,7 +8,11 @@
 	export let config: Record<string, boolean> = {};
 
 	const toolItems = [
-		{ key: 'ENABLE_WEB_SEARCH_TOOL', label: 'Web Search', tip: 'Allow model to search the web' },
+		{
+			key: 'ENABLE_WEB_SEARCH_TOOL',
+			label: 'Web Search',
+			tip: "Set the model's default web search preference for new chats. This does not force web search on for the current chat."
+		},
 		{
 			key: 'ENABLE_SEARCH_KNOWLEDGE_BASES',
 			label: 'Knowledge Base',

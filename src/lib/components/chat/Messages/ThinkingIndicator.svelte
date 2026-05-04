@@ -83,7 +83,7 @@
 		const result: Step[] = [];
 
 		// Step 1: Request sent (always completed)
-		result.push({ label: '请求已发送', completed: true });
+		result.push({ label: $i18n.t('Request sent'), completed: true });
 
 		// Steps from statusHistory
 		for (const status of visibleStatuses) {
@@ -99,7 +99,10 @@
 		// If all steps done or no statuses, add a "waiting" step
 		const lastVisible = visibleStatuses[visibleStatuses.length - 1];
 		if (!lastVisible || lastVisible.done !== false) {
-			result.push({ label: '等待模型响应', completed: false });
+			result.push({
+				label: $i18n.t('Waiting for model response'),
+				completed: false
+			});
 		}
 
 		return result;
@@ -115,7 +118,9 @@
 			/>
 			<div class="w-1.5 h-1.5 rounded-full bg-blue-500/60 animate-bounce" />
 		</div>
-		<span class="text-xs text-gray-500 dark:text-gray-400 font-medium">思考中...</span>
+		<span class="text-xs text-gray-500 dark:text-gray-400 font-medium">
+			{$i18n.t('Thinking...')}
+		</span>
 	</div>
 
 	{#each steps as step, i}

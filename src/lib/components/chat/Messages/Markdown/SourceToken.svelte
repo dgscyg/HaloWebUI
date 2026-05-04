@@ -75,6 +75,7 @@
 		<!-- Multi-citation: click opens popover listing all sources -->
 		<button
 			bind:this={buttonElement}
+			data-inline-citation="true"
 			class="inline-flex items-center gap-0.5 text-[10px] font-medium w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/80 dark:hover:text-white bg-gray-50 text-black/80 hover:text-black transition rounded-xl"
 		>
 			<span class="line-clamp-1 max-w-[200px]">
@@ -85,6 +86,7 @@
 	{:else}
 		<!-- Single citation: click navigates directly -->
 		<button
+			data-inline-citation="true"
 			class="inline-flex items-center text-[10px] font-medium w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/80 dark:hover:text-white bg-gray-50 text-black/80 hover:text-black transition rounded-xl"
 			on:click={() => {
 				onClick(id, firstCitation.identifier ?? firstCitation.index);

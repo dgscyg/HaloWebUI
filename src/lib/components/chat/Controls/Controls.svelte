@@ -6,6 +6,7 @@
 
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import ArrowPath from '$lib/components/icons/ArrowPath.svelte';
+	import { translateWithDefault } from '$lib/i18n';
 	import AdvancedParams from '../Settings/Advanced/AdvancedParams.svelte';
 	import Valves from '$lib/components/chat/Controls/Valves.svelte';
 	import FileItem from '$lib/components/common/FileItem.svelte';
@@ -53,6 +54,7 @@
 		'num_batch',
 		'num_keep',
 		'max_tokens',
+		'max_history_messages',
 		'use_mmap',
 		'use_mlock',
 		'num_thread',
@@ -83,6 +85,16 @@
 		thinking: 0,
 		advanced: 0
 	};
+	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
+		translateWithDefault($i18n, key, defaultValue, options);
+	const trWithDefaultOption = (key: string, options: Record<string, any> = {}) =>
+		tr(
+			key,
+			typeof options?.defaultValue === 'string' && options.defaultValue.trim()
+				? options.defaultValue
+				: key,
+			options
+		);
 
 	const normalizeToolCallingMode = (value: unknown): ToolCallingMode | null => {
 		return value === 'default' || value === 'native' || value === 'off' ? value : null;
@@ -297,9 +309,9 @@
 
 	let showValves = false;
 
-	const defaultEffortSteps = [
-		{ value: 'none', label: '关闭' },
-		{ value: null, label: '默认' },
+	$: defaultEffortSteps = [
+		{ value: 'none', label: tr('关闭', 'Off') },
+		{ value: null, label: tr('默认', 'Default') },
 		{ value: 'low', label: 'Low' },
 		{ value: 'medium', label: 'Medium' },
 		{ value: 'high', label: 'High' },
@@ -307,9 +319,9 @@
 		{ value: 'max', label: 'Max' }
 	];
 
-	const defaultTokenSteps = [
-		{ value: 0, label: '关闭' },
-		{ value: null, label: '默认' },
+	$: defaultTokenSteps = [
+		{ value: 0, label: tr('关闭', 'Off') },
+		{ value: null, label: tr('默认', 'Default') },
 		{ value: 2048, label: '2K' },
 		{ value: 8192, label: '8K' },
 		{ value: 16384, label: '16K' },
@@ -319,8 +331,10 @@
 
 	$: primaryThinkingModel = models?.[0] ?? null;
 	$: anthropicThinkingProfile = getAnthropicThinkingProfile(primaryThinkingModel);
-	$: effortSteps = getAnthropicEffortSteps(primaryThinkingModel) ?? defaultEffortSteps;
-	$: tokenSteps = getAnthropicBudgetSteps(primaryThinkingModel) ?? defaultTokenSteps;
+	$: effortSteps =
+		getAnthropicEffortSteps(primaryThinkingModel, trWithDefaultOption) ?? defaultEffortSteps;
+	$: tokenSteps =
+		getAnthropicBudgetSteps(primaryThinkingModel, trWithDefaultOption) ?? defaultTokenSteps;
 
 	// 滑动条每个 step 的颜色
 	const defaultEffortSliderColors = [
@@ -488,11 +502,11 @@
 				title={$i18n.t('Valves')}
 				buttonClassName="w-full px-3 py-2.5 rounded-xl hover:bg-gray-100/60 dark:hover:bg-white/[0.04] transition-colors duration-200"
 			>
-				<div class="text-sm px-3 pb-3" slot="content">
-					<Valves show={showValves} preferredContext={currentValvesContext} />
-				</div>
-			</Collapsible>
-		</div>
+					<div class="text-sm px-3 pb-3" slot="content">
+						<Valves show={showValves} preferredContext={currentValvesContext} />
+					</div>
+				</Collapsible>
+			</div>
 
 		{#if $user?.role === 'admin' || $user?.permissions.chat?.controls}
 			<!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -527,10 +541,10 @@
 									: $i18n.t('Inheriting Global System Prompt')}
 							</span>
 							{#if systemModified || systemAck}
-								<span
-									class="inline-flex items-center rounded-full border border-teal-200/80 bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:border-teal-800/70 dark:bg-teal-950/40 dark:text-teal-300"
-								>
-									{systemModified ? '已调整' : '已应用'}
+								<span class="inline-flex items-center rounded-full border border-teal-200/80 bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:border-teal-800/70 dark:bg-teal-950/40 dark:text-teal-300">
+									{systemModified
+										? $i18n.t('已调整', { defaultValue: 'Adjusted' })
+										: $i18n.t('已应用', { defaultValue: 'Applied' })}
 								</span>
 							{/if}
 						</div>
@@ -561,12 +575,8 @@
 					<div class="px-3 pb-3" slot="content">
 						<div class="space-y-3">
 							{#if !hasCurrentChatSystemPromptOverride}
-								<div
-									class="rounded-xl border border-sky-200/80 bg-sky-50/70 p-3 dark:border-sky-800/60 dark:bg-sky-950/20"
-								>
-									<div
-										class="flex items-center gap-2 text-[11px] font-medium text-sky-700 dark:text-sky-300"
-									>
+								<div class="rounded-xl border border-sky-200/80 bg-sky-50/70 p-3 dark:border-sky-800/60 dark:bg-sky-950/20">
+									<div class="flex items-center gap-2 text-[11px] font-medium text-sky-700 dark:text-sky-300">
 										<svg
 											xmlns="http://www.w3.org/2000/svg"
 											viewBox="0 0 20 20"
@@ -579,20 +589,14 @@
 												clip-rule="evenodd"
 											/>
 										</svg>
-										{$i18n.t(
-											'Current effective content comes from the global default system prompt.'
-										)}
+										{$i18n.t('Current effective content comes from the global default system prompt.')}
 									</div>
 									{#if hasGlobalSystemPrompt}
-										<div
-											class="mt-2 max-h-44 overflow-y-auto rounded-lg border border-sky-200/80 bg-white/90 px-3 py-2 text-xs leading-5 whitespace-pre-wrap text-gray-700 dark:border-sky-800/60 dark:bg-gray-900/70 dark:text-gray-200"
-										>
+										<div class="mt-2 max-h-44 overflow-y-auto rounded-lg border border-sky-200/80 bg-white/90 px-3 py-2 text-xs leading-5 whitespace-pre-wrap text-gray-700 dark:border-sky-800/60 dark:bg-gray-900/70 dark:text-gray-200">
 											{globalSystemPrompt}
 										</div>
 									{:else}
-										<div
-											class="mt-2 rounded-lg border border-dashed border-sky-200/80 bg-white/70 px-3 py-2 text-xs leading-5 text-sky-700/90 dark:border-sky-800/60 dark:bg-gray-900/50 dark:text-sky-300/90"
-										>
+										<div class="mt-2 rounded-lg border border-dashed border-sky-200/80 bg-white/70 px-3 py-2 text-xs leading-5 text-sky-700/90 dark:border-sky-800/60 dark:bg-gray-900/50 dark:text-sky-300/90">
 											{$i18n.t('No global default system prompt is set yet.')}
 										</div>
 									{/if}
@@ -601,9 +605,7 @@
 
 							<div class="space-y-2">
 								<div class="flex items-center justify-between gap-2">
-									<div
-										class="text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400"
-									>
+									<div class="text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
 										{$i18n.t('Override for This Chat')}
 									</div>
 									<div class="text-[11px] text-gray-400 dark:text-gray-500">
@@ -642,7 +644,9 @@
 						class="absolute top-2 right-10 z-10 flex items-center gap-1 px-2 py-1 rounded-full bg-teal-50/95 dark:bg-teal-900/70 border border-teal-200/80 dark:border-teal-700/60 shadow-sm pointer-events-none"
 					>
 						<span class="text-[10px] font-medium text-teal-700 dark:text-teal-300">
-							{thinkingModified ? '已调整' : '已应用'}
+							{thinkingModified
+								? $i18n.t('已调整', { defaultValue: 'Adjusted' })
+								: $i18n.t('已应用', { defaultValue: 'Applied' })}
 						</span>
 						{#if thinkingModified}
 							<button
@@ -671,7 +675,7 @@
 									: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
 								on:click={() => switchMode('effort')}
 							>
-								强度模式
+								{tr('强度模式', 'Effort Mode')}
 							</button>
 							<button
 								type="button"
@@ -681,7 +685,7 @@
 									: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
 								on:click={() => switchMode('budget')}
 							>
-								预算模式
+								{tr('预算模式', 'Budget Mode')}
 							</button>
 						</div>
 
@@ -689,7 +693,9 @@
 							<!-- 强度模式 -->
 							<div>
 								<div class="flex items-center justify-between mb-1">
-									<div class="text-xs text-gray-500 dark:text-gray-400">思考强度</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400">
+									{tr('思考强度', 'Reasoning Effort')}
+								</div>
 									<button
 										type="button"
 										class="text-[10px] transition-colors duration-150 cursor-pointer {customEffortMode
@@ -707,14 +713,19 @@
 											}
 										}}
 									>
-										{customEffortMode ? '返回预设' : '自定义'}
+										{customEffortMode
+											? tr('返回预设', 'Back to presets')
+											: tr('自定义', 'Custom')}
 									</button>
 								</div>
 								{#if customEffortMode}
 									<input
 										type="text"
 										class="w-full text-xs py-2 px-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200/60 dark:border-gray-700/40 rounded-lg outline-hidden focus:border-blue-300/50 dark:focus:border-blue-500/30 transition-colors duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-										placeholder="输入自定义值，如 high、medium"
+										placeholder={tr(
+											'输入自定义值，如 high、medium',
+											'Enter a custom value, e.g. high, medium'
+										)}
 										bind:value={customEffortValue}
 										on:input={() => {
 											lockBaseline();
@@ -737,7 +748,9 @@
 							<!-- 预算模式 -->
 							<div>
 								<div class="flex items-center justify-between mb-1">
-									<div class="text-xs text-gray-500 dark:text-gray-400">思考预算</div>
+									<div class="text-xs text-gray-500 dark:text-gray-400">
+										{tr('思考预算', 'Thinking Budget')}
+									</div>
 									<button
 										type="button"
 										class="text-[10px] transition-colors duration-150 cursor-pointer {customTokenMode
@@ -758,14 +771,19 @@
 											}
 										}}
 									>
-										{customTokenMode ? '返回预设' : '自定义'}
+										{customTokenMode
+											? tr('返回预设', 'Back to presets')
+											: tr('自定义', 'Custom')}
 									</button>
 								</div>
 								{#if customTokenMode}
 									<input
 										type="number"
 										class="w-full text-xs py-2 px-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200/60 dark:border-gray-700/40 rounded-lg outline-hidden focus:border-blue-300/50 dark:focus:border-blue-500/30 transition-colors duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-										placeholder="输入 Token 数量（最小 1024）"
+										placeholder={tr(
+											'输入 Token 数量（最小 1024）',
+											'Enter token count (minimum 1024)'
+										)}
 										bind:value={customTokenValue}
 										min="1024"
 										on:input={() => {
@@ -808,7 +826,9 @@
 						class="absolute top-2 right-10 z-10 flex items-center gap-1 px-2 py-1 rounded-full bg-teal-50/95 dark:bg-teal-900/70 border border-teal-200/80 dark:border-teal-700/60 shadow-sm pointer-events-none"
 					>
 						<span class="text-[10px] font-medium text-teal-700 dark:text-teal-300">
-							{advancedModified ? '已调整' : '已应用'}
+							{advancedModified
+								? $i18n.t('已调整', { defaultValue: 'Adjusted' })
+								: $i18n.t('已应用', { defaultValue: 'Applied' })}
 						</span>
 						{#if advancedModified}
 							<button

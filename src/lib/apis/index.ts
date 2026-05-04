@@ -516,7 +516,10 @@ export const generateEmoji = async (
 	token: string = '',
 	model: string,
 	prompt: string,
-	chat_id?: string
+	chat_id?: string,
+	options: {
+		skipTextEnhancements?: boolean;
+	} = {}
 ) => {
 	let error = null;
 
@@ -530,6 +533,7 @@ export const generateEmoji = async (
 		body: JSON.stringify({
 			model: model,
 			prompt: prompt,
+			...(options.skipTextEnhancements ? { skip_text_enhancements: true } : {}),
 			...(chat_id && { chat_id: chat_id })
 		})
 	})
@@ -544,6 +548,10 @@ export const generateEmoji = async (
 
 	if (error) {
 		throw error;
+	}
+
+	if (res?.skipped) {
+		return null;
 	}
 
 	const response = res?.choices[0]?.message?.content.replace(/["']/g, '') ?? null;
@@ -562,7 +570,10 @@ export const generateQueries = async (
 	model: string,
 	messages: object[],
 	prompt: string,
-	type?: string = 'web_search'
+	type?: string = 'web_search',
+	options: {
+		skipTextEnhancements?: boolean;
+	} = {}
 ) => {
 	let error = null;
 
@@ -577,7 +588,8 @@ export const generateQueries = async (
 			model: model,
 			messages: messages,
 			prompt: prompt,
-			type: type
+			type: type,
+			...(options.skipTextEnhancements ? { skip_text_enhancements: true } : {})
 		})
 	})
 		.then(parseJsonResponse)
@@ -591,6 +603,10 @@ export const generateQueries = async (
 
 	if (error) {
 		throw error;
+	}
+
+	if (res?.skipped) {
+		return [];
 	}
 
 	// Step 1: Safely extract the response string
@@ -628,7 +644,10 @@ export const generateAutoCompletion = async (
 	model: string,
 	prompt: string,
 	messages?: object[],
-	type: string = 'search query'
+	type: string = 'search query',
+	options: {
+		skipTextEnhancements?: boolean;
+	} = {}
 ) => {
 	const controller = new AbortController();
 	let error = null;
@@ -646,7 +665,8 @@ export const generateAutoCompletion = async (
 			prompt: prompt,
 			...(messages && { messages: messages }),
 			type: type,
-			stream: false
+			stream: false,
+			...(options.skipTextEnhancements ? { skip_text_enhancements: true } : {})
 		})
 	})
 		.then(parseJsonResponse)
@@ -660,6 +680,10 @@ export const generateAutoCompletion = async (
 
 	if (error) {
 		throw error;
+	}
+
+	if (res?.skipped) {
+		return '';
 	}
 
 	const response = res?.choices[0]?.message?.content ?? '';

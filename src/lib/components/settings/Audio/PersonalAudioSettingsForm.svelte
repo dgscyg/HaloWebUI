@@ -12,6 +12,7 @@
 		KOKORO_MODEL_DOWNLOAD_MB
 	} from '$lib/utils/browser-ai-assets';
 	import { revealExpandedSection } from '$lib/utils/expanded-section-scroll';
+	import { translateWithDefault } from '$lib/i18n';
 
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -22,6 +23,8 @@
 
 	// Personal audio preferences form rendered inside /settings/audio.
 	const i18n = getContext('i18n');
+	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
+		translateWithDefault($i18n, key, defaultValue, options);
 
 	export let saveSettings: Function;
 	export let embedded = false;
@@ -45,8 +48,8 @@
 	$: sttLanguageOptions = [
 		{ value: '', label: $i18n.t('Auto-detect') },
 		{ value: 'en', label: $i18n.t('English') },
-		{ value: 'zh', label: $i18n.t('中文 (Chinese)') },
-		{ value: 'ja', label: $i18n.t('日本語 (Japanese)') },
+		{ value: 'zh', label: tr('中文 (Chinese)', 'Chinese') },
+		{ value: 'ja', label: tr('日本語 (Japanese)', 'Japanese') },
 		{ value: 'ko', label: $i18n.t('한국어 (Korean)') },
 		{ value: 'es', label: $i18n.t('Español (Spanish)') },
 		{ value: 'fr', label: $i18n.t('Français (French)') },
@@ -264,7 +267,12 @@
 
 	const saveUserAudioSettings = async () => {
 		if (TTSEngine === 'browser-kokoro' && !kokoroConsentAccepted) {
-			toast.error('请先确认下载浏览器语音模型后再启用 Kokoro.js。');
+			toast.error(
+				tr(
+					'请先确认下载浏览器语音模型后再启用 Kokoro.js。',
+					'Please confirm the browser voice model download before enabling Kokoro.js.'
+				)
+			);
 			return;
 		}
 

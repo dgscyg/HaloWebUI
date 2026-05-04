@@ -9,6 +9,7 @@
 	import { fade } from 'svelte/transition';
 	import { flyAndScale } from '$lib/utils/transitions';
 	import { marked } from 'marked';
+	import { lockBodyScroll, unlockBodyScroll } from '$lib/utils/body-scroll-lock';
 
 	export let title = '';
 	export let message = '';
@@ -39,6 +40,7 @@
 
 	let modalElement = null;
 	let mounted = false;
+	let isAttached = false;
 
 	const init = () => {
 		inputValue = '';
@@ -81,25 +83,39 @@
 		mounted = true;
 	});
 
+	const attachDialog = () => {
+		if (!modalElement || isAttached) return;
+
+		document.body.appendChild(modalElement);
+		window.addEventListener('keydown', handleKeyDown);
+		lockBodyScroll();
+		isAttached = true;
+	};
+
+	const detachDialog = () => {
+		if (!modalElement || !isAttached) return;
+
+		window.removeEventListener('keydown', handleKeyDown);
+
+		if (document.body.contains(modalElement)) {
+			document.body.removeChild(modalElement);
+		}
+
+		unlockBodyScroll();
+		isAttached = false;
+	};
+
 	$: if (mounted) {
 		if (show && modalElement) {
-			document.body.appendChild(modalElement);
-
-			window.addEventListener('keydown', handleKeyDown);
-			document.body.style.overflow = 'hidden';
+			attachDialog();
 		} else if (modalElement) {
-			window.removeEventListener('keydown', handleKeyDown);
-			document.body.removeChild(modalElement);
-
-			document.body.style.overflow = 'unset';
+			detachDialog();
 		}
 	}
 
 	onDestroy(() => {
 		show = false;
-		if (modalElement) {
-			document.body.removeChild(modalElement);
-		}
+		detachDialog();
 	});
 </script>
 

@@ -485,6 +485,72 @@ textarea::placeholder {
 	@apply prose dark:prose-invert prose-blockquote:border-s-gray-100 prose-blockquote:dark:border-gray-800 prose-blockquote:border-s-2 prose-blockquote:not-italic prose-blockquote:font-normal prose-headings:font-semibold prose-hr:my-4 prose-hr:border-gray-100 prose-hr:dark:border-gray-800 prose-p:my-0 prose-img:my-1 prose-headings:my-1 prose-pre:my-0 prose-table:my-0 prose-blockquote:my-0 prose-ul:-my-0 prose-ol:-my-0 prose-li:-my-0 whitespace-pre-line;
 }
 
+/* 聊天消息中的图片尺寸限制 */
+.chat-message-image,
+.markdown-prose img.chat-message-image {
+	max-width: 440px !important;
+	max-height: 440px !important;
+	width: auto !important;
+	height: auto !important;
+	object-fit: contain;
+}
+
+.markdown-prose img.chat-user-attachment-image {
+	max-width: min(88px, 70vw) !important;
+	max-height: 88px !important;
+	width: auto !important;
+	height: auto !important;
+	object-fit: contain;
+}
+
+/* 移动端响应式 */
+@media (max-width: 768px) {
+	.chat-message-image,
+	.markdown-prose img.chat-message-image {
+		max-width: 340px !important;
+		max-height: 380px !important;
+	}
+
+	.markdown-prose img.chat-user-attachment-image {
+		max-width: min(80px, 70vw) !important;
+		max-height: 80px !important;
+	}
+}
+
+/* Markdown prose 中的图片也应用相同限制 */
+.markdown-prose img {
+	max-width: 480px !important;
+	max-height: 480px !important;
+	width: auto !important;
+	height: auto !important;
+	object-fit: contain;
+}
+
+@media (max-width: 768px) {
+	.markdown-prose img {
+		max-width: 320px !important;
+		max-height: 400px !important;
+	}
+}
+
+.markdown-prose
+	:where(h1):not(:where([class~='not-prose'], [class~='not-prose'] *)) {
+	font-size: 1.5625rem;
+	line-height: 1.25;
+}
+
+.markdown-prose
+	:where(h2):not(:where([class~='not-prose'], [class~='not-prose'] *)) {
+	font-size: 1.375rem;
+	line-height: 1.35;
+}
+
+.markdown-prose
+	:where(h3):not(:where([class~='not-prose'], [class~='not-prose'] *)) {
+	font-size: 1.125rem;
+	line-height: 1.45;
+}
+
 .dark .markdown-prose {
 	color: #f0f0f0;
 }
@@ -563,10 +629,10 @@ li p {
 
 /* Scrollbars (global auto-hide, show on hover/scroll) */
 :root {
-	--sb-size: 10px;
-	--sb-padding: 3px;
+	--sb-size: 6px;
+	--sb-padding: 1px;
 	/* inner padding via transparent border */
-	--sb-min-thumb: 28px;
+	--sb-min-thumb: 32px;
 
 	--sb-thumb-rgb: 156 163 175;
 	/* gray-400 */
@@ -576,34 +642,41 @@ li p {
 	/* gray-400 */
 
 	--sb-thumb-alpha-idle: 0;
-	--sb-thumb-alpha-visible: 0.42;
-	--sb-thumb-alpha-hover: 0.62;
-	--sb-thumb-alpha-active: 0.82;
+	--sb-thumb-alpha-visible: 0.38;
+	--sb-thumb-alpha-hover: 0.55;
+	--sb-thumb-alpha-active: 0.75;
 
 	--sb-track-alpha-idle: 0;
-	--sb-track-alpha-visible: 0.06;
+	--sb-track-alpha-visible: 0.04;
+
+	--sb-transition-in: 120ms ease-out;
+	--sb-transition-out: 280ms ease-in;
+}
+
+html {
+	scrollbar-gutter: auto;
 }
 
 .dark {
-	--sb-thumb-rgb: 75 85 99;
-	/* gray-600 */
-	--sb-thumb-hover-rgb: 156 163 175;
-	/* gray-400 */
-	--sb-track-rgb: 75 85 99;
-	/* gray-600 */
+	--sb-thumb-rgb: 160 170 185;
+	/* lighter blue-gray for better visibility on dark bg */
+	--sb-thumb-hover-rgb: 190 200 210;
+	/* brighter hover */
+	--sb-track-rgb: 120 130 145;
+	/* subtle track */
 
-	--sb-thumb-alpha-visible: 0.5;
-	--sb-track-alpha-visible: 0.08;
+	--sb-thumb-alpha-visible: 0.35;
+	--sb-track-alpha-visible: 0.05;
 }
 
-/* WebKit (Chrome/Edge/Safari) */
+/* WebKit (Chrome/Edge/Safari) - overlay scrollbar */
 *::-webkit-scrollbar {
 	width: var(--sb-size);
 	height: var(--sb-size);
 }
 
 *::-webkit-scrollbar-track {
-	background: rgb(var(--sb-track-rgb) / var(--sb-track-alpha-idle));
+	background: transparent;
 	border-radius: 9999px;
 }
 
@@ -614,19 +687,21 @@ li p {
 	background-clip: content-box;
 	min-height: var(--sb-min-thumb);
 	min-width: var(--sb-min-thumb);
-	transition: background-color 180ms ease;
+	transition: background-color var(--sb-transition-out);
 }
 
-/* Visible while scrolling (set by JS on the scroller element) */
+/* Visible state: on scroll (JS) or on hover over scrollable area (JS) */
 [data-scrollbars='visible']::-webkit-scrollbar-track {
 	background: rgb(var(--sb-track-rgb) / var(--sb-track-alpha-visible));
+	transition: background var(--sb-transition-in);
 }
 
 [data-scrollbars='visible']::-webkit-scrollbar-thumb {
 	background-color: rgb(var(--sb-thumb-rgb) / var(--sb-thumb-alpha-visible));
+	transition: background-color var(--sb-transition-in);
 }
 
-/* Enhance while interacting with the scrollbar itself */
+/* Hover/active on the scrollbar thumb itself */
 [data-scrollbars='visible']::-webkit-scrollbar-thumb:hover {
 	background-color: rgb(var(--sb-thumb-hover-rgb) / var(--sb-thumb-alpha-hover));
 }
@@ -645,10 +720,9 @@ li p {
 	scrollbar-color: transparent transparent;
 }
 
-[data-scrollbars='visible'],
-[data-scrollbars='visible']:focus-within {
+[data-scrollbars='visible'] {
 	scrollbar-color: rgb(var(--sb-thumb-rgb) / var(--sb-thumb-alpha-visible))
-		rgb(var(--sb-track-rgb) / var(--sb-track-alpha-visible));
+		transparent;
 }
 
 select {
@@ -1197,6 +1271,53 @@ input[type='range']::-moz-range-thumb {
 :not(.dark) .hljs-selector-class {
 	color: #800000;
 	font-weight: bold;
+}
+
+/* =========================================
+   IMAGE WORKSPACE STYLES
+   ========================================= */
+/* 标签页按钮 */
+.tab-button {
+	@apply flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
+	       transition-all duration-150
+	       text-gray-600 dark:text-gray-400
+	       hover:text-gray-900 dark:hover:text-gray-100
+	       hover:bg-gray-100/50 dark:hover:bg-gray-800/50;
+}
+
+.tab-button.active {
+	@apply bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm;
+}
+
+/* 风格预设卡片 */
+.style-preset-card {
+	@apply flex flex-col items-center justify-center gap-2 p-3
+	       rounded-xl border border-gray-200/60 bg-white/85
+	       dark:border-gray-700/50 dark:bg-gray-900/70
+	       transition-all duration-150
+	       hover:border-gray-300 dark:hover:border-gray-600
+	       hover:shadow-sm hover:scale-[1.02]
+	       active:scale-[0.98];
+}
+
+.style-preset-card.active {
+	@apply border-blue-400 dark:border-blue-500
+	       bg-blue-50/50 dark:bg-blue-900/20;
+}
+
+/* 参数分组标题 */
+.param-group-title {
+	@apply text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3;
+}
+
+/* 参数标签 */
+.param-label {
+	@apply text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5;
+}
+
+/* 参数提示 */
+.param-hint {
+	@apply text-xs text-gray-500 dark:text-gray-400 mt-1;
 }
 
 /* =========================================

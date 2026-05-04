@@ -465,6 +465,13 @@ export function applyModelIcon<T extends ModelLike>(model: T): T {
 	if (!model) return model;
 
 	const existingIcon = model.info?.meta?.profile_image_url ?? model.meta?.profile_image_url ?? null;
+	const hasUpstreamBaseModel = Boolean(model.base_model_id ?? model.info?.base_model_id ?? null);
+
+	// Workspace 助手场景的头像应以用户保存的结果为准，不能在全局模型列表里
+	// 又被基础模型/厂商图标重新盖掉，否则会出现侧栏头像正确、下拉列表头像错误。
+	if (hasUpstreamBaseModel && existingIcon && existingIcon !== DEFAULT_MODEL_ICON) {
+		return model;
+	}
 
 	// 保留用户自定义图标（data URL, blob, cache）
 	const isUserCustom =

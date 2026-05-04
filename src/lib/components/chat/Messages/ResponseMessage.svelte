@@ -4,16 +4,23 @@
 
 	import { createEventDispatcher } from 'svelte';
 	import { onMount, tick, getContext } from 'svelte';
-	import type { Writable } from 'svelte/store';
+	import { writable, type Writable } from 'svelte/store';
 	import type { i18n as i18nType, t } from 'i18next';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	const dispatch = createEventDispatcher();
 
-	import { config, mobile, models, settings, TTSWorker, activeAudioId, user } from '$lib/stores';
+	import {
+		config,
+		mobile,
+		models,
+		settings,
+		TTSWorker,
+		activeAudioId,
+		user
+	} from '$lib/stores';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
-	import { imageGenerations } from '$lib/apis/images';
 	// [REACTION_FEATURE] Commented out - reaction feature disabled for now
 	// import {
 	// 	addChatMessageReaction,
@@ -30,6 +37,8 @@
 		stripThinkingBlocks
 	} from '$lib/utils';
 	import { WEBUI_BASE_URL } from '$lib/constants';
+	import { translateWithDefault } from '$lib/i18n';
+	import { saveUserSettingsPatch } from '$lib/utils/user-settings';
 
 	import Name from './Name.svelte';
 	import ModelIcon from '$lib/components/common/ModelIcon.svelte';
@@ -44,14 +53,16 @@
 		ChevronRight,
 		PencilLine,
 		Copy,
+		GitBranchPlus,
 		Volume2,
 		VolumeX,
-		ImagePlus,
 		Info,
 		PlayCircle,
 		RefreshCw,
 		Trash2,
 		ListPlus,
+		Eye,
+		EyeOff,
 		AlignLeft,
 		Lightbulb,
 		Globe,
@@ -71,7 +82,17 @@
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import { getModelChatDisplayName } from '$lib/utils/model-display';
+	import { findModelByIdentity } from '$lib/utils/model-identity';
+	import {
+		getRenderableMessageError,
+		hasVisibleMessageFiles as messageHasVisibleFiles
+	} from '$lib/utils/chat-message-errors';
 	import type { HeadingItem } from '$lib/utils/headings';
+
+	type MessageOutlineVisibilityContext = {
+		scrollVisibleStore: Writable<boolean>;
+		reveal: () => void;
+	};
 
 	interface MessageType {
 		id: string;
@@ -97,7 +118,13 @@
 		done: boolean;
 		completedAt?: number;
 		usage?: Record<string, unknown>;
-		error?: boolean | { content: string };
+		error?:
+			| boolean
+			| {
+					content?: string;
+					type?: string;
+					[key: string]: unknown;
+			  };
 		sources?: string[];
 		followUps?: string[];
 		code_executions?: {
@@ -132,6 +159,8 @@
 
 	let message: MessageType = history.messages?.[messageId] as MessageType;
 	$: message = history.messages?.[messageId] as MessageType;
+	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
+		translateWithDefault($i18n, key, defaultValue, options);
 
 	function getVisibleAssistantOutput(content: string): string {
 		return sanitizeResponseContent(
@@ -140,6 +169,8 @@
 	}
 
 	$: hasVisibleAssistantOutput = getVisibleAssistantOutput(message?.content ?? '') !== '';
+	$: hasVisibleMessageFiles = messageHasVisibleFiles(message?.files);
+	$: renderableMessageError = getRenderableMessageError(message?.error, message?.files);
 	$: hasVisibleThinkingOutput =
 		/<details\b[^>]*type="reasoning"/i.test(message?.content ?? '') ||
 		/<(think|thinking|reasoning)\b[^>]*>/i.test(message?.content ?? '');
@@ -174,41 +205,50 @@
 	export let regenerateResponse: Function;
 
 	export let addMessages: Function;
+	export let onBranchMessage: Function = () => {};
+	export let branchingMessageId: string | null = null;
+	export let branchSupported = false;
 
 	export let isLastMessage = true;
 	export let readOnly = false;
+	export let forceExpandContent = false;
 
 	let buttonsContainerElement: HTMLDivElement;
 	let citationsRef: any = null;
 	let buttonsScrollBound = false;
-	let buttonsWheelHandler: ((event: WheelEvent) => void) | null = null;
+	let isBranching = false;
+	let branchTooltip = '';
+
+	$: isBranching = branchingMessageId === message?.id;
+	$: branchTooltip = tr(
+		isBranching ? 'Creating branch...' : 'Create branch',
+		isBranching ? '正在创建分支...' : '创建分支'
+	);
 
 	function setupButtonsScroll() {
 		if (buttonsContainerElement && !buttonsScrollBound) {
 			buttonsScrollBound = true;
-			buttonsWheelHandler = (event: WheelEvent) => {
+			buttonsContainerElement.addEventListener('wheel', function (event) {
 				event.preventDefault();
 				if (event.deltaY !== 0) {
 					buttonsContainerElement.scrollLeft += event.deltaY;
 				}
-			};
-			buttonsContainerElement.addEventListener('wheel', buttonsWheelHandler);
+			});
 		}
 	}
 
 	$: if (buttonsContainerElement) {
 		setupButtonsScroll();
 	}
-
-	onDestroy(() => {
-		if (buttonsContainerElement && buttonsWheelHandler) {
-			buttonsContainerElement.removeEventListener('wheel', buttonsWheelHandler);
-		}
-	});
 	let showDeleteConfirm = false;
 	let showRegenerateConfirm = false;
 	let showRegenerateMenu = false;
 	let regenerateInput = '';
+
+	type RenderedCopyPayload = {
+		text: string;
+		html?: string;
+	};
 
 	$: modelSupportsThinking = model?.info?.meta?.capabilities?.reasoning ?? false;
 
@@ -273,7 +313,7 @@
 	// };
 
 	let model = null;
-	$: model = $models.find((m) => m.id === message.model);
+	$: model = findModelByIdentity($models, message.model);
 	$: stats = getStatsDisplay(message);
 
 	const doRegenerate = () => {
@@ -291,8 +331,28 @@
 	let editTextAreaElement: HTMLTextAreaElement;
 	let contentRendererRef: any = null;
 	let messageHeadings: HeadingItem[] = [];
+	let isOutlineHostPointerActive = false;
+	let hasOutlineHostFocusWithin = false;
+	let isOutlineHostActive = false;
+	const fallbackOutlineScrollVisibleStore = writable(false);
+	const messageOutlineVisibilityContext =
+		getContext<MessageOutlineVisibilityContext | undefined>('messageOutlineVisibility');
+	const outlineScrollVisibleStore =
+		messageOutlineVisibilityContext?.scrollVisibleStore ?? fallbackOutlineScrollVisibleStore;
+	$: isOutlineHostActive = isOutlineHostPointerActive || hasOutlineHostFocusWithin;
 	$: canShowMessageOutline =
 		!edit && !$mobile && ($settings?.showMessageOutline ?? true) && messageHeadings.length >= 1;
+
+	const handleOutlineHostFocusOut = (event: FocusEvent) => {
+		const currentTarget = event.currentTarget as HTMLElement | null;
+		const relatedTarget = event.relatedTarget as Node | null;
+
+		if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) {
+			return;
+		}
+
+		hasOutlineHostFocusWithin = false;
+	};
 
 	let messageIndexEdit = false;
 
@@ -301,7 +361,6 @@
 	let speakingIdx: number | undefined;
 
 	let loadingSpeech = false;
-	let generatingImage = false;
 
 	// Global audio queue: stop this message's TTS if another message starts playing
 	$: if (speaking && $activeAudioId !== null && $activeAudioId !== messageId) {
@@ -324,12 +383,54 @@
 		);
 	};
 
+	const writeRenderedCopyPayload = async (payload: RenderedCopyPayload) => {
+		if (($settings?.copyFormatted ?? false) && payload.html) {
+			try {
+				const data = new ClipboardItem({
+					'text/html': new Blob([payload.html], { type: 'text/html' }),
+					'text/plain': new Blob([payload.text], { type: 'text/plain' })
+				});
+				await navigator.clipboard.write([data]);
+				return true;
+			} catch (error) {
+				console.error('Failed to copy rendered HTML content:', error);
+			}
+		}
+
+		return await _copyToClipboard(payload.text, $settings?.copyFormatted ?? false);
+	};
+
 	const copyToClipboard = async (text) => {
 		text = removeAllDetails(text);
 
-		const res = await _copyToClipboard(text, $settings?.copyFormatted ?? false);
+		const renderedPayload = contentRendererRef?.getCopyPayload?.();
+		const res = renderedPayload
+			? await writeRenderedCopyPayload(renderedPayload)
+			: await _copyToClipboard(text, $settings?.copyFormatted ?? false);
+
 		if (res) {
 			toast.success($i18n.t('Copying to clipboard was successful!'));
+		}
+	};
+
+	const toggleInlineCitations = async () => {
+		const nextValue = !($settings?.showInlineCitations ?? true);
+		const optimisticSettings = {
+			...($settings ?? {}),
+			showInlineCitations: nextValue
+		};
+
+		settings.set(optimisticSettings);
+
+		if (!localStorage?.token) {
+			return;
+		}
+
+		try {
+			await saveUserSettingsPatch(localStorage.token, { showInlineCitations: nextValue });
+		} catch (error) {
+			settings.set(optimisticSettings);
+			toast.error(tr('正文引用显示偏好保存失败', 'Failed to save inline citation preference.'));
 		}
 	};
 
@@ -591,28 +692,6 @@
 		await tick();
 	};
 
-	const generateImage = async (message: MessageType) => {
-		generatingImage = true;
-		const res = await imageGenerations(localStorage.token, message.content).catch((error) => {
-			toast.error(`${error}`);
-		});
-		console.log(res);
-
-		if (res) {
-			const files = res.map((image) => ({
-				type: 'image',
-				url: `${image.url}`
-			}));
-
-			saveMessage(message.id, {
-				...message,
-				files: files
-			});
-		}
-
-		generatingImage = false;
-	};
-
 	const deleteMessageHandler = async () => {
 		deleteMessage(message.id);
 	};
@@ -631,15 +710,9 @@
 		const input = data.prompt_tokens ?? data.input_tokens;
 		const output = data.completion_tokens ?? data.output_tokens;
 		const total = data.total_tokens;
-		const compDetails = (data.completion_tokens_details ?? data.output_tokens_details) as Record<
-			string,
-			unknown
-		> | null;
+		const compDetails = (data.completion_tokens_details ?? data.output_tokens_details) as Record<string, unknown> | null;
 		const reasoning = compDetails?.reasoning_tokens;
-		const promptDetails = (data.prompt_tokens_details ?? data.input_tokens_details) as Record<
-			string,
-			unknown
-		> | null;
+		const promptDetails = (data.prompt_tokens_details ?? data.input_tokens_details) as Record<string, unknown> | null;
 		const cached = promptDetails?.cached_tokens;
 
 		const dk = document.documentElement.classList.contains('dark');
@@ -653,17 +726,17 @@
 
 		const num = (v: unknown) => (typeof v === 'number' ? v.toLocaleString() : null);
 		const rows: [string, string | null][] = [
-			['输入 Token', num(input)],
-			['输出 Token', num(output)],
-			['推理 Token', num(reasoning)],
-			['缓存 Token', num(cached)]
+			[tr('输入 Token', 'Input Tokens'), num(input)],
+			[tr('输出 Token', 'Output Tokens'), num(output)],
+			[tr('推理 Token', 'Reasoning Tokens'), num(reasoning)],
+			[tr('缓存 Token', 'Cached Tokens'), num(cached)]
 		];
 
 		let h = `<div style="background:${bg};backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid ${bd};border-radius:1rem;padding:10px 14px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);min-width:150px">`;
 
 		if (typeof total === 'number') {
 			h += `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid ${dv}">`;
-			h += `<span style="font-size:12px;font-weight:500;color:${lb}">总消耗</span>`;
+			h += `<span style="font-size:12px;font-weight:500;color:${lb}">${tr('总消耗', 'Total')}</span>`;
 			h += `<span style="font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;color:${hr}">${total.toLocaleString()}</span>`;
 			h += `</div>`;
 		}
@@ -672,10 +745,9 @@
 		for (const [label, val] of rows) {
 			h += `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">`;
 			h += `<span style="color:${lb}">${label}</span>`;
-			h +=
-				val !== null
-					? `<span style="font-weight:500;font-variant-numeric:tabular-nums;color:${vl}">${val}</span>`
-					: `<span style="color:${vl};font-style:italic">未返回</span>`;
+			h += val !== null
+				? `<span style="font-weight:500;font-variant-numeric:tabular-nums;color:${vl}">${val}</span>`
+				: `<span style="color:${vl};font-style:italic">${tr('未返回', 'Not returned')}</span>`;
 			h += `</div>`;
 		}
 		h += `</div></div>`;
@@ -769,7 +841,9 @@
 
 <DeleteConfirmDialog
 	bind:show={showRegenerateConfirm}
-	title={$i18n.t('Regenerate with {{modelName}}?', { modelName: model?.name ?? message.model })}
+	title={$i18n.t('Regenerate with {{modelName}}?', {
+		modelName: getModelChatDisplayName(model) || message.modelName || message.model
+	})}
 	on:confirm={() => {
 		doRegenerate();
 	}}
@@ -785,14 +859,14 @@
 			class={`shrink-0 ml-0.5 sm:ml-0 ltr:mr-1.5 rtl:ml-1.5 ltr:sm:mr-3 rtl:sm:ml-3 relative z-10`}
 		>
 			<div class="relative">
-				<ModelIcon
-					src={model?.info?.meta?.profile_image_url ??
-						model?.meta?.profile_image_url ??
-						($i18n.language === 'dg-DG' ? `/doge.png` : `${WEBUI_BASE_URL}/static/favicon.png`)}
-					alt="model profile"
-					bare={true}
-					className="size-[26px] sm:size-[34px] rounded-xl -translate-y-[1px] ring-2 ring-white/60 dark:ring-white/20"
-				/>
+					<ModelIcon
+						src={model?.info?.meta?.profile_image_url ??
+							model?.meta?.profile_image_url ??
+							`${WEBUI_BASE_URL}/static/favicon.png`}
+						alt="model profile"
+						bare={true}
+						className="size-[26px] sm:size-[34px] rounded-xl -translate-y-[1px] ring-2 ring-white/60 dark:ring-white/20"
+					/>
 				<!-- Status indicator dot -->
 				<div
 					class="absolute -bottom-0.5 -right-0.5 size-1.5 sm:size-2 translate-x-px -translate-y-px bg-green-400 rounded-full ring-1 sm:ring-[1.5px] ring-white dark:ring-gray-900 animate-pulse"
@@ -802,9 +876,9 @@
 
 		<div class="flex-auto w-0 sm:pl-1 relative z-10">
 			<Name>
-				<Tooltip content={getModelChatDisplayName(model) || message.model} placement="top-start">
+				<Tooltip content={getModelChatDisplayName(model) || message.modelName || message.model} placement="top-start">
 					<span class="line-clamp-1 text-black dark:text-white font-semibold">
-						{getModelChatDisplayName(model) || message.model}
+						{getModelChatDisplayName(model) || message.modelName || message.model}
 					</span>
 				</Tooltip>
 
@@ -837,8 +911,8 @@
 
 			{#if stats && (stats.speed || stats.tokens || stats.elapsed)}
 				<div class="text-gray-500 dark:text-gray-400 mt-1 ml-0.5 text-xs sm:text-sm">
-					{#if stats.speed}速度: {stats.speed} T/s{/if}{#if stats.speed && (stats.tokens || stats.elapsed)}{' | '}{/if}{#if stats.tokens}消耗:
-						{stats.tokens} Token{/if}{#if stats.tokens && stats.elapsed}{' | '}{/if}{#if stats.elapsed}耗时:
+					{#if stats.speed}{tr('速度', 'Speed')}: {stats.speed} T/s{/if}{#if stats.speed && (stats.tokens || stats.elapsed)}{' | '}{/if}{#if stats.tokens}{tr('消耗', 'Tokens')}:
+						{stats.tokens} {$i18n.t('Token')}{/if}{#if stats.tokens && stats.elapsed}{' | '}{/if}{#if stats.elapsed}{tr('耗时', 'Elapsed')}:
 						{stats.elapsed} s{/if}
 				</div>
 			{/if}
@@ -848,14 +922,14 @@
 					class="flex items-baseline gap-1.5 mt-1 ml-0.5 text-xs text-gray-400 dark:text-gray-500 italic"
 				>
 					<RefreshCw class="w-3.5 h-3.5 shrink-0 translate-y-[1px]" strokeWidth={1.5} />
-					<span class="line-clamp-1">{message.instruction.replace(/^请/, '')}</span>
+					<span class="line-clamp-1">{message.instruction.replace(/^请/, '').replace(/^Please\s+/i, '')}</span>
 				</div>
 			{/if}
 
 			<div class="mt-1.5 -ml-4 w-[calc(100%+1rem)] sm:ml-0 sm:w-auto">
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
-						{#if message.content !== '' || message.error}
+						{#if message.content !== '' || renderableMessageError || hasVisibleMessageFiles}
 							<!-- Only show status section when content is streaming (not during initial loading) -->
 							{#if displayStatusHistory.length > 0}
 								{@const status = displayStatusHistory.at(-1)}
@@ -963,11 +1037,16 @@
 						{/if}
 
 						{#if message?.files && message.files?.filter((f) => f.type === 'image').length > 0}
-							<div class="my-1 w-full flex overflow-x-auto gap-2 flex-wrap">
+							<div class="my-1 flex overflow-x-auto gap-2 flex-wrap">
 								{#each message.files as file}
 									<div>
 										{#if file.type === 'image'}
-											<Image src={file.url} alt={message.content} />
+											<Image
+												src={file.url}
+												alt={message.content}
+												className="outline-hidden focus:outline-hidden"
+												imageClassName="rounded-lg chat-message-image"
+											/>
 										{:else}
 											<FileItem
 												item={file}
@@ -1049,11 +1128,23 @@
 								class="relative min-w-0 flex-1 overflow-visible message-outline-host {canShowMessageOutline
 									? 'message-outline-host-active'
 									: ''}"
+								on:pointerenter={() => {
+									isOutlineHostPointerActive = true;
+								}}
+								on:pointerleave={() => {
+									isOutlineHostPointerActive = false;
+								}}
+								on:focusin={() => {
+									hasOutlineHostFocusWithin = true;
+								}}
+								on:focusout={handleOutlineHostFocusOut}
 							>
 								{#if canShowMessageOutline}
 									<MessageOutline
 										headings={messageHeadings}
+										visible={$outlineScrollVisibleStore && isOutlineHostActive}
 										onSelect={(heading) => {
+											messageOutlineVisibilityContext?.reveal?.();
 											contentRendererRef?.scrollToHeading?.(heading.id);
 										}}
 									/>
@@ -1072,7 +1163,7 @@
 											/>
 										{/if}
 
-										{#if message.content === '' && message.done && !message.error && !(message?.files?.length > 0)}
+										{#if message.content === '' && message.done && !renderableMessageError && !hasVisibleMessageFiles}
 											<!-- Empty response: model returned 0 tokens without error -->
 											<Error
 												content={$i18n.t(
@@ -1090,6 +1181,7 @@
 												content={message.content}
 												streaming={!message.done}
 												{isLastMessage}
+												forceExpand={forceExpandContent}
 												sources={message.sources}
 												floatingButtons={message?.done &&
 													!readOnly &&
@@ -1125,14 +1217,21 @@
 														);
 													} else if (type === 'ask') {
 														const input = e.detail?.input ?? '';
-														submitMessage(message.id, `\`\`\`\n${content}\n\`\`\`\n${input}`);
+														submitMessage(
+															message.id,
+															`\`\`\`\n${content}\n\`\`\`\n${input}`
+														);
 													}
 												}}
 											/>
 										{/if}
 
-										{#if message?.error}
-											<Error content={message?.error === true ? message.content : message?.error} />
+										{#if renderableMessageError}
+											<Error
+												content={renderableMessageError === true
+													? message.content
+													: renderableMessageError}
+											/>
 										{/if}
 
 										{#if message.code_executions}
@@ -1141,128 +1240,169 @@
 									</div>
 
 									<div class="message-outline-toolbar-row flex items-end mt-2 gap-3 flex-wrap">
-										{#if (message?.sources || message?.citations) && (model?.info?.meta?.capabilities?.citations ?? true)}
-											<div class="flex-shrink-0">
-												<Citations
-													bind:this={citationsRef}
-													id={message?.id}
-													sources={message?.sources ?? message?.citations}
-												/>
+						{#if (message?.sources || message?.citations) && (model?.info?.meta?.capabilities?.citations ?? true)}
+							<div class="flex shrink-0 items-center gap-2">
+								<Citations
+									bind:this={citationsRef}
+									id={message?.id}
+									sources={message?.sources ?? message?.citations}
+								/>
+								<Tooltip
+									content={($settings?.showInlineCitations ?? true)
+										? tr('隐藏正文引用标签', 'Hide inline citations')
+										: tr('显示正文引用标签', 'Show inline citations')}
+									placement="bottom"
+								>
+									<button
+										type="button"
+										aria-label={($settings?.showInlineCitations ?? true)
+											? tr('隐藏正文引用标签', 'Hide inline citations')
+											: tr('显示正文引用标签', 'Show inline citations')}
+										class="text-gray-600 dark:text-gray-300 rounded-xl bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl shadow-sm hover:bg-white/80 dark:hover:bg-gray-700/60 transition-all duration-200 flex items-center justify-center border border-gray-200/50 dark:border-gray-700/50 h-[36px] w-[36px] shrink-0"
+										on:click={toggleInlineCitations}
+									>
+										{#if $settings?.showInlineCitations ?? true}
+											<EyeOff class="size-3.5 shrink-0" strokeWidth={2.25} />
+										{:else}
+											<Eye class="size-3.5 shrink-0" strokeWidth={2.25} />
+										{/if}
+									</button>
+								</Tooltip>
+							</div>
+						{/if}
+						{#if message.done || siblings.length > 1}
+							<div
+								bind:this={buttonsContainerElement}
+								class="flex items-center gap-0.5 overflow-x-auto buttons text-gray-600 dark:text-gray-300 px-1.5 h-[37px] rounded-xl {isLastMessage
+									? 'visible opacity-100'
+									: 'invisible group-hover/message:visible opacity-0 group-hover/message:opacity-100'} transition-all duration-300 bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl shadow-sm border border-gray-200/50 dark:border-gray-700/50 w-fit min-w-0 max-w-full toolbar-appear"
+							>
+								{#if siblings.length > 1}
+									<div class="flex self-center min-w-fit" dir="ltr">
+										<button
+											class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
+											on:click={() => {
+												showPreviousMessage(message);
+											}}
+										>
+											<ChevronLeft class="size-3.5" strokeWidth={2.5} />
+										</button>
+
+										{#if messageIndexEdit}
+											<div
+												class="text-sm flex justify-center font-semibold self-center dark:text-gray-100 min-w-fit"
+											>
+												<input
+													id="message-index-input-{message.id}"
+													type="number"
+													value={siblings.indexOf(message.id) + 1}
+													min="1"
+													max={siblings.length}
+													on:focus={(e) => {
+														e.target.select();
+													}}
+													on:blur={(e) => {
+														gotoMessage(message, e.target.value - 1);
+														messageIndexEdit = false;
+													}}
+													on:keydown={(e) => {
+														if (e.key === 'Enter') {
+															gotoMessage(message, e.target.value - 1);
+															messageIndexEdit = false;
+														}
+													}}
+													class="bg-transparent font-semibold self-center dark:text-gray-100 min-w-fit outline-hidden"
+												/>/{siblings.length}
+											</div>
+										{:else}
+											<!-- svelte-ignore a11y-no-static-element-interactions -->
+											<div
+												class="text-xs tracking-wider font-medium self-center text-gray-500 dark:text-gray-300 min-w-fit tabular-nums"
+												on:dblclick={async () => {
+													messageIndexEdit = true;
+
+													await tick();
+													const input = document.getElementById(
+														`message-index-input-${message.id}`
+													);
+													if (input) {
+														input.focus();
+														input.select();
+													}
+												}}
+											>
+												{siblings.indexOf(message.id) + 1}/{siblings.length}
 											</div>
 										{/if}
-										{#if message.done || siblings.length > 1}
-											<div
-												bind:this={buttonsContainerElement}
-												class="flex items-center gap-0.5 overflow-x-auto buttons text-gray-600 dark:text-gray-300 px-1.5 h-[37px] rounded-xl {isLastMessage
-													? 'visible opacity-100'
-													: 'invisible group-hover/message:visible opacity-0 group-hover/message:opacity-100'} transition-all duration-300 bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl shadow-sm border border-gray-200/50 dark:border-gray-700/50 w-fit min-w-0 max-w-full toolbar-appear"
+
+										<button
+											class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
+											on:click={() => {
+												showNextMessage(message);
+											}}
+										>
+											<ChevronRight class="size-3.5" strokeWidth={2.5} />
+										</button>
+									</div>
+									{#if message.done}
+										<div
+											class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"
+										></div>
+									{/if}
+								{/if}
+
+								{#if message.done}
+									{#if !readOnly}
+										{#if $user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true}
+											<Tooltip content={$i18n.t('Edit')} placement="bottom">
+												<button
+													class="{isLastMessage
+														? 'visible'
+														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+													on:click={() => {
+														editMessageHandler();
+													}}
+												>
+													<PencilLine class="w-4 h-4" strokeWidth={2} />
+												</button>
+											</Tooltip>
+										{/if}
+									{/if}
+
+									<Tooltip content={$i18n.t('Copy')} placement="bottom">
+										<button
+											class="{isLastMessage
+												? 'visible'
+												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 copy-response-button"
+											on:click={() => {
+												copyToClipboard(message.content);
+											}}
+										>
+											<Copy class="w-4 h-4" strokeWidth={2} />
+										</button>
+									</Tooltip>
+
+									{#if !readOnly && branchSupported}
+										<Tooltip content={branchTooltip} placement="bottom">
+											<button
+												class="{isLastMessage
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+												on:click={() => {
+													onBranchMessage(message.id);
+												}}
+												disabled={isBranching}
+												aria-busy={isBranching}
 											>
-												{#if siblings.length > 1}
-													<div class="flex self-center min-w-fit" dir="ltr">
-														<button
-															class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
-															on:click={() => {
-																showPreviousMessage(message);
-															}}
-														>
-															<ChevronLeft class="size-3.5" strokeWidth={2.5} />
-														</button>
+												<GitBranchPlus
+													class={`w-4 h-4 ${isBranching ? 'animate-spin' : ''}`}
+													strokeWidth={2}
+												/>
+											</button>
+										</Tooltip>
+									{/if}
 
-														{#if messageIndexEdit}
-															<div
-																class="text-sm flex justify-center font-semibold self-center dark:text-gray-100 min-w-fit"
-															>
-																<input
-																	id="message-index-input-{message.id}"
-																	type="number"
-																	value={siblings.indexOf(message.id) + 1}
-																	min="1"
-																	max={siblings.length}
-																	on:focus={(e) => {
-																		e.target.select();
-																	}}
-																	on:blur={(e) => {
-																		gotoMessage(message, e.target.value - 1);
-																		messageIndexEdit = false;
-																	}}
-																	on:keydown={(e) => {
-																		if (e.key === 'Enter') {
-																			gotoMessage(message, e.target.value - 1);
-																			messageIndexEdit = false;
-																		}
-																	}}
-																	class="bg-transparent font-semibold self-center dark:text-gray-100 min-w-fit outline-hidden"
-																/>/{siblings.length}
-															</div>
-														{:else}
-															<!-- svelte-ignore a11y-no-static-element-interactions -->
-															<div
-																class="text-xs tracking-wider font-medium self-center text-gray-500 dark:text-gray-300 min-w-fit tabular-nums"
-																on:dblclick={async () => {
-																	messageIndexEdit = true;
-
-																	await tick();
-																	const input = document.getElementById(
-																		`message-index-input-${message.id}`
-																	);
-																	if (input) {
-																		input.focus();
-																		input.select();
-																	}
-																}}
-															>
-																{siblings.indexOf(message.id) + 1}/{siblings.length}
-															</div>
-														{/if}
-
-														<button
-															class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-lg transition-all duration-200 hover:scale-110 active:scale-95"
-															on:click={() => {
-																showNextMessage(message);
-															}}
-														>
-															<ChevronRight class="size-3.5" strokeWidth={2.5} />
-														</button>
-													</div>
-													{#if message.done}
-														<div
-															class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"
-														></div>
-													{/if}
-												{/if}
-
-												{#if message.done}
-													{#if !readOnly}
-														{#if $user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true}
-															<Tooltip content={$i18n.t('Edit')} placement="bottom">
-																<button
-																	class="{isLastMessage
-																		? 'visible'
-																		: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-																	on:click={() => {
-																		editMessageHandler();
-																	}}
-																>
-																	<PencilLine class="w-4 h-4" strokeWidth={2} />
-																</button>
-															</Tooltip>
-														{/if}
-													{/if}
-
-													<Tooltip content={$i18n.t('Copy')} placement="bottom">
-														<button
-															class="{isLastMessage
-																? 'visible'
-																: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 copy-response-button"
-															on:click={() => {
-																copyToClipboard(message.content);
-															}}
-														>
-															<Copy class="w-4 h-4" strokeWidth={2} />
-														</button>
-													</Tooltip>
-
-													<!-- [REACTION_FEATURE] Commented out - reaction button disabled for now
+									<!-- [REACTION_FEATURE] Commented out - reaction button disabled for now
 								{#if !readOnly}
 									<div>
 										<Tooltip content={$i18n.t('React')} placement="bottom">
@@ -1286,389 +1426,314 @@
 								{/if}
 								-->
 
-													{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
-														<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
-															<button
-																id="speak-button-{message.id}"
-																class="{isLastMessage
-																	? 'visible'
-																	: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-																on:click={() => {
-																	if (!loadingSpeech) {
-																		toggleSpeakMessage();
-																	}
-																}}
-															>
-																{#if loadingSpeech}
-																	<svg
-																		class=" w-4 h-4"
-																		fill="currentColor"
-																		viewBox="0 0 24 24"
-																		xmlns="http://www.w3.org/2000/svg"
-																	>
-																		<style>
-																			.spinner_S1WN {
-																				animation: spinner_MGfb 0.8s linear infinite;
-																				animation-delay: -0.8s;
-																			}
+									{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
+										<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
+											<button
+												id="speak-button-{message.id}"
+												class="{isLastMessage
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+												on:click={() => {
+													if (!loadingSpeech) {
+														toggleSpeakMessage();
+													}
+												}}
+											>
+												{#if loadingSpeech}
+													<svg
+														class=" w-4 h-4"
+														fill="currentColor"
+														viewBox="0 0 24 24"
+														xmlns="http://www.w3.org/2000/svg"
+													>
+														<style>
+															.spinner_S1WN {
+																animation: spinner_MGfb 0.8s linear infinite;
+																animation-delay: -0.8s;
+															}
 
-																			.spinner_Km9P {
-																				animation-delay: -0.65s;
-																			}
+															.spinner_Km9P {
+																animation-delay: -0.65s;
+															}
 
-																			.spinner_JApP {
-																				animation-delay: -0.5s;
-																			}
+															.spinner_JApP {
+																animation-delay: -0.5s;
+															}
 
-																			@keyframes spinner_MGfb {
-																				93.75%,
-																				100% {
-																					opacity: 0.2;
-																				}
-																			}
-																		</style>
-																		<circle class="spinner_S1WN" cx="4" cy="12" r="3" />
-																		<circle
-																			class="spinner_S1WN spinner_Km9P"
-																			cx="12"
-																			cy="12"
-																			r="3"
-																		/>
-																		<circle
-																			class="spinner_S1WN spinner_JApP"
-																			cx="20"
-																			cy="12"
-																			r="3"
-																		/>
-																	</svg>
-																{:else if speaking}
-																	<VolumeX class="w-4 h-4" strokeWidth={2} />
-																{:else}
-																	<Volume2 class="w-4 h-4" strokeWidth={2} />
-																{/if}
-															</button>
-														</Tooltip>
-													{/if}
-
-													{#if $config?.features.enable_image_generation && ($user?.role === 'admin' || $user?.permissions?.features?.image_generation) && !readOnly}
-														<Tooltip content={$i18n.t('Generate Image')} placement="bottom">
-															<button
-																class="{isLastMessage
-																	? 'visible'
-																	: 'invisible group-hover:visible'}  p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-																on:click={() => {
-																	if (!generatingImage) {
-																		generateImage(message);
-																	}
-																}}
-															>
-																{#if generatingImage}
-																	<svg
-																		class=" w-4 h-4"
-																		fill="currentColor"
-																		viewBox="0 0 24 24"
-																		xmlns="http://www.w3.org/2000/svg"
-																	>
-																		<style>
-																			.spinner_S1WN {
-																				animation: spinner_MGfb 0.8s linear infinite;
-																				animation-delay: -0.8s;
-																			}
-
-																			.spinner_Km9P {
-																				animation-delay: -0.65s;
-																			}
-
-																			.spinner_JApP {
-																				animation-delay: -0.5s;
-																			}
-
-																			@keyframes spinner_MGfb {
-																				93.75%,
-																				100% {
-																					opacity: 0.2;
-																				}
-																			}
-																		</style>
-																		<circle class="spinner_S1WN" cx="4" cy="12" r="3" />
-																		<circle
-																			class="spinner_S1WN spinner_Km9P"
-																			cx="12"
-																			cy="12"
-																			r="3"
-																		/>
-																		<circle
-																			class="spinner_S1WN spinner_JApP"
-																			cx="20"
-																			cy="12"
-																			r="3"
-																		/>
-																	</svg>
-																{:else}
-																	<ImagePlus class="w-4 h-4" strokeWidth={2} />
-																{/if}
-															</button>
-														</Tooltip>
-													{/if}
-
-													{#if message.usage}
-														<Tooltip
-															content={formatUsageHtml(message.usage)}
-															placement="bottom"
-															offset={[0, 8]}
-															tippyOptions={{
-																theme: 'none',
-																maxWidth: 'none',
-																duration: [100, 75],
-																onShow(instance) {
-																	const box = instance.popper.firstElementChild;
-																	if (box) {
-																		box.style.background = 'transparent';
-																		box.style.border = 'none';
-																		box.style.boxShadow = 'none';
-																		box.style.borderRadius = '0';
-																	}
-																	const tc = box?.querySelector('.tippy-content');
-																	if (tc) tc.style.padding = '0';
+															@keyframes spinner_MGfb {
+																93.75%,
+																100% {
+																	opacity: 0.2;
 																}
+															}
+														</style>
+														<circle class="spinner_S1WN" cx="4" cy="12" r="3" />
+														<circle class="spinner_S1WN spinner_Km9P" cx="12" cy="12" r="3" />
+														<circle class="spinner_S1WN spinner_JApP" cx="20" cy="12" r="3" />
+													</svg>
+												{:else if speaking}
+													<VolumeX class="w-4 h-4" strokeWidth={2} />
+												{:else}
+													<Volume2 class="w-4 h-4" strokeWidth={2} />
+												{/if}
+											</button>
+										</Tooltip>
+									{/if}
+
+									{#if message.usage}
+										<Tooltip
+											content={formatUsageHtml(message.usage)}
+											placement="bottom"
+											offset={[0, 8]}
+											tippyOptions={{
+												theme: 'none',
+												maxWidth: 'none',
+												duration: [100, 75],
+												onShow(instance) {
+													const box = instance.popper.firstElementChild;
+													if (box) {
+														box.style.background = 'transparent';
+														box.style.border = 'none';
+														box.style.boxShadow = 'none';
+														box.style.borderRadius = '0';
+													}
+													const tc = box?.querySelector('.tippy-content');
+													if (tc) tc.style.padding = '0';
+												}
+											}}
+										>
+											<button
+												class="{isLastMessage
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+												id="info-{message.id}"
+											>
+												<Info class="w-4 h-4" strokeWidth={2} />
+											</button>
+										</Tooltip>
+									{/if}
+
+									<div class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"></div>
+
+									{#if !readOnly}
+										{#if isLastMessage}
+											<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
+												<button
+													type="button"
+													id="continue-response-button"
+													class="{isLastMessage
+														? 'visible'
+														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
+													on:click={() => {
+														continueResponse();
+													}}
+												>
+													<PlayCircle class="w-4 h-4" strokeWidth={2} />
+												</button>
+											</Tooltip>
+										{/if}
+
+										{#if $settings?.regenerateMenu ?? true}
+											<Dropdown
+												bind:show={showRegenerateMenu}
+												side="top"
+												align="start"
+												on:change={(e) => {
+													if (!e.detail) regenerateInput = '';
+												}}
+											>
+												<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
+													<button
+														type="button"
+														class="{isLastMessage
+															? 'visible'
+															: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
+														aria-label={$i18n.t('Regenerate')}
+													>
+														<RefreshCw class="w-4 h-4" strokeWidth={2} />
+													</button>
+												</Tooltip>
+
+												<div slot="content">
+													<DropdownMenu.Content
+														class="w-60 rounded-2xl px-1.5 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+														sideOffset={8}
+														side="top"
+														align="start"
+														transition={flyAndScale}
+													>
+														<!-- 自定义指令输入框 -->
+														<div class="px-1.5 py-1.5">
+															<form
+																class="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-xl"
+																on:submit|preventDefault={() => {
+																	if (regenerateInput.trim()) {
+																		showRegenerateMenu = false;
+																		regenerateResponse(message, {
+																			instruction: regenerateInput.trim()
+																		});
+																		regenerateInput = '';
+																	}
+																}}
+															>
+																<input
+																	type="text"
+																	bind:value={regenerateInput}
+																	placeholder={$i18n.t('Request changes to reply...')}
+																	class="w-full bg-transparent text-sm outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500"
+																/>
+																<button
+																	type="submit"
+																	class="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors {regenerateInput.trim()
+																		? 'opacity-100'
+																		: 'opacity-30 pointer-events-none'}"
+																	disabled={!regenerateInput.trim()}
+																>
+																	<ArrowRight class="w-4 h-4" />
+																</button>
+															</form>
+														</div>
+
+														<hr class="border-black/5 dark:border-white/5 my-0.5" />
+
+														<!-- 重试 -->
+														<DropdownMenu.Item
+															class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+															on:click={() => {
+																showRegenerateMenu = false;
+																doRegenerate();
 															}}
 														>
-															<button
-																class="{isLastMessage
-																	? 'visible'
-																	: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-																id="info-{message.id}"
-															>
-																<Info class="w-4 h-4" strokeWidth={2} />
-															</button>
-														</Tooltip>
-													{/if}
+															<RefreshCw class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+															<span>{$i18n.t('Retry')}</span>
+														</DropdownMenu.Item>
 
-													<div
-														class="w-px h-4 bg-gray-300/40 dark:bg-gray-600/40 mx-0.5 self-center"
-													></div>
+														<!-- 添加详细信息 -->
+														<DropdownMenu.Item
+															class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+															on:click={() => {
+																showRegenerateMenu = false;
+																regenerateResponse(message, {
+																	instruction: $i18n.t('Please provide a more detailed response')
+																});
+															}}
+														>
+															<ListPlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+															<span>{$i18n.t('Add more detail')}</span>
+														</DropdownMenu.Item>
 
-													{#if !readOnly}
-														{#if isLastMessage}
-															<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
-																<button
-																	type="button"
-																	id="continue-response-button"
-																	class="{isLastMessage
-																		? 'visible'
-																		: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
-																	on:click={() => {
-																		continueResponse();
-																	}}
-																>
-																	<PlayCircle class="w-4 h-4" strokeWidth={2} />
-																</button>
-															</Tooltip>
-														{/if}
+														<!-- 更加简洁 -->
+														<DropdownMenu.Item
+															class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+															on:click={() => {
+																showRegenerateMenu = false;
+																regenerateResponse(message, {
+																	instruction: $i18n.t('Please respond more concisely')
+																});
+															}}
+														>
+															<AlignLeft class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+															<span>{$i18n.t('More concise')}</span>
+														</DropdownMenu.Item>
 
-														{#if $settings?.regenerateMenu ?? true}
-															<Dropdown
-																bind:show={showRegenerateMenu}
-																side="top"
-																align="start"
-																on:change={(e) => {
-																	if (!e.detail) regenerateInput = '';
-																}}
-															>
-																<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
-																	<button
-																		type="button"
-																		class="{isLastMessage
-																			? 'visible'
-																			: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
-																		aria-label={$i18n.t('Regenerate')}
-																	>
-																		<RefreshCw class="w-4 h-4" strokeWidth={2} />
-																	</button>
-																</Tooltip>
-
-																<div slot="content">
-																	<DropdownMenu.Content
-																		class="w-60 rounded-2xl px-1.5 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-																		sideOffset={8}
-																		side="top"
-																		align="start"
-																		transition={flyAndScale}
-																	>
-																		<!-- 自定义指令输入框 -->
-																		<div class="px-1.5 py-1.5">
-																			<form
-																				class="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-xl"
-																				on:submit|preventDefault={() => {
-																					if (regenerateInput.trim()) {
-																						showRegenerateMenu = false;
-																						regenerateResponse(message, {
-																							instruction: regenerateInput.trim()
-																						});
-																						regenerateInput = '';
-																					}
-																				}}
-																			>
-																				<input
-																					type="text"
-																					bind:value={regenerateInput}
-																					placeholder={$i18n.t('Request changes to reply...')}
-																					class="w-full bg-transparent text-sm outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500"
-																				/>
-																				<button
-																					type="submit"
-																					class="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors {regenerateInput.trim()
-																						? 'opacity-100'
-																						: 'opacity-30 pointer-events-none'}"
-																					disabled={!regenerateInput.trim()}
-																				>
-																					<ArrowRight class="w-4 h-4" />
-																				</button>
-																			</form>
-																		</div>
-
-																		<hr class="border-black/5 dark:border-white/5 my-0.5" />
-
-																		<!-- 重试 -->
-																		<DropdownMenu.Item
-																			class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-																			on:click={() => {
-																				showRegenerateMenu = false;
-																				doRegenerate();
-																			}}
-																		>
-																			<RefreshCw class="w-4 h-4 shrink-0" strokeWidth={1.75} />
-																			<span>{$i18n.t('Retry')}</span>
-																		</DropdownMenu.Item>
-
-																		<!-- 添加详细信息 -->
-																		<DropdownMenu.Item
-																			class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-																			on:click={() => {
-																				showRegenerateMenu = false;
-																				regenerateResponse(message, {
-																					instruction: $i18n.t(
-																						'Please provide a more detailed response'
-																					)
-																				});
-																			}}
-																		>
-																			<ListPlus class="w-4 h-4 shrink-0" strokeWidth={1.75} />
-																			<span>{$i18n.t('Add more detail')}</span>
-																		</DropdownMenu.Item>
-
-																		<!-- 更加简洁 -->
-																		<DropdownMenu.Item
-																			class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-																			on:click={() => {
-																				showRegenerateMenu = false;
-																				regenerateResponse(message, {
-																					instruction: $i18n.t('Please respond more concisely')
-																				});
-																			}}
-																		>
-																			<AlignLeft class="w-4 h-4 shrink-0" strokeWidth={1.75} />
-																			<span>{$i18n.t('More concise')}</span>
-																		</DropdownMenu.Item>
-
-																		<!-- 思考时间更长（条件显示） -->
-																		{#if modelSupportsThinking}
-																			<DropdownMenu.Item
-																				class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-																				on:click={() => {
-																					showRegenerateMenu = false;
-																					regenerateResponse(message, { reasoningEffort: 'high' });
-																				}}
-																			>
-																				<Lightbulb class="w-4 h-4 shrink-0" strokeWidth={1.75} />
-																				<span>{$i18n.t('Think longer')}</span>
-																			</DropdownMenu.Item>
-																		{/if}
-
-																		<!-- 搜索网页（条件显示） -->
-																		{#if $config?.features?.enable_web_search}
-																			<DropdownMenu.Item
-																				class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-																				on:click={() => {
-																					showRegenerateMenu = false;
-																					regenerateResponse(message, { webSearch: true });
-																				}}
-																			>
-																				<Globe class="w-4 h-4 shrink-0" strokeWidth={1.75} />
-																				<span>{$i18n.t('Search the web')}</span>
-																			</DropdownMenu.Item>
-																		{/if}
-																	</DropdownMenu.Content>
-																</div>
-															</Dropdown>
-														{:else}
-															<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
-																<button
-																	type="button"
-																	class="{isLastMessage
-																		? 'visible'
-																		: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
-																	on:click={() => {
-																		doRegenerate();
-																	}}
-																>
-																	<RefreshCw class="w-4 h-4" strokeWidth={2} />
-																</button>
-															</Tooltip>
-														{/if}
-
-														<Tooltip content={$i18n.t('Delete')} placement="bottom">
-															<button
-																type="button"
-																id="delete-response-button"
-																class="{isLastMessage
-																	? 'visible'
-																	: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
+														<!-- 思考时间更长（条件显示） -->
+														{#if modelSupportsThinking}
+															<DropdownMenu.Item
+																class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
 																on:click={() => {
-																	showDeleteConfirm = true;
+																	showRegenerateMenu = false;
+																	regenerateResponse(message, { reasoningEffort: 'high' });
 																}}
 															>
-																<Trash2 class="w-4 h-4" strokeWidth={2} />
-															</button>
-														</Tooltip>
-
-														{#if isLastMessage}
-															{#each model?.actions ?? [] as action}
-																<Tooltip content={action.name} placement="bottom">
-																	<button
-																		type="button"
-																		class="{isLastMessage
-																			? 'visible'
-																			: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
-																		on:click={() => {
-																			actionMessage(action.id, message);
-																		}}
-																	>
-																		{#if action.icon_url}
-																			<div class="size-4">
-																				<img
-																					src={action.icon_url}
-																					class="w-4 h-4 {action.icon_url.includes('svg')
-																						? 'dark:invert-[80%]'
-																						: ''}"
-																					style="fill: currentColor;"
-																					alt={action.name}
-																				/>
-																			</div>
-																		{:else}
-																			<Sparkles strokeWidth="2.1" className="size-4" />
-																		{/if}
-																	</button>
-																</Tooltip>
-															{/each}
+																<Lightbulb class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+																<span>{$i18n.t('Think longer')}</span>
+															</DropdownMenu.Item>
 														{/if}
-													{/if}
-												{/if}
-											</div>
-										{/if}
-									</div>
 
-									<!-- [REACTION_FEATURE] Commented out - reaction display disabled for now
+														<!-- 搜索网页（条件显示） -->
+														{#if $config?.features?.enable_web_search}
+															<DropdownMenu.Item
+																class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+																on:click={() => {
+																	showRegenerateMenu = false;
+																	regenerateResponse(message, { webSearch: true });
+																}}
+															>
+																<Globe class="w-4 h-4 shrink-0" strokeWidth={1.75} />
+																<span>{$i18n.t('Search the web')}</span>
+															</DropdownMenu.Item>
+														{/if}
+													</DropdownMenu.Content>
+												</div>
+											</Dropdown>
+										{:else}
+											<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
+												<button
+													type="button"
+													class="{isLastMessage
+														? 'visible'
+														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
+													on:click={() => {
+														doRegenerate();
+													}}
+												>
+													<RefreshCw class="w-4 h-4" strokeWidth={2} />
+												</button>
+											</Tooltip>
+										{/if}
+
+										<Tooltip content={$i18n.t('Delete')} placement="bottom">
+											<button
+												type="button"
+												id="delete-response-button"
+												class="{isLastMessage
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95 regenerate-response-button"
+												on:click={() => {
+													showDeleteConfirm = true;
+												}}
+											>
+												<Trash2 class="w-4 h-4" strokeWidth={2} />
+											</button>
+										</Tooltip>
+
+										{#if isLastMessage}
+											{#each model?.actions ?? [] as action}
+												<Tooltip content={action.name} placement="bottom">
+													<button
+														type="button"
+														class="{isLastMessage
+															? 'visible'
+															: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl dark:hover:text-white hover:text-black transition-all duration-200 hover:scale-110 active:scale-95"
+														on:click={() => {
+															actionMessage(action.id, message);
+														}}
+													>
+														{#if action.icon_url}
+															<div class="size-4">
+																<img
+																	src={action.icon_url}
+																	class="w-4 h-4 {action.icon_url.includes('svg')
+																		? 'dark:invert-[80%]'
+																		: ''}"
+																	style="fill: currentColor;"
+																	alt={action.name}
+																/>
+															</div>
+														{:else}
+															<Sparkles strokeWidth="2.1" className="size-4" />
+														{/if}
+													</button>
+												</Tooltip>
+											{/each}
+										{/if}
+									{/if}
+								{/if}
+							</div>
+						{/if}
+					</div>
+
+					<!-- [REACTION_FEATURE] Commented out - reaction display disabled for now
 					{#if reactions.length > 0}
 						<div class="flex flex-wrap gap-1.5 mt-1.5">
 							{#each reactions as reaction}
@@ -1694,25 +1759,25 @@
 					{/if}
 					-->
 
-									{#if (isLastMessage || ($settings?.keepFollowUpPrompts ?? false)) && message.done && !readOnly && (message?.followUps ?? []).length > 0}
-										<div class="mt-2 flex flex-wrap gap-2">
-											{#each message.followUps as followUp}
-												<button
-													type="button"
-													class="text-xs px-2.5 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-black/5 dark:hover:bg-white/5 transition"
-													on:click={() => {
-														if ($settings?.insertFollowUpPrompt ?? false) {
-															setInputText(followUp);
-														} else {
-															submitMessage(message?.id, followUp);
-														}
-													}}
-												>
-													{followUp}
-												</button>
-											{/each}
-										</div>
-									{/if}
+					{#if (isLastMessage || ($settings?.keepFollowUpPrompts ?? false)) && message.done && !readOnly && (message?.followUps ?? []).length > 0}
+						<div class="mt-2 flex flex-wrap gap-2">
+							{#each message.followUps as followUp}
+								<button
+									type="button"
+									class="text-xs px-2.5 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-black/5 dark:hover:bg-white/5 transition"
+									on:click={() => {
+										if ($settings?.insertFollowUpPrompt ?? false) {
+											setInputText(followUp);
+										} else {
+											submitMessage(message?.id, followUp);
+										}
+									}}
+								>
+									{followUp}
+								</button>
+							{/each}
+						</div>
+					{/if}
 								</div>
 							</div>
 						{/if}
@@ -1721,7 +1786,7 @@
 			</div>
 		</div>
 	</div>
-{/key}
+	{/key}
 
 <style>
 	.message-outline-host {

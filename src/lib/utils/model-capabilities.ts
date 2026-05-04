@@ -16,6 +16,35 @@ export interface ModelCapabilities {
 	rerank: boolean; // 重排模型
 }
 
+const DEDICATED_IMAGE_MODEL_PATTERNS = [
+	'gpt-image',
+	'chatgpt-image',
+	'dall-e',
+	'dalle',
+	'imagen',
+	'grok-imagine',
+	'qwen-image',
+	'glm-image',
+	'hunyuan-image',
+	'seedream',
+	'flux',
+	'stable-diffusion',
+	'sdxl',
+	'midjourney',
+	'ideogram',
+	'recraft',
+	'kolors',
+	'wanx',
+	'cogview',
+	'playground',
+	'agnes-image',
+	'nano-banana',
+	'janus',
+	'kandinsky'
+];
+
+const DEDICATED_IMAGE_MODEL_REGEXES = [/^grok(?:[-.\w]+)?-image(?:[-.\w]+)?$/i, /^sd[-.\w]+$/i];
+
 /**
  * 根据模型ID推断其能力
  */
@@ -195,6 +224,20 @@ function inferImageGen(id: string): boolean {
 		return true;
 	}
 	return imageGenPatterns.some((p) => id.includes(p));
+}
+
+export function isDedicatedImageGenerationModel(modelId: string): boolean {
+	const id = modelId.toLowerCase().split('/').pop() ?? modelId.toLowerCase();
+
+	if (id.includes('vision') && !id.includes('image')) {
+		return false;
+	}
+
+	if (DEDICATED_IMAGE_MODEL_REGEXES.some((pattern) => pattern.test(id))) {
+		return true;
+	}
+
+	return DEDICATED_IMAGE_MODEL_PATTERNS.some((pattern) => id.includes(pattern));
 }
 
 // 嵌入模型推断

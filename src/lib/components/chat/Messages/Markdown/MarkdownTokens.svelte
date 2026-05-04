@@ -444,11 +444,19 @@
 			{/if}
 		{:else if token.type === 'inlineKatex'}
 			{#if token.text}
-				<KatexRenderer content={token.text} displayMode={token?.displayMode ?? false} />
+				<KatexRenderer
+					content={token.text}
+					source={token.raw}
+					displayMode={token?.displayMode ?? false}
+				/>
 			{/if}
 		{:else if token.type === 'blockKatex'}
 			{#if token.text}
-				<KatexRenderer content={token.text} displayMode={token?.displayMode ?? false} />
+				<KatexRenderer
+					content={token.text}
+					source={token.raw}
+					displayMode={token?.displayMode ?? false}
+				/>
 			{/if}
 		{:else if token.type === 'space'}
 			<div class="my-2" />
